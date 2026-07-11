@@ -1,0 +1,356 @@
+// ============================================================
+// stages.js — ステージ定義（10面）・盤面グラフ構築・進行度セーブ
+// ============================================================
+// 盤面は「グラフ」: 各マスが next（次のマスidの配列）を持つ。
+// next が2つ以上あるマスは分かれ道（人間は選択ダイアログ、CPUは先読みで判断）。
+//
+// ステージ定義:
+//   board.rings  : 長方形ループの列。{w,h,x0,y0,start?}。最初のリングの先頭マスが城(id 0)。
+//                  start=[x,y] でループの開始マスを回転指定（八の字の共有マス用）
+//   board.chords : 近道。{from:[x,y], cells:[[x,y]...], to:[x,y]} — from/to はリング上のマス
+//   board.warpPairs : [["x,y","x,y"]] 対応マスへ飛ぶ（typesでWARP指定すること）
+//   types        : {"x,y": "GATE"|"CARD"|"MAGIC"|"MAGMA"|"BOOST"|"WARP"} 指定なしはLAND
+//   elements     : 属性ブロックの並び（短いパレット）。同属性を RUN マス連続で置いて連鎖を出やすくする。
+//                  先頭に4属性を並べれば小さい盤面でも全属性が出る。bias属性を多く入れると偏る。
+//   elemRun      : 属性ブロックの長さ（省略時3）。大きいほど同属性が固まり連鎖が強くなる
+//   elementAt    : {"x,y": element} 個別指定（循環より優先）
+//   gatesNeeded  : 周回に必要な関門数（省略時3）
+//   rules        : state.js の DEFAULT_RULES への上書き
+"use strict";
+
+// ---------- 盤面ヘルパー ----------
+// w×h 長方形の外周マス座標（下辺中央から時計回り）
+function ringCoords(w, h, x0 = 0, y0 = 0) {
+  const cells = [];
+  const cx = Math.floor((w - 1) / 2);
+  for (let x = cx; x >= 0; x--) cells.push([x0 + x, y0 + h - 1]);
+  for (let y = h - 2; y >= 0; y--) cells.push([x0, y0 + y]);
+  for (let x = 1; x <= w - 1; x++) cells.push([x0 + x, y0]);
+  for (let y = 1; y <= h - 1; y++) cells.push([x0 + w - 1, y0 + y]);
+  for (let x = w - 2; x > cx; x--) cells.push([x0 + x, y0 + h - 1]);
+  return cells;
+}
+
+function rotateToStart(cells, start) {
+  const i = cells.findIndex(c => c[0] === start[0] && c[1] === start[1]);
+  if (i < 0) { console.error("[stages] start座標がリング上にない", start); return cells; }
+  return cells.slice(i).concat(cells.slice(0, i));
+}
+
+// ステージ定義 → タイル配列（id/x/y/type/element/next/warpTo）
+function buildBoard(stage) {
+  const b = stage.board;
+  const paths = [];
+  b.rings.forEach(r => {
+    let cells = ringCoords(r.w, r.h, r.x0 || 0, r.y0 || 0);
+    if (r.start) cells = rotateToStart(cells, r.start);
+    paths.push([...cells, cells[0]]); // 閉路
+  });
+  (b.chords || []).forEach(c => paths.push([c.from, ...c.cells, c.to]));
+
+  const keyOf = c => c[0] + "," + c[1];
+  const tiles = [];
+  const idxByKey = {};
+  const idxOf = c => {
+    const k = keyOf(c);
+    if (idxByKey[k] === undefined) {
+      idxByKey[k] = tiles.length;
+      tiles.push({ id: tiles.length, x: c[0], y: c[1], type: null, element: null, owner: null, level: 0, creature: null, next: [] });
+    }
+    return idxByKey[k];
+  };
+  paths.forEach(path => {
+    for (let i = 1; i < path.length; i++) {
+      const a = idxOf(path[i - 1]), b2 = idxOf(path[i]);
+      if (a !== b2 && !tiles[a].next.includes(b2)) tiles[a].next.push(b2);
+    }
+  });
+
+  // タイプ・属性の割り当て（id 0 は常に城）
+  // 属性は「同属性を RUN マス連続で置く」クラスタ割当にして連鎖（同属性の隣接地）を出やすくする。
+  //   elements は“属性ブロックの並び”を表す短いパレット（bias属性を厚めに）。RUN で各ブロックの長さを決める。
+  //   非LANDマス（関門/カード等）で列が分断されても、隣接する土地同士は同属性になりやすい。
+  //   elementAt の個別指定は循環を消費しない（ci を進めない）ので、指定タイルは連鎖の起点として別枠に置ける。
+  let ci = 0;
+  const RUN = stage.elemRun || 3;
+  tiles.forEach(t => {
+    const k = t.x + "," + t.y;
+    t.type = t.id === 0 ? "CASTLE" : (stage.types[k] || "LAND");
+    if (t.type === "LAND") {
+      t.level = 1;
+      t.element = (stage.elementAt && stage.elementAt[k]) || stage.elements[Math.floor(ci++ / RUN) % stage.elements.length];
+    }
+  });
+  (b.warpPairs || []).forEach(([a, c]) => {
+    const ia = idxByKey[a], ic = idxByKey[c];
+    if (ia === undefined || ic === undefined) { console.error("[stages] warp座標が不正", a, c); return; }
+    tiles[ia].warpTo = ic;
+    tiles[ic].warpTo = ia;
+  });
+  return tiles;
+}
+
+// ---------- ステージ定義 ----------
+const STAGES = [
+  {
+    id: "s1", name: "草原の環", icon: "🌿",
+    cpuName: "見習いセプター・ノア", ai: "novice",
+    desc: "ひとまわり20マスの小さな環。テンポよく周回ボーナスを稼ごう。火・木・地・水の4属性バランス型。",
+    board: { rings: [{ w: 6, h: 6 }] },
+    types: {
+      "0,2": "GATE", "3,0": "GATE", "5,3": "GATE",
+      "0,5": "CARD", "5,0": "CARD",
+      "1,0": "MAGIC", "4,5": "MAGIC",
+    },
+    elements: ["fire", "wood", "earth", "water"],
+    rules: { target: 3000, maxRounds: 32 },
+  },
+  {
+    id: "s2", name: "火山峠ヴォルグ", icon: "🌋",
+    cpuName: "火術師ヴォルグ", ai: "easy", cpuBias: "fire",
+    desc: "横に長い22マスの峠道。火の土地が多く、🌋マグマに止まると80G失う。",
+    board: { rings: [{ w: 7, h: 6 }] },
+    types: {
+      "0,3": "GATE", "3,0": "GATE", "6,3": "GATE",
+      "1,5": "CARD", "5,0": "CARD",
+      "1,0": "MAGIC", "5,5": "MAGIC",
+      "0,0": "MAGMA", "6,1": "MAGMA",
+    },
+    elements: ["fire", "water", "wood", "earth", "fire"],
+    rules: { target: 3200, maxRounds: 34 },
+  },
+  {
+    id: "s3", name: "蒼水の都メルディア", icon: "🌊",
+    cpuName: "水賢者マリナ", ai: "easy", cpuBias: "water",
+    desc: "24マスの環に「水路の橋」が架かる29マスの街。橋を渡れば対岸へ近道、中央には💎魔力の泉。",
+    board: {
+      rings: [{ w: 7, h: 7 }],
+      chords: [{ from: [0, 3], cells: [[1, 3], [2, 3], [3, 3], [4, 3], [5, 3]], to: [6, 3] }],
+    },
+    types: {
+      "0,4": "GATE", "3,0": "GATE", "6,4": "GATE",
+      "1,6": "CARD", "5,6": "CARD",
+      "6,0": "MAGIC", "3,3": "MAGIC",
+    },
+    elementAt: { "1,3": "water", "2,3": "water", "4,3": "water", "5,3": "water" },
+    elements: ["water", "fire", "wood", "earth", "water"],
+    hud: { left: "50%", top: "72%", width: "46%" },
+    rules: { target: 3500, maxRounds: 38 },
+  },
+  {
+    id: "s4", name: "風走る高地", icon: "🍃",
+    cpuName: "疾風のセイル", ai: "normal", cpuBias: "wood",
+    desc: "横一直線に伸びた24マスの細長い高原。💨疾風マスに乗れば一気に加速、城へ吹き戻されることも。",
+    board: { rings: [{ w: 10, h: 4 }] },
+    types: {
+      "0,1": "GATE", "5,0": "GATE", "9,2": "GATE",
+      "2,0": "CARD", "7,3": "CARD",
+      "1,3": "MAGIC", "8,0": "MAGIC",
+      "3,0": "BOOST", "6,3": "BOOST",
+    },
+    elements: ["wood", "fire", "water", "earth", "wood"],
+    hud: { left: "50%", top: "50%", width: "62%" },
+    rules: { target: 3200, maxRounds: 36 },
+  },
+  {
+    id: "s5", name: "大地の霊峰ガンド", icon: "⛰️",
+    cpuName: "岩人ドルガ", ai: "normal", cpuBias: "earth",
+    desc: "縦に高い24マスの霊峰＋中腹を横切る「尾根の近道」。尾根の奥には+300Gの地脈💎が眠る。",
+    board: {
+      rings: [{ w: 6, h: 8 }],
+      chords: [{ from: [0, 4], cells: [[1, 4], [2, 4], [3, 4], [4, 4]], to: [5, 4] }],
+    },
+    types: {
+      "0,2": "GATE", "3,0": "GATE", "5,2": "GATE",
+      "1,7": "CARD", "4,0": "CARD",
+      "0,0": "MAGIC", "2,4": "MAGIC",
+    },
+    elementAt: { "1,4": "earth", "3,4": "earth", "4,4": "earth" },
+    elements: ["earth", "fire", "wood", "water", "earth"],
+    hud: { left: "50%", top: "29%", width: "50%" },
+    rules: { target: 3400, maxRounds: 38, magicTileG: 300 },
+  },
+  {
+    id: "s6", name: "幻影回廊リノア", icon: "🌀",
+    cpuName: "幻術師リノア", ai: "normal",
+    desc: "2つの環が🏰城で交差する31マスの「八の字」回廊。周回には両方の環を巡る必要がある。遠い角同士は🌀ワープで繋がる。",
+    board: {
+      rings: [
+        { w: 5, h: 5, x0: 0, y0: 0, start: [4, 4] },
+        { w: 5, h: 5, x0: 4, y0: 4, start: [4, 4] },
+      ],
+      warpPairs: [["0,0", "8,8"]],
+    },
+    types: {
+      "0,2": "GATE", "2,0": "GATE", "8,6": "GATE", "6,8": "GATE",
+      "1,4": "CARD", "7,4": "CARD",
+      "4,0": "MAGIC", "4,8": "MAGIC",
+      "0,0": "WARP", "8,8": "WARP",
+    },
+    gatesNeeded: 3,
+    elements: ["fire", "wood", "earth", "water"],
+    hud: { left: "24%", top: "76%", width: "42%" },
+    rules: { target: 3000, maxRounds: 40 },
+  },
+  {
+    id: "s7", name: "黄金市場ゴルド", icon: "💰",
+    cpuName: "大商人ゴルド", ai: "hard", cpuBias: "water",
+    desc: "28マスの大きな市場をぐるりと回る。通行料は割高、💎魔力+250・⛩️関門+150の高額経済戦。",
+    board: { rings: [{ w: 8, h: 8 }] },
+    types: {
+      "0,3": "GATE", "4,0": "GATE", "7,4": "GATE",
+      "1,0": "CARD", "6,7": "CARD",
+      "0,0": "MAGIC", "7,0": "MAGIC",
+    },
+    elements: ["water", "fire", "wood", "earth", "water"],
+    rules: { target: 4200, maxRounds: 40, tollRate: 0.85, magicTileG: 250, gateBonus: 150 },
+  },
+  {
+    id: "s8", name: "闘技場アレナ", icon: "⚔️",
+    cpuName: "剣闘士ガイアス", ai: "hard", cpuBias: "earth",
+    desc: "たった16マスの小さな闘技場。土地の奪い合いは避けられない。侵略ST+10＆土地の加護2倍。周回は関門2つでOK。",
+    board: { rings: [{ w: 5, h: 5 }] },
+    types: {
+      "0,2": "GATE", "4,2": "GATE",
+      "2,0": "CARD",
+      "0,0": "MAGIC", "4,4": "MAGIC",
+    },
+    gatesNeeded: 2,
+    elements: ["earth", "fire", "water", "wood", "earth"],
+    rules: { target: 4000, maxRounds: 40, invaderSt: 10, landHpMult: 2 },
+  },
+  {
+    id: "s9", name: "雷鳴峡谷ズーム", icon: "⚡",
+    cpuName: "雷帝ズーム", ai: "hard", cpuBias: "water",
+    desc: "24マスの環を縦横の谷道が貫く33マスの大峡谷。中央の十字路で道を選べ。谷道には🌋マグマと💨疾風が待つ。",
+    board: {
+      rings: [{ w: 7, h: 7 }],
+      chords: [
+        { from: [0, 3], cells: [[1, 3], [2, 3], [3, 3], [4, 3], [5, 3]], to: [6, 3] },
+        { from: [3, 0], cells: [[3, 1], [3, 2], [3, 3], [3, 4], [3, 5]], to: [3, 6] },
+      ],
+    },
+    types: {
+      "0,4": "GATE", "5,0": "GATE", "6,4": "GATE",
+      "1,6": "CARD", "6,0": "CARD",
+      "0,0": "MAGIC", "6,2": "MAGIC",
+      "1,3": "BOOST", "3,4": "BOOST",
+      "4,3": "MAGMA", "3,2": "MAGMA",
+    },
+    elements: ["water", "fire", "earth", "wood", "water"],
+    hud: { left: "27%", top: "30%", width: "38%" },
+    rules: { target: 3200, maxRounds: 42 },
+  },
+  {
+    id: "s10", name: "魔王城ザルバド", icon: "👑",
+    cpuName: "魔王ザルバド", ai: "demon", cpuBias: "fire",
+    desc: "最終決戦。28マスの城郭の頂から🏰玉座へ一直線に堕ちる「地獄回廊」——ただし🌋マグマだらけ。魔王は初期魔力+200。",
+    board: {
+      rings: [{ w: 9, h: 7 }],
+      chords: [{ from: [4, 0], cells: [[4, 1], [4, 2], [4, 3], [4, 4], [4, 5]], to: [4, 6] }],
+    },
+    types: {
+      "0,3": "GATE", "4,0": "GATE", "8,3": "GATE",
+      "1,6": "CARD", "7,0": "CARD",
+      "0,0": "MAGIC", "8,0": "MAGIC",
+      "3,6": "MAGMA", "5,6": "MAGMA", "4,2": "MAGMA", "4,4": "MAGMA",
+    },
+    elementAt: { "4,1": "fire", "4,3": "fire", "4,5": "fire" },
+    elements: ["fire", "water", "wood", "earth", "fire"],
+    hud: { left: "26%", top: "50%", width: "40%" },
+    rules: { target: 4500, maxRounds: 45, cpuMagicBonus: 200 },
+  },
+  {
+    // ★ 非環状（星型）盤面のデモ：中央の環から四方へ小さな環が伸びる「四つ辻」。
+    //   関門はgatesNeeded:"all"で全て必須通過点＝4つ全て回って城へ戻れば1周。対角のショートカットで三叉路になる。
+    id: "s11", name: "星辰の四つ辻", icon: "✴️",
+    cpuName: "星詠みステラ", ai: "normal",
+    desc: "中央の環から四方へ小さな環が伸びる星型の盤面。⛩️関門4つは全てが必須通過点——全て巡って城へ戻れば1周。中央を貫く対角路は三叉路になっている。",
+    board: {
+      rings: [
+        { w: 3, h: 3, x0: 2, y0: 2 },   // 中央の環（城はここ）
+        { w: 3, h: 3, x0: 0, y0: 0 },   // 左上の環（角(2,2)を共有）
+        { w: 3, h: 3, x0: 4, y0: 0 },   // 右上の環（角(4,2)を共有）
+        { w: 3, h: 3, x0: 0, y0: 4 },   // 左下の環（角(2,4)を共有）
+        { w: 3, h: 3, x0: 4, y0: 4 },   // 右下の環（角(4,4)を共有）
+      ],
+      chords: [
+        { from: [2, 2], cells: [[3, 3]], to: [4, 4] },  // 左上⇄右下の対角ショートカット（三叉路化）
+        { from: [4, 2], cells: [[3, 3]], to: [2, 4] },  // 右上⇄左下の対角ショートカット
+      ],
+    },
+    types: {
+      "0,0": "GATE", "6,0": "GATE", "0,6": "GATE", "6,6": "GATE",
+      "3,3": "MAGIC",
+      "1,0": "CARD", "5,6": "CARD",
+      "5,2": "MAGIC", "1,4": "MAGIC",
+    },
+    gatesNeeded: "all",
+    elements: ["fire", "wood", "earth", "water"],
+    hud: { left: "50%", top: "43%", width: "32%" },
+    rules: { target: 3200, maxRounds: 44 },
+  },
+];
+
+// ---------- 定義の整合性チェック（起動時に一度だけ実行） ----------
+function validateStages() {
+  STAGES.forEach(s => {
+    const tiles = buildBoard(s);
+    const byKey = {};
+    tiles.forEach(t => { byKey[t.x + "," + t.y] = t; });
+    // types/elementAt の座標が実在するか
+    Object.keys(s.types).forEach(k => {
+      if (!byKey[k]) console.error(`[stages] ${s.id}: types座標 ${k} が盤面にない`);
+    });
+    Object.keys(s.elementAt || {}).forEach(k => {
+      if (!byKey[k]) console.error(`[stages] ${s.id}: elementAt座標 ${k} が盤面にない`);
+      else if (byKey[k].type !== "LAND") console.error(`[stages] ${s.id}: elementAt座標 ${k} がLANDでない`);
+    });
+    // 全マスが行き先を持ち、城と相互到達可能か
+    tiles.forEach(t => {
+      if (t.next.length === 0) console.error(`[stages] ${s.id}: マス${t.id}(${t.x},${t.y})に行き先がない`);
+      if (t.type === "WARP" && t.warpTo === undefined) console.error(`[stages] ${s.id}: WARP ${t.x},${t.y} に対応先がない`);
+    });
+    const bfs = (startId, edges) => {
+      const seen = new Set([startId]);
+      const q = [startId];
+      while (q.length) { const v = q.pop(); for (const n of edges(v)) if (!seen.has(n)) { seen.add(n); q.push(n); } }
+      return seen;
+    };
+    const fwd = bfs(0, id => tiles[id].next);
+    const rev = bfs(0, id => tiles.filter(t => t.next.includes(id)).map(t => t.id));
+    if (fwd.size !== tiles.length) console.error(`[stages] ${s.id}: 城から到達できないマスがある (${fwd.size}/${tiles.length})`);
+    if (rev.size !== tiles.length) console.error(`[stages] ${s.id}: 城へ戻れないマスがある (${rev.size}/${tiles.length})`);
+    // 関門数と gatesNeeded の整合（"all" は全関門必須なので常に妥当）
+    const gateCount = tiles.filter(t => t.type === "GATE").length;
+    const gn = s.gatesNeeded ?? 3;
+    if (gn === "all") {
+      if (gateCount === 0) console.error(`[stages] ${s.id}: gatesNeeded:"all" だが関門が0個`);
+    } else if (gn > gateCount) {
+      console.error(`[stages] ${s.id}: gatesNeeded(${gn}) > 関門数(${gateCount})`);
+    }
+  });
+}
+validateStages();
+
+// ---------- 進行度（localStorage・プレイヤープロファイル別） ----------
+const PROGRESS_KEY = "mana-circuit-progress";
+
+function loadProgress() {
+  try {
+    const p = JSON.parse(localStorage.getItem(profileStorageKey(PROGRESS_KEY)));
+    if (p && typeof p === "object" && p.cleared) return p;
+  } catch (e) { /* 壊れていたら初期化 */ }
+  return { cleared: {} };
+}
+
+function saveStageClear(stageId) {
+  const p = loadProgress();
+  p.cleared[stageId] = true;
+  try { localStorage.setItem(profileStorageKey(PROGRESS_KEY), JSON.stringify(p)); } catch (e) { /* プライベートモード等 */ }
+}
+
+function isStageUnlocked(idx) {
+  if (idx === 0) return true;
+  return !!loadProgress().cleared[STAGES[idx - 1].id];
+}

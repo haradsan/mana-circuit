@@ -1,0 +1,4 @@
+# 開発メモ類は公開しない（ローカルにのみ保持）
+HANDOFF.md
+DESIGN.md
+server.ps1
