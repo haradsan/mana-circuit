@@ -41,8 +41,12 @@ header {
 h1 {
   font-size: 22px;
   letter-spacing: 6px;
-  color: var(--gold);
-  text-shadow: 0 0 12px #ffd76a55;
+  /* 金彩のグラデーション文字 */
+  background: linear-gradient(180deg, #fff3c4 10%, #ffd76a 45%, #c9962e 75%, #ffe9a0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 10px #ffd76a44) drop-shadow(0 2px 2px #000);
 }
 #round-info { color: var(--dim); font-size: 14px; }
 .header-right { display: flex; align-items: center; gap: 12px; }
@@ -266,25 +270,38 @@ body.in-game #hud-tabs { display: flex; }
   max-width: min(94vw, 916px);
   padding-bottom: 4px;
 }
-#hand .card { flex: 0 0 auto; }
+#hand .card, #hand .flip3d { flex: 0 0 auto; }
 
+/* カード = 額縁＋アート窓＋コスト宝珠＋魔力の光沢。属性色の縁取りとレア度の輝きで差をつける */
 .card {
   width: 128px;
-  background: linear-gradient(180deg, #322a48, #262034);
+  background: linear-gradient(180deg, #3a3153, #241e33);
   border: 1.5px solid var(--border);
   border-radius: 10px;
-  padding: 8px 10px;
+  padding: 5px 6px 6px;
   font-size: 12px;
   transition: all 0.15s;
   position: relative;
+  overflow: hidden; /* 光沢スイープをカード内に収める */
+  box-shadow: 0 3px 10px #0007;
 }
-.card.el-fire  { border-color: #e0553788; }
-.card.el-wood  { border-color: #4e9a2f88; }
-.card.el-water { border-color: #3d7de088; }
-.card.el-earth { border-color: #8a6b3a88; }
-.card.el-neutral { border-color: #9d97b588; } /* 無属性（v13） */
-.card.spell    { border-color: #b06fd688; }
-.card.item     { border-color: #c9a75588; }
+/* 内側の細い額縁線 */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 1px solid #ffffff14;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 3;
+}
+.card.el-fire  { border-color: #e05537aa; }
+.card.el-wood  { border-color: #4e9a2faa; }
+.card.el-water { border-color: #3d7de0aa; }
+.card.el-earth { border-color: #8a6b3aaa; }
+.card.el-neutral { border-color: #9d97b5aa; } /* 無属性（v13） */
+.card.spell    { border-color: #b06fd6aa; }
+.card.item     { border-color: #c9a755aa; }
 .card.disabled { opacity: 0.38; pointer-events: none; } /* コスト不足カードはクリック自体を無効化（魔力不足での召喚防止） */
 .card.selectable, .card.castable { cursor: pointer; }
 .card.selectable:hover, .card.castable:hover {
@@ -294,13 +311,60 @@ body.in-game #hud-tabs { display: flex; }
 }
 .card.castable { box-shadow: 0 0 10px #b06fd666; }
 
-.c-head { display: flex; justify-content: space-between; align-items: center; }
-.c-icon { font-size: 15px; }
-.c-cost { color: var(--gold); font-weight: bold; }
-.c-name { font-weight: bold; margin: 4px 0 2px; font-size: 12.5px; }
-.c-stats { color: #ffb0a0; }
-.c-desc { color: var(--dim); font-size: 11px; line-height: 1.4; }
-.c-ab { min-height: 16px; }
+/* アート窓（クリーチャーの造形が描かれる） */
+.c-art {
+  height: 64px;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid #00000066;
+  box-shadow: inset 0 0 10px #0008;
+}
+.c-art svg { display: block; width: 100%; height: 100%; }
+/* コスト宝珠（アート左上に重なる） */
+.c-cost {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2;
+  width: 25px;
+  height: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffe9a0, #c9962e 65%, #8a6620);
+  color: #241a05;
+  font-weight: bold;
+  font-size: 11px;
+  border: 1px solid #6b520f;
+  box-shadow: 0 1px 4px #000a, 0 0 6px #ffd76a44;
+}
+/* 属性・種別の小さな紋章（アート右下） */
+.c-elem {
+  position: absolute;
+  top: 50px;
+  right: 6px;
+  z-index: 2;
+  font-size: 12px;
+  filter: drop-shadow(0 1px 2px #000);
+}
+.c-name {
+  font-weight: bold;
+  margin: 4px 0 2px;
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(90deg, transparent, #00000055 20%, #00000055 80%, transparent);
+  border-radius: 4px;
+  padding: 1px 2px;
+}
+.c-stats { display: flex; justify-content: space-around; font-weight: bold; font-size: 12px; }
+.c-st { color: #ffb08a; }
+.c-hp { color: #8ee0a0; }
+.c-desc { color: var(--dim); font-size: 10.5px; line-height: 1.4; min-height: 44px; }
+.c-ab { min-height: 16px; text-align: center; }
 .ab {
   display: inline-block;
   background: #4a2a5a;
@@ -311,23 +375,50 @@ body.in-game #hud-tabs { display: flex; }
   margin-right: 3px;
   margin-top: 3px;
 }
+/* 魔力の光沢（ゆっくり流れる斜めのきらめき） */
+.c-shine {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(115deg, transparent 32%, #ffffff12 45%, #ffd76a1e 50%, transparent 64%);
+  background-size: 300% 100%;
+  animation: card-shine 5.5s linear infinite;
+  mix-blend-mode: screen;
+}
+@keyframes card-shine {
+  0%   { background-position: 130% 0; }
+  100% { background-position: -170% 0; }
+}
 
 /* ---------- レア度 ---------- */
 .c-rarity {
   position: absolute;
-  top: 7px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 4px;
+  right: 5px;
+  z-index: 2;
   font-size: 9px;
   letter-spacing: -1.5px;
   white-space: nowrap;
   pointer-events: none;
+  filter: drop-shadow(0 1px 2px #000);
 }
-.card.rar-rare { box-shadow: 0 0 8px #4da3ff33; }
-.card.rar-legendary { box-shadow: 0 0 12px #ffb14d55; }
-.at-rarity { position: absolute; top: 2px; left: 4px; font-size: 8px; letter-spacing: -1.5px; }
+.card.rar-rare { box-shadow: 0 3px 10px #0007, 0 0 10px #4da3ff44; }
+.card.rar-legendary {
+  border-color: #ffb14d;
+  box-shadow: 0 3px 10px #0007, 0 0 14px #ffb14d55;
+  animation: legend-glow 2.4s ease-in-out infinite;
+}
+@keyframes legend-glow {
+  0%, 100% { box-shadow: 0 3px 10px #0007, 0 0 10px #ffb14d44; }
+  50%      { box-shadow: 0 3px 10px #0007, 0 0 20px #ffb14d77; }
+}
+.at-rarity { position: absolute; top: 2px; left: 4px; font-size: 8px; letter-spacing: -1.5px; z-index: 2; }
 .album-tile.rar-rare { border-color: #4da3ff66; }
 .album-tile.rar-legendary { border-color: #ffb14d77; box-shadow: 0 0 8px #ffb14d33; }
+/* アルバムのミニアート */
+.at-art { height: 38px; border-radius: 5px; overflow: hidden; margin-bottom: 2px; border: 1px solid #0006; }
+.at-art svg { display: block; width: 100%; height: 100%; }
 
 /* ---------- ダイアログ ---------- */
 #overlay {
@@ -341,14 +432,16 @@ body.in-game #hud-tabs { display: flex; }
 }
 #overlay.show { display: flex; }
 #dialog {
-  background: var(--bg2);
+  background: linear-gradient(180deg, #2a2340, var(--bg2) 120px);
   border: 1px solid var(--gold);
+  outline: 1px solid #ffd76a33; /* 二重の額縁線 */
+  outline-offset: 3px;
   border-radius: 16px;
   padding: 22px 26px;
   max-width: 720px;
   max-height: 84vh;
   overflow-y: auto;
-  box-shadow: 0 12px 48px #000c, 0 0 30px #ffd76a22;
+  box-shadow: 0 12px 48px #000c, 0 0 30px #ffd76a22, inset 0 1px 0 #ffffff14;
 }
 #dialog h2 { font-size: 18px; color: var(--gold); margin-bottom: 8px; }
 .dlg-body { font-size: 13.5px; color: var(--dim); line-height: 1.7; margin-bottom: 12px; }
@@ -387,6 +480,53 @@ body.in-game #hud-tabs { display: flex; }
 .dice-pick .btn { font-size: 20px; width: 52px; }
 
 /* ---------- ステージ選択 ---------- */
+/* 世界観ヘッダー（紋章＋題字＋口上＋状態チップ） */
+.ss-hero {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid #ffd76a33;
+  outline: 1px solid #ffd76a14;
+  outline-offset: 2px;
+  border-radius: 12px;
+  background: radial-gradient(ellipse at 18% -10%, #352c4e, #1d1830 72%);
+  position: relative;
+  overflow: hidden;
+}
+.ss-crest {
+  flex: none;
+  width: 76px;
+  height: 76px;
+  filter: drop-shadow(0 0 12px #ffd76a33);
+  animation: pack-float 3.4s ease-in-out infinite;
+}
+.ss-crest svg { display: block; width: 100%; height: 100%; }
+.ss-hero-main { flex: 1; min-width: 0; }
+.ss-hero h2 {
+  margin-bottom: 4px;
+  letter-spacing: 2px;
+  background: linear-gradient(180deg, #fff3c4 10%, #ffd76a 45%, #c9962e 75%, #ffe9a0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 1px 2px #000);
+}
+.ss-flavor { color: var(--dim); font-size: 12.5px; line-height: 1.75; margin-bottom: 8px; }
+.ss-flavor b { color: var(--gold); }
+.ss-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.ss-chip {
+  font-size: 11.5px;
+  color: var(--dim);
+  border: 1px solid var(--border);
+  background: #241e33cc;
+  border-radius: 20px;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+.ss-chip b { color: var(--gold); }
+
 .stage-list {
   display: flex;
   flex-direction: column;
@@ -401,7 +541,7 @@ body.in-game #hud-tabs { display: flex; }
   gap: 12px;
   width: 100%;
   text-align: left;
-  background: var(--panel);
+  background: linear-gradient(180deg, #2e2742, #221c31);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -410,14 +550,54 @@ body.in-game #hud-tabs { display: flex; }
   font-size: 13px;
   cursor: pointer;
   transition: all 0.15s;
+  position: relative;
+  overflow: hidden;
 }
-.stage-btn:hover:not(.locked) { border-color: var(--gold); background: #332b48; }
+.stage-btn:hover:not(.locked) {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, #38304f, #292239);
+  transform: translateX(3px);
+  box-shadow: 0 0 12px #ffd76a22;
+}
 .stage-btn.locked { opacity: 0.45; cursor: default; }
-.st-icon { font-size: 22px; }
-.st-main { flex: 1; }
+.stage-btn.locked .st-icon { filter: grayscale(1); }
+/* 背景に大きく透かしたステージの紋様 */
+.stage-btn .st-bg {
+  position: absolute;
+  right: 30px;
+  top: 50%;
+  transform: translateY(-50%) rotate(-12deg);
+  font-size: 54px;
+  opacity: 0.08;
+  pointer-events: none;
+}
+.st-icon {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 21px;
+  background: radial-gradient(circle at 35% 28%, #4a3f68, #241e33 72%);
+  border: 1px solid #ffd76a44;
+  border-radius: 50%;
+  box-shadow: inset 0 0 8px #000a, 0 0 8px #ffd76a22;
+}
+.st-main { flex: 1; position: relative; }
 .st-main b { display: block; font-size: 13.5px; }
 .st-main small { color: var(--dim); font-size: 11px; line-height: 1.4; }
-.st-star { font-size: 16px; width: 22px; text-align: center; }
+.st-no {
+  color: var(--gold);
+  font-size: 10px;
+  letter-spacing: 1px;
+  border: 1px solid #ffd76a55;
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-right: 7px;
+  vertical-align: 1.5px;
+}
+.st-star { font-size: 16px; width: 22px; text-align: center; filter: drop-shadow(0 0 6px #ffd76a88); }
 .stage-btn.diff-current { border-color: var(--gold); background: #332b48; box-shadow: 0 0 10px #ffd76a33; }
 
 /* ---------- バトル演出 ---------- */
@@ -519,12 +699,86 @@ body.in-game #hud-tabs { display: flex; }
 .profile-row .stage-btn { flex: 1; }
 .profile-row .btn { align-self: center; }
 
-/* ---------- 2人対戦（ホットシート）: 交代中の伏せカード ---------- */
-.card.facedown {
-  display: flex; align-items: center; justify-content: center;
-  min-height: 96px; font-size: 34px; cursor: default;
-  background: repeating-linear-gradient(135deg, #2a2438, #2a2438 8px, #241e30 8px, #241e30 16px);
-  border-color: #5a5470;
+/* ---------- 伏せカード（共通のカードバック＝守護竜とマナ回路の紋章） ---------- */
+/* サイズは親（フリップの面や伏せ手札）いっぱいに広がる＝表面のカードと常に同寸になる */
+.card-back {
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.5px solid #6a5a8a;
+  box-shadow: 0 3px 10px #0007, inset 0 0 14px #0009;
+  background: #1c1630;
+}
+.card-back svg { display: block; width: 100%; height: 100%; }
+/* 2人対戦（ホットシート）: 交代中の伏せ手札（フリップカードと同寸） */
+.card.facedown { width: 126px; height: 176px; padding: 0; cursor: default; border: none; overflow: visible; box-shadow: none; }
+.card.facedown::before { display: none; }
+
+/* ---------- フリップ演出用の固定サイズカード（表裏のサイズを完全一致させる） ---------- */
+/* 通常のカードは内容に応じて高さが変わるが、めくり演出では「同じ1枚」に見えることを優先し
+   TCG比率（63:88）の固定サイズで描画する。カードバック（120×168）と相似＝めくっても寸法が揃う */
+.card.fixed {
+  width: 126px;
+  height: 176px;
+  display: flex;
+  flex-direction: column;
+}
+.card.fixed .c-art { height: 70px; flex: none; }
+.card.fixed .c-elem { top: 56px; }
+.card.fixed .c-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
+/* 長いスペル説明は4行で省略（全文はアルバム・手札・ダイアログで読める） */
+.card.fixed .c-desc {
+  min-height: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- 3Dフリップ（裏＝カードバック → 表＝カード） ---------- */
+.flip3d { perspective: 800px; position: relative; }
+.flip3d-inner {
+  display: grid;
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.3, 1.15);
+}
+.flip3d.revealed .flip3d-inner { transform: rotateY(180deg); }
+.flip3d-face { grid-area: 1 / 1; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.flip3d-front { transform: rotateY(180deg); }
+/* 裏面は絶対配置で表面のカードにぴったり重ねる。
+   （通常配置だと中のSVGの固有サイズ(300px)がセルを押し広げ、裏だけ大きくなる＝
+   「めくったら別のサイズのカードになる」不一致の原因だった） */
+.flip3d-back { display: flex; position: absolute; inset: 0; }
+.flip3d-back .card-back { flex: 1; }
+
+/* ---------- ドロー演出（山札 → めくれて手札へ） ---------- */
+#draw-fx {
+  position: fixed;
+  left: 50%;
+  bottom: 230px;
+  transform: translateX(-50%);
+  z-index: 150;
+  pointer-events: none;
+  filter: drop-shadow(0 10px 24px #000c);
+  animation: draw-rise 0.3s ease backwards;
+}
+#draw-fx.to-hand {
+  transition: transform 0.28s ease-in, opacity 0.28s ease-in;
+  transform: translateX(-50%) translateY(140px) scale(0.55);
+  opacity: 0;
+}
+@keyframes draw-rise {
+  from { transform: translateX(-50%) translateY(60px) scale(0.7); opacity: 0; }
+  to   { transform: translateX(-50%); opacity: 1; }
 }
 
 /* ---------- ♻️ カード工房 ---------- */
@@ -538,11 +792,286 @@ body.in-game #hud-tabs { display: flex; }
 #bgm-btn.off { opacity: 0.4; }
 
 /* ---------- パック開封 ---------- */
+/* ① パック（クリックで封が弾け飛ぶ） */
+.pack-stage { text-align: center; padding: 8px 0 14px; }
+.pack-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  animation: pack-float 2.4s ease-in-out infinite;
+  filter: drop-shadow(0 8px 26px #000b) drop-shadow(0 0 18px #ffd76a33);
+  transition: filter 0.2s, transform 0.15s;
+}
+.pack-btn:hover { filter: drop-shadow(0 8px 26px #000b) drop-shadow(0 0 30px #ffd76a77); transform: scale(1.04); }
+.pack-btn .pack-svg { width: 168px; height: 224px; display: block; }
+@keyframes pack-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+/* 開封: 封（#pack-top）が弾け飛び、本体が光って震える */
+.pack-btn.burst { animation: pack-shake 0.5s ease; }
+.pack-btn.burst #pack-top { animation: pack-tear 0.5s ease forwards; }
+.pack-btn.burst #pack-body { filter: brightness(1.9) drop-shadow(0 0 24px #ffe9a0); transition: filter 0.4s; }
+@keyframes pack-tear {
+  to { transform: translate(24px, -70px) rotate(28deg); opacity: 0; }
+}
+@keyframes pack-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px) rotate(-2deg); }
+  40% { transform: translateX(5px) rotate(2deg); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+.pack-hint { color: var(--gold); font-size: 13px; margin-top: 6px; animation: peek-pulse 1.6s ease-in-out infinite; text-shadow: 0 0 10px #ffd76a55; }
+
+/* ② めくりフェーズ: 伏せられたカードが並び、クリックでフリップ */
 .pack-reveal { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 8px 0 14px; }
-.pack-reveal .card { animation: pack-pop 0.45s ease backwards; }
-.pack-reveal .card:nth-child(2) { animation-delay: 0.12s; }
-.pack-reveal .card:nth-child(3) { animation-delay: 0.24s; }
+.pr-slot { cursor: pointer; animation: pack-pop 0.4s ease backwards; position: relative; border-radius: 10px; }
+.pr-slot:nth-child(2) { animation-delay: 0.06s; }
+.pr-slot:nth-child(3) { animation-delay: 0.12s; }
+.pr-slot:nth-child(4) { animation-delay: 0.18s; }
+.pr-slot:nth-child(5) { animation-delay: 0.24s; }
+.pr-slot:nth-child(n+6) { animation-delay: 0.3s; }
 @keyframes pack-pop { from { transform: scale(0.5) rotate(-8deg); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+/* まだ伏せられているカードはほんのり明滅して「めくれる」ことを示す */
+.pr-slot .flip3d:not(.revealed) .card-back { animation: peek-pulse 1.8s ease-in-out infinite; }
+/* NEWリボン（めくった後にだけ現れる） */
+.pr-new {
+  position: absolute;
+  top: -7px;
+  left: -7px;
+  z-index: 5;
+  background: linear-gradient(180deg, #ffe9a0, #d9a94e);
+  color: #241a05;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 1px 7px;
+  border-radius: 6px;
+  transform: rotate(-10deg);
+  box-shadow: 0 2px 6px #000a;
+  opacity: 0;
+  transition: opacity 0.3s 0.35s, transform 0.3s 0.35s;
+}
+.flip3d.revealed .pr-new { opacity: 1; transform: rotate(-10deg) scale(1.05); }
+/* レア以上をめくった瞬間の光 */
+.pr-glow-rare .flip3d.revealed { animation: pr-ring-rare 0.9s ease; border-radius: 10px; }
+.pr-glow-legendary .flip3d.revealed { animation: pr-ring-legend 1.1s ease; border-radius: 10px; }
+@keyframes pr-ring-rare {
+  0% { box-shadow: 0 0 0 0 #4da3ffcc; }
+  100% { box-shadow: 0 0 26px 14px #4da3ff00; }
+}
+@keyframes pr-ring-legend {
+  0% { box-shadow: 0 0 0 0 #ffd76add; }
+  60% { box-shadow: 0 0 34px 20px #ffb14d33; }
+  100% { box-shadow: 0 0 40px 26px #ffb14d00; }
+}
+
+/* ---------- バトルカットイン（フルスクリーン・スキップ可） ---------- */
+#battle-cutin {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, #100c1cd8, #05030aee 75%);
+  overflow: hidden;
+}
+#battle-cutin.bc-out { transition: opacity 0.3s; opacity: 0; }
+/* 集中線（斜めのスピードライン） */
+#battle-cutin::before {
+  content: "";
+  position: absolute;
+  inset: -50%;
+  background: repeating-linear-gradient(105deg, transparent 0 42px, #ffd76a09 42px 46px, transparent 46px 90px, #ffffff06 90px 93px);
+  animation: bc-lines 0.9s linear infinite;
+  pointer-events: none;
+}
+@keyframes bc-lines { from { transform: translateX(0); } to { transform: translateX(133px); } }
+.bc-inner { width: min(94vw, 720px); position: relative; z-index: 1; }
+.bc-title {
+  text-align: center;
+  color: var(--gold);
+  font-size: 22px;
+  letter-spacing: 3px;
+  text-shadow: 0 0 16px #ffd76a66, 0 2px 6px #000;
+  margin-bottom: 10px;
+  animation: bc-title-in 0.4s ease backwards;
+}
+.bc-title small { font-size: 13px; color: var(--dim); letter-spacing: 1px; }
+@keyframes bc-title-in { from { transform: translateY(-30px); opacity: 0; } to { transform: none; opacity: 1; } }
+/* 両者のカットイン（左右から突撃してくる） */
+.fighter.bc-att { animation: bc-in-l 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) backwards; }
+.fighter.bc-def { animation: bc-in-r 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) 0.12s backwards; }
+@keyframes bc-in-l { from { transform: translateX(-70vw) skewX(-8deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes bc-in-r { from { transform: translateX(70vw) skewX(8deg); opacity: 0; } to { transform: none; opacity: 1; } }
+#battle-cutin .vs { font-size: 38px; animation: bc-vs 0.5s cubic-bezier(0.2, 0.8, 0.3, 1.4) 0.3s backwards; }
+@keyframes bc-vs { from { transform: scale(3.2); opacity: 0; } 70% { transform: scale(0.92); opacity: 1; } to { transform: scale(1); } }
+/* 攻撃の突進・被弾・撃破 */
+.bc-lunge-r { animation: bc-lunge-r 0.42s cubic-bezier(0.3, 0, 0.2, 1); }
+.bc-lunge-l { animation: bc-lunge-l 0.42s cubic-bezier(0.3, 0, 0.2, 1); }
+@keyframes bc-lunge-r { 30% { transform: translateX(-12px); } 55% { transform: translateX(46px) scale(1.06); } 100% { transform: none; } }
+@keyframes bc-lunge-l { 30% { transform: translateX(12px); } 55% { transform: translateX(-46px) scale(1.06); } 100% { transform: none; } }
+.bc-hurt { animation: bc-hurt 0.42s ease; }
+@keyframes bc-hurt {
+  0%, 45% { transform: none; filter: none; }
+  55% { transform: translateX(10px) rotate(2deg); filter: brightness(2); }
+  70% { transform: translateX(-7px) rotate(-1.5deg); }
+  85% { transform: translateX(4px); }
+  100% { transform: none; filter: none; }
+}
+.bc-dead { animation: bc-dead 0.8s ease forwards; }
+@keyframes bc-dead {
+  30% { transform: none; filter: none; opacity: 1; }
+  100% { transform: translateY(26px) rotate(7deg); filter: grayscale(1) brightness(0.5); opacity: 0.45; }
+}
+/* 一撃のフラッシュ（会心は金色） */
+.bc-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 2; }
+.bc-flash.go { animation: bc-flash 0.35s ease; }
+.bc-flash.go-crit { animation: bc-flash-crit 0.55s ease; }
+@keyframes bc-flash { 0% { opacity: 0; } 30% { opacity: 0.3; } 100% { opacity: 0; } }
+@keyframes bc-flash-crit { 0% { opacity: 0; background: #ffd76a; } 25% { opacity: 0.55; background: #ffd76a; } 100% { opacity: 0; } }
+.bc-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+#battle-cutin.bc-skipping #battle-skip { opacity: 0.4; pointer-events: none; }
+#battle-cutin #battle-log { background: #17131fd9; }
+#battle-log .formula { color: #9a92b5; font-size: 11.5px; }
+
+/* ---------- 勝利の祝福 ---------- */
+#victory-fx {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  pointer-events: none;
+  overflow: hidden;
+}
+#victory-fx.vf-fade { transition: opacity 1s; opacity: 0; }
+/* 回転する金色の光条 */
+.vf-rays {
+  position: absolute;
+  left: 50%;
+  top: 36%;
+  width: 160vmax;
+  height: 160vmax;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: conic-gradient(
+    #ffd76a22 0deg 12deg, transparent 12deg 30deg,
+    #ffd76a18 30deg 42deg, transparent 42deg 60deg,
+    #ffd76a22 60deg 72deg, transparent 72deg 90deg,
+    #ffd76a18 90deg 102deg, transparent 102deg 120deg,
+    #ffd76a22 120deg 132deg, transparent 132deg 150deg,
+    #ffd76a18 150deg 162deg, transparent 162deg 180deg,
+    #ffd76a22 180deg 192deg, transparent 192deg 210deg,
+    #ffd76a18 210deg 222deg, transparent 222deg 240deg,
+    #ffd76a22 240deg 252deg, transparent 252deg 270deg,
+    #ffd76a18 270deg 282deg, transparent 282deg 300deg,
+    #ffd76a22 300deg 312deg, transparent 312deg 330deg,
+    #ffd76a18 330deg 342deg, transparent 342deg 360deg);
+  animation: vf-spin 16s linear infinite, vf-rays-in 1s ease backwards;
+}
+@keyframes vf-spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes vf-rays-in { from { opacity: 0; } to { opacity: 1; } }
+.vf-title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 26%;
+  text-align: center;
+  font-size: clamp(42px, 9vw, 76px);
+  font-weight: bold;
+  letter-spacing: 10px;
+  color: #ffe9a0;
+  text-shadow: 0 0 34px #ffd76a, 0 4px 14px #000;
+  animation: vf-title-in 0.8s cubic-bezier(0.2, 0.8, 0.3, 1.35) 0.15s backwards;
+}
+.vf-sub {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(26% + clamp(56px, 11vw, 96px));
+  text-align: center;
+  font-size: clamp(16px, 3vw, 24px);
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 0 0 14px #ffd76a99, 0 2px 8px #000;
+  animation: vf-title-in 0.8s ease 0.5s backwards;
+}
+@keyframes vf-title-in { from { transform: scale(2.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+/* 紙吹雪 */
+.vf-confetti {
+  position: absolute;
+  top: -24px;
+  display: block;
+  border-radius: 2px;
+  opacity: 0.95;
+  animation: vf-fall linear forwards;
+}
+@keyframes vf-fall {
+  to { transform: translateY(112vh) rotate(660deg); opacity: 0.8; }
+}
+
+/* ---------- タイトル画面（起動時の世界観演出） ---------- */
+#title-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at 50% 118%, #3a2c58 0%, transparent 55%),
+    radial-gradient(ellipse at 50% -10%, #2b2340 0%, #17131f 55%, #0d0a16 100%);
+}
+#title-screen.ts-out { transition: opacity 0.65s ease; opacity: 0; }
+/* マナの粒子（明滅する星） */
+.ts-star {
+  position: absolute;
+  border-radius: 50%;
+  background: #d9d2f2;
+  box-shadow: 0 0 6px #d9d2f288;
+  animation: ts-twinkle 3s ease-in-out infinite;
+}
+@keyframes ts-twinkle { 0%, 100% { opacity: 0.08; } 50% { opacity: 0.85; } }
+.ts-center { text-align: center; padding: 0 16px; z-index: 1; margin-bottom: 7vh; }
+.ts-emblem {
+  width: min(34vh, 60vw);
+  margin: 0 auto;
+  animation: ts-float 4.5s ease-in-out infinite;
+  filter: drop-shadow(0 0 26px #ffd76a22);
+}
+.ts-emblem svg { display: block; width: 100%; height: auto; }
+@keyframes ts-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+.ts-title {
+  font-size: clamp(34px, 9vw, 58px);
+  letter-spacing: 12px;
+  padding-left: 12px; /* letter-spacingの右余白ぶんを相殺して中央に */
+  margin-top: -8px;
+  background: linear-gradient(180deg, #fff3c4 10%, #ffd76a 45%, #c9962e 75%, #ffe9a0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 18px #ffd76a55) drop-shadow(0 3px 3px #000);
+}
+.ts-sub { color: #c9b874; letter-spacing: 7px; font-size: clamp(10px, 2.4vw, 13px); margin-top: 2px; opacity: 0.85; }
+.ts-flavor {
+  color: var(--dim);
+  line-height: 2.05;
+  font-size: clamp(11.5px, 2.6vw, 14px);
+  margin-top: 18px;
+  text-shadow: 0 1px 3px #000;
+}
+.ts-start {
+  margin-top: 22px;
+  color: var(--gold);
+  font-size: clamp(12.5px, 2.8vw, 15px);
+  letter-spacing: 2px;
+  animation: ts-pulse 1.8s ease-in-out infinite;
+  text-shadow: 0 0 12px #ffd76a66;
+}
+@keyframes ts-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+/* 地平に並ぶクリーチャーのシルエット */
+.ts-frieze { position: absolute; left: 0; right: 0; bottom: 0; pointer-events: none; opacity: 0.95; }
+.ts-frieze svg { display: block; width: 100%; height: auto; max-height: 17vh; margin: 0 auto; }
 
 /* ---------- レスポンシブ（縦長・狭い画面） ---------- */
 @media (max-width: 980px) {
@@ -594,6 +1123,11 @@ body.in-game #hud-tabs { display: flex; }
   #win-hand { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); max-width: 96vw; }
   #hud-tabs { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
   #peek-restore { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+  /* ステージ選択の世界観ヘッダーは狭い画面ではコンパクトに */
+  .ss-hero { gap: 10px; padding: 10px 11px; }
+  .ss-crest { width: 54px; height: 54px; }
+  .ss-hero h2 { font-size: 15px; letter-spacing: 1px; }
+  .ss-flavor { font-size: 11.5px; line-height: 1.6; margin-bottom: 6px; }
 }
 
 /* ---------- スクロールバー ---------- */

@@ -42,16 +42,34 @@ function tilePx(tile) { return { x: tile.x * CELL + 5, y: tile.y * CELL + 5 }; }
 function renderBoard(g) {
   const svg = document.getElementById("board");
   let html = "";
+  // マナの回路（マスをつなぐ道）: タイルの下層に描く。外周の太い道＋中央を流れる魔力の点線
+  g.tiles.forEach(tile => {
+    const c1 = tilePx(tile);
+    tile.next.forEach(nid => {
+      const c2 = tilePx(g.tiles[nid]);
+      const [x1, y1, x2, y2] = [c1.x + TILE / 2, c1.y + TILE / 2, c2.x + TILE / 2, c2.y + TILE / 2];
+      html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#241e33" stroke-width="16" stroke-linecap="round"/>`;
+      html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#5c5480" stroke-width="2.5" stroke-dasharray="2 9" stroke-linecap="round" opacity="0.9"/>`;
+    });
+  });
   g.tiles.forEach(tile => {
     const { x, y } = tilePx(tile);
     const isLand = tile.type === "LAND";
-    const fill = isLand ? ELEMENTS[tile.element].color + "33"
+    const fill = isLand ? `url(#tg-${tile.element})`
+      : tile.type === "CASTLE" ? "url(#tg-castle)"
       : tile.type === "MAGMA" ? "#5a2418"
-      : "#2a2438";
-    const stroke = tile.owner !== null ? PLAYER_COLORS[tile.owner] : "#5a5470";
-    const sw = tile.owner !== null ? 4 : 1.5;
+      : "url(#tg-special)";
+    const stroke = tile.owner !== null ? PLAYER_COLORS[tile.owner]
+      : tile.type === "CASTLE" ? "#c9a755" : "#5a5470";
+    const sw = tile.owner !== null ? 4 : tile.type === "CASTLE" ? 2.5 : 1.5;
     html += `<g class="tile" data-tile="${tile.id}">`;
+    // 所有地はプレイヤー色のオーラで一目で分かるように
+    if (tile.owner !== null) {
+      html += `<rect x="${x - 3}" y="${y - 3}" width="${TILE + 6}" height="${TILE + 6}" rx="13" fill="none" stroke="${PLAYER_COLORS[tile.owner]}" stroke-width="7" opacity="0.22"/>`;
+    }
     html += `<rect x="${x}" y="${y}" width="${TILE}" height="${TILE}" rx="10" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+    // 内側のハイライト線（タイルの立体感）
+    html += `<rect x="${x + 2.5}" y="${y + 2.5}" width="${TILE - 5}" height="${TILE - 5}" rx="8" fill="none" stroke="#fff" stroke-opacity="${tile.type === "CASTLE" ? 0.12 : 0.06}" stroke-width="1"/>`;
     if (isLand) {
       // 土地の属性は「左上コーナーの角丸チップ」で表示（＝土地の属性だと分かる位置）
       html += `<rect x="${x + 4}" y="${y + 4}" width="26" height="22" rx="6" fill="${ELEMENTS[tile.element].color}cc"/>`;
@@ -87,7 +105,15 @@ function renderBoard(g) {
         html += `<text x="${x + TILE / 2}" y="${y + TILE - 5}" font-size="13" fill="${PLAYER_COLORS[tile.owner]}" text-anchor="middle" font-weight="bold">${toll}G</text>`;
       }
     } else {
-      html += `<text x="${x + TILE / 2}" y="${y + 45}" font-size="30" text-anchor="middle">${TILE_ICONS[tile.type]}</text>`;
+      // 魔力マスは宝石がきらめき、城は少し大きな紋章で特別感を出す
+      const iconSize = tile.type === "CASTLE" ? 34 : 30;
+      html += `<text x="${x + TILE / 2}" y="${y + 46}" font-size="${iconSize}" text-anchor="middle">${TILE_ICONS[tile.type]}</text>`;
+      if (tile.type === "MAGIC") {
+        html += `<text x="${x + TILE - 16}" y="${y + 22}" font-size="11" text-anchor="middle">✨<animate attributeName="opacity" values="1;0.2;1" dur="1.8s" repeatCount="indefinite"/></text>`;
+      }
+      if (tile.type === "CASTLE") {
+        html += `<path d="M${x + TILE / 2 - 16} ${y + 12} h32" stroke="#ffd76a" stroke-width="1.5" opacity="0.7"/>`;
+      }
       html += `<text x="${x + TILE / 2}" y="${y + 70}" font-size="12" fill="#b8b2cc" text-anchor="middle">${TILE_LABELS[tile.type]}</text>`;
     }
     // 盤面エフェクト（🌋溶岩/🛡️結界/💨追い風）のバッジ
@@ -122,14 +148,23 @@ function renderBoard(g) {
     }
     html += `</g>`;
   });
-  // プレイヤー駒
+  // プレイヤー駒（宝珠風・手番プレイヤーの駒は光が脈動する）
   g.players.forEach(p => {
     if (!p.alive) return;
     const { x, y } = tilePx(g.tiles[p.pos]);
     const off = p.id === 0 ? { dx: 20, dy: -8 } : { dx: TILE - 20, dy: -8 };
+    const cx = x + off.dx, cy = y + off.dy;
+    const active = g.current === p.id && !g.over;
     html += `<g class="token">`;
-    html += `<circle cx="${x + off.dx}" cy="${y + off.dy}" r="13" fill="${PLAYER_COLORS[p.id]}" stroke="#fff" stroke-width="2"/>`;
-    html += `<text x="${x + off.dx}" y="${y + off.dy + 5}" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">${g.hotseat ? p.id + 1 : (p.id === 0 ? "P" : "C")}</text>`;
+    if (active) {
+      html += `<circle cx="${cx}" cy="${cy}" r="16" fill="none" stroke="${PLAYER_COLORS[p.id]}" stroke-width="2.5" opacity="0.6">` +
+        `<animate attributeName="r" values="14;19;14" dur="1.5s" repeatCount="indefinite"/>` +
+        `<animate attributeName="opacity" values="0.7;0.15;0.7" dur="1.5s" repeatCount="indefinite"/></circle>`;
+    }
+    html += `<circle cx="${cx}" cy="${cy + 1.5}" r="13" fill="#000" opacity="0.35"/>`;
+    html += `<circle cx="${cx}" cy="${cy}" r="13" fill="url(#tokP${p.id})" stroke="#fff" stroke-width="2"/>`;
+    html += `<ellipse cx="${cx - 4}" cy="${cy - 5}" rx="4.5" ry="3" fill="#fff" opacity="0.45"/>`;
+    html += `<text x="${cx}" y="${cy + 5}" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold" style="text-shadow:0 1px 2px #000">${g.hotseat ? p.id + 1 : (p.id === 0 ? "P" : "C")}</text>`;
     html += `</g>`;
   });
   svg.innerHTML = html;
@@ -171,17 +206,34 @@ function cardHTML(c, opts = {}) {
   const cls = ["card", typeCls, `rar-${rar}`];
   if (opts.disabled) cls.push("disabled");
   if (opts.selectable) cls.push("selectable");
+  if (opts.fixed) cls.push("fixed"); // フリップ演出用の固定サイズ（表裏のサイズを一致させる）
   const abil = (c.ab || []).map(a => `<span class="ab">${ABILITY_INFO[a].name}</span>`).join("");
   const body = c.type === "creature"
-    ? `<div class="c-stats">ST ${c.st} / HP ${c.hp}</div><div class="c-ab">${abil}</div>`
+    ? `<div class="c-stats"><span class="c-st">ST ${c.st}</span><span class="c-hp">HP ${c.hp}</span></div><div class="c-ab">${abil}</div>`
     : `<div class="c-desc">${esc(c.desc)}</div>`;
-  const icon = c.icon || (c.type === "creature" ? ELEMENTS[c.element].icon
-    : c.type === "item" ? (c.st > 0 ? "⚔️" : "🛡️") : "✨");
+  const elemIcon = c.type === "creature" ? ELEMENTS[c.element].icon
+    : c.type === "item" ? (c.st > 0 ? "⚔️" : "🛡️") : "✨";
   const rm = RARITY_META[rar];
+  // 額縁＋アート窓＋コスト宝珠＋魔力の光沢（.c-shine）で「魔力の込められたカード」を表現
   return `<div class="${cls.join(" ")}" data-card="${c.id}" title="${esc(c.type === 'spell' ? c.desc : (c.ab || []).map(a => ABILITY_INFO[a].name + ': ' + ABILITY_INFO[a].desc).join(' / '))}">
-    <div class="c-head"><span class="c-icon">${icon}</span><span class="c-cost">${c.cost}G</span></div>
-    <div class="c-name">${esc(c.name)}</div>${body}
-    <div class="c-rarity" style="color:${rm.color}" title="${rm.label}">${rm.stars}</div></div>`;
+    <div class="c-art">${typeof cardArtSVG === "function" ? cardArtSVG(c) : ""}</div>
+    <span class="c-cost" title="コスト ${c.cost}G">${c.cost}</span>
+    <span class="c-rarity" style="color:${rm.color}" title="${rm.label}">${rm.stars}</span>
+    <span class="c-elem" title="${c.type === "creature" ? ELEMENTS[c.element].name + "属性" : c.type === "item" ? "アイテム" : "スペル"}">${elemIcon}</span>
+    <div class="c-name">${esc(c.name)}</div><div class="c-body">${body}</div>
+    <div class="c-shine"></div></div>`;
+}
+
+// 3Dフリップできるカード（裏面=共通のカードバック／表面=カード本体）。
+// .revealed を付けると裏→表にめくれる。手札のオープン・ドロー・パック開封で使う。
+// 表裏が「同じ1枚のカード」に見えるよう、表面は固定サイズ（.card.fixed）で描画し、
+// 裏面はグリッドセル（＝表面と同寸）いっぱいに広がる。
+function flipCardHTML(c, opts = {}) {
+  return `<div class="flip3d${opts.revealed ? " revealed" : ""}"${c ? ` data-flip="${c.id}"` : ""}>
+    <div class="flip3d-inner">
+      <div class="flip3d-face flip3d-back">${CARD_BACK_HTML}</div>
+      <div class="flip3d-face flip3d-front">${c ? cardHTML(c, { ...opts, fixed: true }) : ""}</div>
+    </div>${opts.badge || ""}</div>`;
 }
 
 function renderHand(g) {
@@ -190,7 +242,7 @@ function renderHand(g) {
   const el = document.getElementById("hand");
   if (g.hotseat && UI.handHidden) {
     // 手番交代画面の間は伏せて、次のプレイヤーの手札が前のプレイヤーに見えないようにする
-    el.innerHTML = p.hand.map(() => `<div class="card facedown" title="交代中は伏せられています">🎴</div>`).join("");
+    el.innerHTML = p.hand.map(() => `<div class="card facedown" title="交代中は伏せられています">${CARD_BACK_HTML}</div>`).join("");
   } else {
     el.innerHTML = p.hand.map(id => cardHTML(CARD_BY_ID[id])).join("");
   }
@@ -198,7 +250,74 @@ function renderHand(g) {
     (g.hotseat ? `${p.name}の` : "") + `手札 ${p.hand.length}/${HAND_LIMIT}`;
 }
 
+// ---------- ゲーム開始の手札オープン演出 ----------
+// 全カードが表紙（カードバック）側で配られ、1枚ずつめくれて対戦が始まる
+async function handIntro(g) {
+  const p = g.players[0];
+  const el = document.getElementById("hand");
+  el.innerHTML = p.hand.map(id => flipCardHTML(CARD_BY_ID[id])).join("");
+  await sleep(420);
+  for (const f of el.querySelectorAll(".flip3d")) {
+    f.classList.add("revealed");
+    SFX.flip();
+    await sleep(150);
+  }
+  await sleep(500);
+  renderHand(g);
+}
+
+// ---------- ドロー演出 ----------
+// 山札からカードが現れ、めくれて手札へ吸い込まれる（人間のドロー時のみ）
+async function animateDraw(card) {
+  const host = document.createElement("div");
+  host.id = "draw-fx";
+  host.innerHTML = flipCardHTML(card);
+  document.body.appendChild(host);
+  SFX.draw();
+  await sleep(120);
+  host.querySelector(".flip3d").classList.add("revealed");
+  SFX.flip();
+  await sleep(620);
+  host.classList.add("to-hand"); // 手札ウィンドウへ吸い込まれる
+  await sleep(300);
+  host.remove();
+}
+
 function renderAll(g) { renderBoard(g); renderPanels(g); renderHand(g); }
+
+// ---------- タイトル画面（起動時の世界観演出） ----------
+// マナの粒子が瞬く夜空＋ゆっくり回る大紋章＋地平のクリーチャーシルエット。
+// 画面のどこかをクリック／タップでフェードアウトしてメニューへ。
+function showTitleScreen() {
+  return new Promise(resolve => {
+    const el = document.createElement("div");
+    el.id = "title-screen";
+    // マナの粒子（ランダム配置・明滅）
+    const stars = Array.from({ length: 46 }, () => {
+      const sz = (Math.random() * 2 + 1).toFixed(1);
+      return `<span class="ts-star" style="left:${(Math.random() * 100).toFixed(1)}%;top:${(Math.random() * 88).toFixed(1)}%;` +
+        `width:${sz}px;height:${sz}px;animation-duration:${(2.2 + Math.random() * 3.4).toFixed(1)}s;animation-delay:-${(Math.random() * 4).toFixed(1)}s"></span>`;
+    }).join("");
+    el.innerHTML = `
+      ${stars}
+      <div class="ts-center">
+        <div class="ts-emblem">${TITLE_EMBLEM_SVG}</div>
+        <h1 class="ts-title">マナサーキット</h1>
+        <div class="ts-sub">— MANA CIRCUIT —</div>
+        <p class="ts-flavor">大地に張り巡らされた魔力の回路が、いま目を覚ます。<br>
+          クリーチャーを従え、土地を繋ぎ、四大のマナを我が手に。<br>
+          環を制する者こそ、次代の大魔導師。</p>
+        <div class="ts-start">✦ クリック / タップ で始める ✦</div>
+      </div>
+      <div class="ts-frieze">${TITLE_FRIEZE_SVG}</div>`;
+    document.body.appendChild(el);
+    el.addEventListener("click", () => {
+      if (typeof SFX !== "undefined" && SFX.bless) SFX.bless(); // 荘厳なアルペジオで開幕
+      el.classList.add("ts-out");
+      setTimeout(() => { el.remove(); resolve(); }, 650);
+    }, { once: true });
+  });
+}
 
 // ---------- 盤面ズーム（拡大縮小して読みやすく） ----------
 let BOARD_ZOOM = 1;
@@ -388,8 +507,9 @@ function showStageSelect(opts = {}) {
         ? `${versus ? "" : `VS ${esc(s.cpuName)}｜`}${buildBoard(s).length}マス｜目標 ${((s.rules && s.rules.target) || 4000)}G<br>${esc(s.desc)}`
         : "？？？（前のステージをクリアで解放）";
       return `<button class="stage-btn ${unlocked ? "" : "locked"}" data-idx="${i}" ${unlocked ? "" : "disabled"}>
+        <span class="st-bg" aria-hidden="true">${unlocked ? s.icon : "🔒"}</span>
         <span class="st-icon">${unlocked ? s.icon : "🔒"}</span>
-        <span class="st-main"><b>STAGE ${i + 1}｜${unlocked ? esc(s.name) : "？？？"}</b><small>${desc}</small></span>
+        <span class="st-main"><b><span class="st-no">STAGE ${i + 1}</span>${unlocked ? esc(s.name) : "？？？"}</b><small>${desc}</small></span>
         <span class="st-star">${cleared ? "⭐" : ""}</span>
       </button>`;
     }).join("");
@@ -397,17 +517,31 @@ function showStageSelect(opts = {}) {
     const streak = (typeof trainingStreakCount === "function") ? trainingStreakCount() : 0;
     const wr = currentWeeklyRule();
     const wOn = weeklyEnabled();
+    // 世界観ヘッダー（紋章＋題字＋口上＋状態チップ）
+    const chips = arr => `<div class="ss-chips">${arr.filter(Boolean).map(t => `<span class="ss-chip">${t}</span>`).join("")}</div>`;
+    const hero = (title, flavor, chipArr) => `
+      <div class="ss-hero">
+        <div class="ss-crest">${typeof TITLE_EMBLEM_SVG !== "undefined" ? TITLE_EMBLEM_SVG : ""}</div>
+        <div class="ss-hero-main">
+          <h2>${title}</h2>
+          <p class="ss-flavor">${flavor}</p>
+          ${chips(chipArr)}
+        </div>
+      </div>`;
+    const weeklyChip = wOn ? `🎪 今週のルール: <b>${esc(wr.name)}</b>` : "";
     const header = versus
-      ? `<h2>🎮 2人対戦 — ステージ選択</h2><p class="dlg-body"><b>🔵 ${esc(versus.names[0])}</b> vs <b>🔴 ${esc(versus.names[1])}</b> — 同じ端末で交互に操作します。<br>` +
-        `<b>全ステージから選択可</b>（報酬カード・進行度は変化しません）${wOn ? `｜🎪 今週のルール「${esc(wr.name)}」適用` : ""}</p>`
+      ? hero("🎮 決闘の間",
+        `同じ卓を囲み、端末を手渡して覇を競う——友との真剣勝負。<b>全ステージから選択可</b>（報酬・進行度は変化しません）。`,
+        [`🔵 <b>${esc(versus.names[0])}</b> vs 🔴 <b>${esc(versus.names[1])}</b>`, weeklyChip])
       : training
-      ? `<h2>🎯 トレーニング</h2><p class="dlg-body">好きな解放済みステージを選んで練習対戦。<b>勝つとカードを${REWARD_TRAINING}枚獲得</b>できます（何度でも）。` +
-        `🔥<b>${TRAINING_STREAK_FOR_RARE}連勝から</b>は毎回<b>レア以上1枚保証</b>（負け・投了でリセット）${streak >= 1 ? `｜現在 🔥<b>${streak}連勝中</b>` : ""}。<br>` +
-        `現在のゲーム難易度: <b>${diff.icon} ${diff.label}</b>（下の「⚙ 難易度」で変更）</p>`
-      : `<h2>✦ マナサーキット ✦</h2>
-         <p class="dlg-body">クリーチャーを召喚して土地を支配し、連鎖で通行料を吊り上げろ。目標資産を築いて🏰城に帰還すれば勝利！<br>
-         ステージ初クリアで<b>カードパック</b>、トレーニングで<b>カード</b>を集め、<b>自分だけのデッキ</b>を組もう。<br>
-         プレイヤー: <b>👤 ${esc(currentProfileName())}</b>｜現在のゲーム難易度: <b>${diff.icon} ${diff.label}</b>${wOn ? `｜🎪 <b>${esc(wr.name)}</b> 適用中` : ""}</p>`;
+      ? hero("🎯 修練の間",
+        `腕とデッキを磨く練習対戦。<b>勝つとカードを${REWARD_TRAINING}枚獲得</b>（何度でも）。` +
+        `🔥<b>${TRAINING_STREAK_FOR_RARE}連勝から</b>は毎回<b>レア以上1枚保証</b>（負け・投了でリセット）。`,
+        [streak >= 1 ? `🔥 <b>${streak}連勝中</b>` : "", `⚙ 難易度: <b>${diff.icon} ${diff.label}</b>`])
+      : hero("✦ 遠征の書 — 旅路を選べ ✦",
+        `大地に張り巡らされた魔力の回路。クリーチャーを従えて土地を繋ぎ、連鎖で通行料を吊り上げ、
+         目標資産を成して🏰城へ帰還せよ。初クリアの<b>カードパック</b>と勝利の<b>カード</b>で、自分だけのデッキを組み上げろ。`,
+        [`👤 <b>${esc(currentProfileName())}</b>`, `⚙ 難易度: <b>${diff.icon} ${diff.label}</b>`, weeklyChip]);
     const buttons = (versus || training)
       ? (training ? `<button class="btn" data-value="difficulty">⚙ 難易度: ${diff.icon}${diff.label}</button>` : "") +
         `<button class="btn" data-value="back">← 戻る</button>`
@@ -457,17 +591,23 @@ function showDifficultyPicker() {
   });
 }
 
-// ---------- バトル演出 ----------
+// ---------- バトル演出（フルスクリーンのカットイン・スキップ可） ----------
+// 侵略側が左から、防衛側が右から突撃してくるカットイン。攻撃のたびにカードが突進し、
+// 被弾側が揺れる。「⏩ スキップ」で残りのログを一括表示して即座に決着へ進める。
+UI.battleSkip = false;
+UI.battleCtx = null; // { attName, defName } — ログ行からどちらの攻撃かを判定する
+
 function openBattleView(g, attackerName, attCard, attItem, tile, defItem) {
   closePassiveDialog(); // 🔍マス情報などが開いていたら閉じてから（上書きでbusyカウンタが狂うのを防ぐ）
   const defCard = CARD_BY_ID[tile.creature.cardId];
   const defBonus = attCard.ab.includes("pierce") ? 0 : landHpBonus(tile, defCard);
   const support = landSupportSt(g, tile);
   const dCur = tile.creature.hp ?? defCard.hp;
-  const overlay = document.getElementById("overlay");
-  const box = document.getElementById("dialog");
+  UI.battleSkip = false;
+  UI.battleCtx = { attName: attCard.name, defName: defCard.name };
+  const cutin = document.getElementById("battle-cutin");
   const fighter = (c, item, extraHp, side, extraMods = "") => `
-    <div class="fighter ${side}">
+    <div class="fighter ${side === "att" ? "bc-att" : "bc-def"}" id="bc-${side}">
       <div class="f-side">${side === "att" ? "⚔ 侵略" : "🛡 防衛"}</div>
       ${cardHTML(c)}
       <div class="f-mods">
@@ -476,40 +616,124 @@ function openBattleView(g, attackerName, attCard, attItem, tile, defItem) {
         ${extraMods}
       </div>
     </div>`;
+  // 物理/魔法の攻防に関わる要素はカットインにバッジで明示（魔法攻撃はアイテム由来も含む）
+  const typeMods = (c, item) =>
+    (c.ab.includes("physnull") ? `<span class="f-mod">🌫 物理無効</span>` : "") +
+    (c.ab.includes("physreflect") ? `<span class="f-mod">🪞 物理反射</span>` : "") +
+    ((c.ab.includes("magicatk") || (item && item.magicatk)) ? `<span class="f-mod">✨ 魔法攻撃</span>` : "");
   const defMods =
     (support > 0 ? `<span class="f-mod">🏰 援護ST+${support}</span>` : "") +
     (dCur < defCard.hp ? `<span class="f-mod">🩹 HP残${dCur}</span>` : "") +
-    (defCard.ab.includes("capture") ? `<span class="f-mod">🕸️ 捕縛</span>` : "");
-  box.innerHTML = `<h2>⚔ バトル！ ${esc(ELEMENTS[tile.element].name)}の土地 Lv${tile.level}</h2>
-    <div class="battle-arena">
-      ${fighter(attCard, attItem, 0, "att")}
-      <div class="vs">VS</div>
-      ${fighter(defCard, defItem, defBonus, "def", defMods)}
-    </div>
-    <div id="battle-log"></div>`;
-  overlay.classList.add("show");
+    (defCard.ab.includes("capture") ? `<span class="f-mod">🕸️ 捕縛</span>` : "") +
+    typeMods(defCard, defItem);
+  cutin.innerHTML = `
+    <div class="bc-flash" id="bc-flash"></div>
+    <div class="bc-inner">
+      <h2 class="bc-title">⚔ バトル！ <small>${esc(ELEMENTS[tile.element].name)}の土地 Lv${tile.level}</small></h2>
+      <div class="battle-arena">
+        ${fighter(attCard, attItem, 0, "att", typeMods(attCard, attItem))}
+        <div class="vs">VS</div>
+        ${fighter(defCard, defItem, defBonus, "def", defMods)}
+      </div>
+      <div id="battle-log"></div>
+      <div class="bc-actions"><button id="battle-skip" class="btn small" title="残りの演出を飛ばして決着まで進めます">⏩ 演出をスキップ</button></div>
+    </div>`;
+  cutin.classList.remove("hidden", "bc-out");
+  document.getElementById("battle-skip").addEventListener("click", () => {
+    UI.battleSkip = true;
+    cutin.classList.add("bc-skipping");
+  });
+}
+
+// ログ行に応じたカットインの動き（突進・被弾・会心フラッシュ・撃破）
+function _battleLineFx(line) {
+  const ctx = UI.battleCtx || {};
+  const att = document.getElementById("bc-att");
+  const def = document.getElementById("bc-def");
+  const flash = document.getElementById("bc-flash");
+  const pulse = (el, cls) => {
+    if (!el) return;
+    el.classList.remove(cls);
+    void el.offsetWidth; // アニメを再発火させるためのリフロー
+    el.classList.add(cls);
+  };
+  if (line.includes("会心")) { pulse(flash, "go-crit"); return; }
+  if (line.startsWith(`${ctx.attName}の攻撃`) || line.startsWith(`${ctx.attName}の魔法攻撃`)) { pulse(att, "bc-lunge-r"); pulse(def, "bc-hurt"); pulse(flash, "go"); return; }
+  if (line.startsWith(`${ctx.defName}の攻撃`) || line.startsWith(`${ctx.defName}の魔法攻撃`)) { pulse(def, "bc-lunge-l"); pulse(att, "bc-hurt"); pulse(flash, "go"); return; }
+  if (line.includes("物理無効！") || line.includes("物理反射！")) { pulse(flash, "go"); return; }
+  if (line.includes("跳ね返った")) { // 物理反射のダメージが攻撃側に返った行（行頭は被弾した側の名前）
+    if (line.startsWith(ctx.attName)) pulse(att, "bc-hurt");
+    else if (line.startsWith(ctx.defName)) pulse(def, "bc-hurt");
+    pulse(flash, "go"); return;
+  }
+  if (line.includes("倒された")) {
+    if (line.startsWith(ctx.defName)) pulse(def, "bc-dead");
+    else if (line.startsWith(ctx.attName)) pulse(att, "bc-dead");
+  }
 }
 
 async function playBattleLines(lines, interval = 700) {
   const el = document.getElementById("battle-log");
   for (const line of lines) {
+    const instant = UI.battleSkip; // スキップ後は残りを一括表示
     if (el) {
       const div = document.createElement("div");
       div.textContent = line;
       if (line.includes("会心")) div.className = "crit";
+      else if (line.startsWith("📊")) div.className = "formula";
       el.appendChild(div);
       el.scrollTop = el.scrollHeight;
     }
+    log(line, "battle");
+    if (instant) continue;
     if (line.includes("倒された")) SFX.destroy();
     else if (line.includes("会心")) SFX.destroy();
     else if (line.includes("攻撃！")) SFX.hit();
-    log(line, "battle");
+    _battleLineFx(line);
     await sleep(interval);
   }
 }
 
 function closeBattleView() {
-  document.getElementById("overlay").classList.remove("show");
+  const cutin = document.getElementById("battle-cutin");
+  cutin.classList.add("bc-out"); // フェードアウトしてから消す
+  setTimeout(() => { cutin.classList.add("hidden"); cutin.classList.remove("bc-out", "bc-skipping"); }, 320);
+}
+
+// ---------- 勝利の祝福演出 ----------
+// 金色の光条＋舞い散る紙吹雪＋祝福の鐘の音。演出中もクリックは透過する（pointer-events:none）ので
+// 続く報酬ダイアログの操作を妨げない。opts.grand で紙吹雪を増量（初クリア用）。
+async function playVictoryFx(title, sub, opts = {}) {
+  const old = document.getElementById("victory-fx");
+  if (old) old.remove();
+  const host = document.createElement("div");
+  host.id = "victory-fx";
+  const colors = ["#ffd76a", "#ffe9a0", "#4da3ff", "#ff8a6a", "#8ee0a0", "#d9a6ff", "#fff"];
+  const n = opts.grand ? 110 : 70;
+  let confetti = "";
+  for (let i = 0; i < n; i++) {
+    const left = Math.random() * 100;
+    const delay = Math.random() * 1.6;
+    const dur = 2.2 + Math.random() * 1.6;
+    const c = colors[Math.floor(Math.random() * colors.length)];
+    const w = 6 + Math.random() * 7, h = 8 + Math.random() * 9;
+    const rot = Math.floor(Math.random() * 360);
+    confetti += `<i class="vf-confetti" style="left:${left}vw;width:${w}px;height:${h}px;background:${c};animation-delay:${delay}s;animation-duration:${dur}s;transform:rotate(${rot}deg)"></i>`;
+  }
+  host.innerHTML = `
+    <div class="vf-rays"></div>
+    <div class="vf-title">${esc(title)}</div>
+    <div class="vf-sub">${esc(sub || "")}</div>
+    ${confetti}`;
+  document.body.appendChild(host);
+  SFX.bless();
+  await sleep(1700); // タイトルの余韻まで待ってから次へ（紙吹雪は背後で降り続ける）
+  (async () => {   // 後片付けは待たずに進める（ダイアログの背後で静かにフェードアウト）
+    await sleep(2600);
+    host.classList.add("vf-fade");
+    await sleep(1100);
+    host.remove();
+  })();
 }
 
 // ---------- 分かれ道の選択（人間用） ----------

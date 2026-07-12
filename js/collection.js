@@ -219,9 +219,13 @@ function albumTile(c, count) {
   const owned = count > 0;
   const stats = c.type === "creature" ? `ST${c.st}/HP${c.hp}` : `${c.cost}G`;
   const rar = cardRarity(c), rm = RARITY_META[rar];
+  // 所持カードはミニアート（造形）を表示、未収集はシルエットの「？」
+  const art = owned && typeof cardArtSVG === "function"
+    ? `<div class="at-art">${cardArtSVG(c)}</div>`
+    : `<div class="at-icon">${owned ? cardIconOf(c) : "❔"}</div>`;
   return `<div class="album-tile rar-${rar} ${owned ? "" : "locked"}" title="${esc(owned ? rm.label + "／" + deckTip(c) : "未収集")}">
     <div class="at-rarity" style="color:${rm.color}">${rm.stars}</div>
-    <div class="at-icon">${owned ? cardIconOf(c) : "❔"}</div>
+    ${art}
     <div class="at-name">${owned ? esc(c.name) : "？？？"}</div>
     <div class="at-sub">${owned ? stats : ""}</div>
     ${owned ? `<div class="at-count">×${count}</div>` : ""}</div>`;
@@ -540,18 +544,78 @@ function showDiscardViewer() {
   });
 }
 
-// ---------- カード獲得の演出 ----------
+// ---------- カード獲得の演出（パック開封 → 1枚ずつめくる） ----------
+// ① 封のされたカードパックをクリックで開封（封が弾け飛ぶ）
+// ② 全カードが表紙（カードバック）側で並び、クリックで1枚ずつめくる（🃏全てめくるも可）
+// ③ レア以上はめくった瞬間に光の演出、初入手のカードには NEW リボン
 function showPackReveal(cardIds, title, sub) {
   return new Promise(resolve => {
     const overlay = document.getElementById("overlay");
     const box = document.getElementById("dialog");
-    const newlyOwned = {}; // 「NEW!」判定用に、この開封で初めて手に入れたか
+    // addCards は既に適用済みなので「現在の所持数 == このパック内の枚数」なら今回が初入手
+    const packCount = {};
+    cardIds.forEach(id => { packCount[id] = (packCount[id] || 0) + 1; });
+    const isNew = id => ownedCount(id) === packCount[id];
+    let opened = false;
+
+    const cardsHTML = cardIds.map(id => {
+      const c = CARD_BY_ID[id];
+      const badge = isNew(id) ? `<span class="pr-new">NEW</span>` : "";
+      return `<div class="pr-slot" data-rar="${cardRarity(c)}" title="クリックでめくる">${flipCardHTML(c, { badge })}</div>`;
+    }).join("");
+
+    // ② めくりフェーズ
+    const renderCards = allRevealed => {
+      box.innerHTML = `<h2>${esc(title)}</h2>
+        <p class="dlg-body">${esc(sub || "新しいカードを手に入れた！")}${allRevealed ? "" : " — <b>カードをクリックしてめくろう！</b>"}</p>
+        <div class="pack-reveal">${cardsHTML}</div>
+        <div class="dlg-buttons">
+          <button class="btn" data-value="flipall">🃏 全てめくる</button>
+          <button class="btn primary" data-value="ok">受け取る</button>
+        </div>`;
+      const slots = [...box.querySelectorAll(".pr-slot")];
+      const reveal = slot => {
+        const f = slot.querySelector(".flip3d");
+        if (f.classList.contains("revealed")) return;
+        f.classList.add("revealed");
+        const rar = slot.dataset.rar;
+        SFX.reveal(rar);
+        if (rar === "rare" || rar === "legendary") slot.classList.add(`pr-glow-${rar}`);
+      };
+      const flipAll = async () => { for (const s of slots) { if (!s.querySelector(".flip3d").classList.contains("revealed")) { reveal(s); await sleep(100); } } };
+      if (allRevealed) slots.forEach(reveal);
+      slots.forEach(slot => slot.addEventListener("click", () => reveal(slot)));
+      box.querySelector("[data-value=flipall]").addEventListener("click", flipAll);
+      box.querySelector("[data-value=ok]").addEventListener("click", async () => {
+        await flipAll(); // 伏せたまま受け取ろうとしたら、見せてから閉じる
+        overlay.classList.remove("show");
+        resolve();
+      });
+    };
+
+    // ① 開封フェーズ
     box.innerHTML = `<h2>${esc(title)}</h2>
       <p class="dlg-body">${esc(sub || "新しいカードを手に入れた！")}</p>
-      <div class="pack-reveal">${cardIds.map(id => cardHTML(CARD_BY_ID[id])).join("")}</div>
-      <div class="dlg-buttons"><button class="btn primary" data-value="ok">受け取る</button></div>`;
+      <div class="pack-stage">
+        <button class="pack-btn" title="クリックで開封">${typeof PACK_SVG !== "undefined" ? PACK_SVG : "🎁"}</button>
+        <div class="pack-hint">✨ パックをクリックして開封！（${cardIds.length}枚入り）</div>
+      </div>
+      <div class="dlg-buttons"><button class="btn" data-value="skipall">⏩ 開封してすべて表示</button></div>`;
     overlay.classList.add("show");
     if (typeof SFX !== "undefined" && SFX.coin) SFX.coin();
-    box.querySelector("[data-value=ok]").addEventListener("click", () => { overlay.classList.remove("show"); resolve(); });
+    box.querySelector(".pack-btn").addEventListener("click", async e => {
+      if (opened) return;
+      opened = true;
+      SFX.pack();
+      e.currentTarget.classList.add("burst");
+      await sleep(560);
+      renderCards(false);
+    });
+    box.querySelector("[data-value=skipall]").addEventListener("click", () => {
+      if (opened) return;
+      opened = true;
+      SFX.pack();
+      renderCards(true);
+    });
   });
 }

@@ -32,6 +32,10 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   const defAb = abilities(defCard, defItemEff);
   const attReflect = (attItemEff && attItemEff.reflect) || 0; // 受けた攻撃を反射する割合
   const defReflect = (defItemEff && defItemEff.reflect) || 0;
+  // 攻撃タイプ（v15）: 能力 magicatk か magicatk:true のアイテム（打消し後の有効アイテム）で攻撃が「魔法」になる。
+  // 物理無効(physnull)・物理反射(physreflect)は「物理攻撃＝魔法でない攻撃」だけを防ぐ／跳ね返す。
+  const attMagic = attAb.has("magicatk") || !!(attItemEff && attItemEff.magicatk);
+  const defMagic = defAb.has("magicatk") || !!(defItemEff && defItemEff.magicatk);
 
   let attSt = attCard.st + (attItemEff ? attItemEff.st : 0) + (attAb.has("assault") ? 20 : 0) + RULES.invaderSt;
   let defSt = defCard.st + (defItemEff ? defItemEff.st : 0);
@@ -63,6 +67,8 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
     log.push(`🛡 ${defCard.name}は土地の加護でHP+${defBonus}`);
   }
   if (guardBonus > 0) log.push(`🛡 ${defCard.name}の守護！ HP+${guardBonus}`);
+  if (attMagic) log.push(`✨ ${attCard.name}の攻撃は魔法攻撃！（物理無効・物理反射を貫く）`);
+  if (defMagic) log.push(`✨ ${defCard.name}の攻撃は魔法攻撃！（物理無効・物理反射を貫く）`);
 
   // 攻撃順: 通常は侵略側が先。防衛側だけが先制持ちなら防衛側が先
   const defFirst = defAb.has("first") && !attAb.has("first");
@@ -80,21 +86,37 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   // 侵略は「一撃で相手の実効HPを削り切れば占領」。届かなければ守られる（会心なら1.5倍で覆ることも）。
   // ここを式で明示することで「基礎HPだけ見て勝てるはずが、土地の加護・守護で実効HPが上がり届かず負けた」を検証できる。
   // 連撃（double）持ちは1手番で2回攻撃するため、一撃の到達判定はST×2で見る
+  // 物理攻撃が物理無効/物理反射に阻まれる場合はダメージ0＝占領不可（魔法攻撃なら通常どおり）
+  const attBlocked = !attMagic && (defAb.has("physnull") || defAb.has("physreflect")); // 侵略の攻撃が通らない
+  const defBlocked = !defMagic && (attAb.has("physnull") || attAb.has("physreflect")); // 防衛の反撃が通らない
   const attTotal = attAb.has("double") ? attSt * 2 : attSt;
-  const canOneShot = attTotal >= defHp;
-  const critReach = !canOneShot && Math.floor(attSt * 1.5) * (attAb.has("double") ? 2 : 1) >= defHp;
-  log.push(`📊【式】決着: 侵略の一撃 ST${attSt}${attAb.has("double") ? `×2(連撃)＝${attTotal}` : ""} ${canOneShot ? "≥" : "<"} 防衛の実効HP${defHp} → ${canOneShot ? "撃破して占領" : `守られる（あと${defHp - attTotal}届かない${critReach ? "／💫会心が出れば届く" : ""}）`}${defFirst ? "　※防衛が先制（侵略側HPが低いと反撃で討死）" : ""}`);
+  const canOneShot = !attBlocked && attTotal >= defHp;
+  const critReach = !attBlocked && !canOneShot && Math.floor(attSt * 1.5) * (attAb.has("double") ? 2 : 1) >= defHp;
+  if (attBlocked) {
+    log.push(`📊【式】決着: ${defCard.name}の${defAb.has("physnull") ? "物理無効" : "物理反射"}により侵略の物理攻撃は通らない → 占領不可${defAb.has("physreflect") ? "（攻撃はそっくり跳ね返る）" : ""}${defBlocked ? "　※反撃も通らない（両者無傷）" : ""}`);
+  } else {
+    log.push(`📊【式】決着: 侵略の一撃 ST${attSt}${attAb.has("double") ? `×2(連撃)＝${attTotal}` : ""} ${canOneShot ? "≥" : "<"} 防衛の実効HP${defHp} → ${canOneShot ? "撃破して占領" : `守られる（あと${defHp - attTotal}届かない${critReach ? "／💫会心が出れば届く" : ""}）`}${defFirst ? "　※防衛が先制（侵略側HPが低いと反撃で討死）" : ""}${defBlocked ? `　※侵略側の${attAb.has("physnull") ? "物理無効" : "物理反射"}で防衛の反撃は通らない` : ""}`);
+  }
 
-  // 一撃を計算（会心込み）。{ remain: 対象の残HP, dmg: 与えたダメージ } を返す
-  const strike = (name, st, ab, targetName, targetHp) => {
+  // 一撃を計算（会心込み）。物理無効/物理反射（対象の能力）と魔法攻撃（攻撃側）もここで解決する。
+  // { remain: 対象の残HP, dmg: 与えたダメージ, bounced: 物理反射で攻撃側へ跳ね返ったダメージ } を返す
+  const strike = (name, st, ab, isMagic, targetName, targetAb, targetHp) => {
     let dmg = st;
     if (rng && Math.random() < (ab.has("lucky") ? CRIT_RATE_LUCKY : CRIT_RATE)) {
       dmg = Math.floor(st * 1.5);
       log.push(`💫 ${name}の会心の一撃！！`);
     }
+    if (!isMagic && targetAb.has("physnull")) {
+      log.push(`🌫 ${targetName}の物理無効！ ${name}の攻撃はすり抜けた（0ダメージ）`);
+      return { remain: targetHp, dmg: 0, bounced: 0 };
+    }
+    if (!isMagic && targetAb.has("physreflect")) {
+      log.push(`🪞 ${targetName}の物理反射！ ${name}の攻撃がそっくり跳ね返る`);
+      return { remain: targetHp, dmg: 0, bounced: dmg };
+    }
     const remain = targetHp - dmg;
-    log.push(`${name}の攻撃！ ${targetName}に${dmg}ダメージ（残りHP ${Math.max(0, remain)}）`);
-    return { remain, dmg };
+    log.push(`${name}の${isMagic ? "魔法攻撃" : "攻撃"}！ ${targetName}に${dmg}ダメージ（残りHP ${Math.max(0, remain)}）`);
+    return { remain, dmg, bounced: 0 };
   };
   // 反射（ミラーシールド）: 攻撃を受けた側が、受けたダメージの一部を攻撃側へ跳ね返す
   const reflectBack = (targetReflect, dmg, attackerName, reflectorName, attackerHp) => {
@@ -105,37 +127,50 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
     return attackerHp - rf;
   };
 
+  // 物理反射の跳ね返りダメージを攻撃側へ適用（strikeのbounced）
+  const applyBounce = (bounced, strikerName, strikerHp) => {
+    if (!bounced) return strikerHp;
+    const remain = strikerHp - bounced;
+    log.push(`${strikerName}は跳ね返った${bounced}ダメージを受けた！（残りHP ${Math.max(0, remain)}）`);
+    return remain;
+  };
   // 侵略側の手番（1回）。連撃持ちなら相手が生き残っている限りもう1撃（合計2撃）
   const attTurn = () => {
-    let r = strike(attCard.name, attSt, attAb, defCard.name, defHp);
+    let r = strike(attCard.name, attSt, attAb, attMagic, defCard.name, defAb, defHp);
     defHp = r.remain;
+    attHp = applyBounce(r.bounced, attCard.name, attHp); // 防衛側の物理反射
     attHp = reflectBack(defReflect, r.dmg, attCard.name, defCard.name, attHp); // 防衛側が反射
     if (defHp > 0 && attHp > 0 && attAb.has("double")) {
       log.push(`🐲 ${attCard.name}の連撃！`);
-      r = strike(attCard.name, attSt, attAb, defCard.name, defHp);
+      r = strike(attCard.name, attSt, attAb, attMagic, defCard.name, defAb, defHp);
       defHp = r.remain;
+      attHp = applyBounce(r.bounced, attCard.name, attHp);
       attHp = reflectBack(defReflect, r.dmg, attCard.name, defCard.name, attHp);
     }
   };
   // 防衛側の手番（1回）。連撃持ちなら同様に2撃目
   const defTurn = () => {
-    let r = strike(defCard.name, defSt, defAb, attCard.name, attHp);
+    let r = strike(defCard.name, defSt, defAb, defMagic, attCard.name, attAb, attHp);
     attHp = r.remain;
+    defHp = applyBounce(r.bounced, defCard.name, defHp); // 侵略側の物理反射
     defHp = reflectBack(attReflect, r.dmg, defCard.name, attCard.name, defHp); // 侵略側が反射
     if (attHp > 0 && defHp > 0 && defAb.has("double")) {
       log.push(`🐲 ${defCard.name}の連撃！`);
-      r = strike(defCard.name, defSt, defAb, attCard.name, attHp);
+      r = strike(defCard.name, defSt, defAb, defMagic, attCard.name, attAb, attHp);
       attHp = r.remain;
+      defHp = applyBounce(r.bounced, defCard.name, defHp);
       defHp = reflectBack(attReflect, r.dmg, defCard.name, attCard.name, defHp);
     }
   };
+  // 相手の手番中に反射ダメージで自分が倒れることがある（物理反射/ミラーシールド）ため、
+  // 反撃側は「自分も相手も生存」のときだけ手番を得る
   if (defFirst) {
     log.push(`🛡 ${defCard.name}の先制攻撃！`);
     defTurn();
-    if (attHp > 0) attTurn();
+    if (attHp > 0 && defHp > 0) attTurn();
   } else {
     attTurn();
-    if (defHp > 0) defTurn();
+    if (defHp > 0 && attHp > 0) defTurn();
   }
 
   const attackerWins = defHp <= 0;

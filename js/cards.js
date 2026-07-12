@@ -27,6 +27,8 @@ function hasElemAdvantage(attElem, defElem) { return ELEM_ADVANTAGE[attElem] ===
 // 能力: first=先制 / pierce=貫通 / assault=強襲(侵略時ST+20)
 //       guard=守護(防衛時HP+20) / lucky=豪運(会心率10%→25%)
 //       capture=捕縛(防衛で撃退した侵略者を1ターン拘束) / immobile=不動(侵略・侵攻に出せない防御専用)
+//       physnull=物理無効(物理攻撃が効かない) / physreflect=物理反射(物理攻撃を攻撃側へ跳ね返す)
+//       magicatk=魔法攻撃(攻撃が魔法＝物理無効・反射を貫く。magicatk:true のアイテムでも付与できる)
 const ABILITY_INFO = {
   first:    { name: "先制", desc: "防衛時でも先に攻撃する" },
   pierce:   { name: "貫通", desc: "土地のHPボーナスを無視する" },
@@ -37,6 +39,10 @@ const ABILITY_INFO = {
   immobile: { name: "不動", desc: "侵略・侵攻には出せない防御専用（そのぶんHPが高い）" },
   spellproof: { name: "護法", desc: "敵の対象指定スペル（メテオ・バニッシュ・ガスト）の対象にならない" },
   double:   { name: "連撃", desc: "バトルで続けて2回攻撃する（1撃目で相手が倒れなければもう1撃）" },
+  // v15: 物理/魔法の攻撃タイプを導入。「物理攻撃」＝魔法攻撃でない通常の攻撃すべて。
+  physnull:    { name: "物理無効", desc: "物理攻撃（魔法攻撃以外）を無効化する＝ダメージ0。魔法攻撃は通る" },
+  physreflect: { name: "物理反射", desc: "物理攻撃を無効化し、そのダメージをそっくり攻撃側へ跳ね返す。魔法攻撃は通る" },
+  magicatk:    { name: "魔法攻撃", desc: "攻撃が魔法になる。物理無効・物理反射に妨げられず、通常どおりダメージを与える" },
 };
 
 // レア度: カードの希少度。card.rarity で個別指定、無ければコストとタイプから推定。
@@ -143,12 +149,23 @@ const CARD_DB = [
   { id: "elderent",    name: "エンシェントエント", type: "creature", element: "wood", cost: 135, st: 60, hp: 75, ab: ["capture"] },
   // --- v13追加クリーチャー ---
   { id: "alraune",     name: "アルラウネ",       type: "creature", element: "wood",  cost: 85,  st: 40, hp: 50, ab: ["capture"] },
+  // --- v15追加: 各属性に「元から魔法攻撃を備えた」術士を1種ずつ。
+  //     無属性の物理無効・物理反射（ファントム/ミラージュ）を素で掃討できる対抗札。そのぶんHPは低め ---
+  { id: "flamemage",   name: "フレイムメイジ",   type: "creature", element: "fire",  cost: 75,  st: 45, hp: 25, ab: ["magicatk"], rarity: "uncommon" },
+  { id: "druid",       name: "ドルイド",         type: "creature", element: "wood",  cost: 70,  st: 35, hp: 35, ab: ["magicatk"], rarity: "uncommon" },
+  { id: "runedwarf",   name: "ルーンドワーフ",   type: "creature", element: "earth", cost: 70,  st: 35, hp: 40, ab: ["magicatk"], rarity: "uncommon" },
+  { id: "frostwizard", name: "フロストウィザード", type: "creature", element: "water", cost: 75, st: 40, hp: 30, ab: ["magicatk"], rarity: "uncommon" },
   // --- 無属性（v13追加）: 土地の加護を一切受けず属性相性の輪の外＝どの土地でも同じ強さ。
   //     そのぶんコスト効率がやや高く、全員レア以上でユニークな能力（護法/連撃/二重能力）を持つ ---
   { id: "gargoyle",     name: "ガーゴイル",       type: "creature", element: "neutral", cost: 60,  st: 35, hp: 55, ab: ["guard", "spellproof"], rarity: "rare" },
   { id: "unicorn",      name: "ユニコーン",       type: "creature", element: "neutral", cost: 75,  st: 45, hp: 45, ab: ["first", "lucky"],      rarity: "rare" },
   { id: "mithrilgolem", name: "ミスリルゴーレム", type: "creature", element: "neutral", cost: 95,  st: 50, hp: 70, ab: ["spellproof"],           rarity: "rare" },
   { id: "chimera",      name: "キメラ",           type: "creature", element: "neutral", cost: 115, st: 45, hp: 60, ab: ["double"],               rarity: "legendary" },
+  // --- 無属性（v15追加）: 物理/魔法の攻撃タイプを軸にしたトリックスター。
+  //     物理攻撃しか持たない相手には鉄壁だが、魔法攻撃（✨アイテム/クリーチャー）や除去スペルにはあっさり沈む
+  //     ＝「対策を積んでいるか」で強さが激変するメタカード。HPは意図的に低い（物理無効=低め／物理反射=極小）---
+  { id: "phantom",      name: "ファントム",       type: "creature", element: "neutral", cost: 75,  st: 30, hp: 35, ab: ["physnull"],    rarity: "rare" },
+  { id: "mirage",       name: "ミラージュ",       type: "creature", element: "neutral", cost: 55,  st: 10, hp: 15, ab: ["physreflect"], rarity: "rare" },
   // --- アイテム（バトル時に装備、使い切り） ---
   { id: "longsword",     name: "ロングソード",     type: "item", cost: 40,  st: 20, hp: 0,  desc: "バトル時 ST+20" },
   { id: "battleaxe",     name: "バトルアックス",   type: "item", cost: 70,  st: 40, hp: 0,  desc: "バトル時 ST+40" },
@@ -167,6 +184,10 @@ const CARD_DB = [
   { id: "saintarmor",    name: "セイントアーマー", type: "item", cost: 110, st: 0,  hp: 45, grant: ["guard"], desc: "HP+45・守護を得る" },
   // --- v13追加アイテム ---
   { id: "warbanner",     name: "ウォーバナー",     type: "item", cost: 65,  st: 25, hp: 10, desc: "バトル時 ST+25 / HP+10" },
+  // --- v15追加: 魔法攻撃アイテム。同コスト帯の武器よりST補正は低いが、装備者の攻撃が魔法になる
+  //     ＝物理無効・物理反射（ファントム/ミラージュ）を貫いて掃討できる（防衛時の反撃にも有効） ---
+  { id: "magicwand",     name: "マジックワンド",   type: "item", cost: 50,  st: 15, hp: 0,  magicatk: true, rarity: "uncommon", desc: "バトル時 ST+15・攻撃が魔法になる（物理無効・物理反射を貫く）" },
+  { id: "arcanarod",     name: "アルカナロッド",   type: "item", cost: 90,  st: 35, hp: 0,  magicatk: true, rarity: "rare",     desc: "バトル時 ST+35・攻撃が魔法になる（物理無効・物理反射を貫く）" },
   // --- スペル ---
   { id: "manadrain", name: "マナドレイン",   type: "spell", cost: 50,  spell: "drain",    desc: "相手から200Gを奪う（低コスト高効率）" },
   { id: "holyword",  name: "ホーリーワード", type: "spell", cost: 60,  spell: "holyword", desc: "次のダイスの目を自由に選ぶ" },
