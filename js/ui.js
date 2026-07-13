@@ -248,6 +248,36 @@ function renderHand(g) {
   }
   document.getElementById("hand-count").textContent =
     (g.hotseat ? `${p.name}の` : "") + `手札 ${p.hand.length}/${HAND_LIMIT}`;
+  updateHandArrows();
+}
+
+// ---------- 手札の矢印送り ----------
+// スマホでは手札の横スワイプがAndroidの「戻る」ジェスチャーと衝突してゲームが終了してしまうため、
+// はみ出した手札は ◀▶ ボタンで1枚ずつ送れるようにする（オーバーフロー時のみ表示）。
+function updateHandArrows() {
+  const hand = document.getElementById("hand");
+  const prev = document.getElementById("hand-prev");
+  const next = document.getElementById("hand-next");
+  if (!hand || !prev || !next) return;
+  const overflow = hand.scrollWidth > hand.clientWidth + 4;
+  prev.classList.toggle("hidden", !overflow);
+  next.classList.toggle("hidden", !overflow);
+  if (!overflow) return;
+  prev.disabled = hand.scrollLeft <= 2;
+  next.disabled = hand.scrollLeft >= hand.scrollWidth - hand.clientWidth - 2;
+}
+function initHandArrows() {
+  const hand = document.getElementById("hand");
+  const step = () => {
+    const card = hand.querySelector(".card, .flip3d");
+    return card ? card.getBoundingClientRect().width + 8 : 110; // カード1枚ぶんずつ送る
+  };
+  // スクロール直後に矢印の有効/無効を更新する（scrollイベントが飛ばない環境があるためクリック側でも直接呼ぶ）
+  const go = dir => { hand.scrollBy({ left: dir * step() }); updateHandArrows(); };
+  document.getElementById("hand-prev").addEventListener("click", () => go(-1));
+  document.getElementById("hand-next").addEventListener("click", () => go(1));
+  hand.addEventListener("scroll", updateHandArrows, { passive: true });
+  window.addEventListener("resize", updateHandArrows);
 }
 
 // ---------- ゲーム開始の手札オープン演出 ----------
@@ -321,7 +351,8 @@ function showTitleScreen() {
 
 // ---------- 盤面ズーム（拡大縮小して読みやすく） ----------
 let BOARD_ZOOM = 1;
-const ZOOM_MIN = 0.6, ZOOM_MAX = 2.6, ZOOM_STEP = 0.2;
+// ZOOM_MIN は「⛶ 全体」フィットで大きな盤面を1画面に収められるよう低め（0.3）にしてある
+const ZOOM_MIN = 0.3, ZOOM_MAX = 2.6, ZOOM_STEP = 0.2;
 function applyZoom() {
   const svg = document.getElementById("board");
   if (svg) svg.style.setProperty("--zoom", BOARD_ZOOM.toFixed(2));
@@ -333,6 +364,21 @@ function zoomBoard(delta) {
   applyZoom();
 }
 function resetZoom() { BOARD_ZOOM = 1; applyZoom(); }
+// 「⛶ 全体」: 盤面全体が #board-wrap に収まる倍率へ調整する（見えないマスを無くす）。
+// opts.max を指定すると倍率の上限（対戦開始時は 1＝拡大はしない）
+function fitBoard(opts = {}) {
+  const wrap = document.getElementById("board-wrap");
+  const svg = document.getElementById("board");
+  if (!wrap || !svg) return;
+  const rect = svg.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const baseW = rect.width / BOARD_ZOOM, baseH = rect.height / BOARD_ZOOM; // 等倍時のサイズを逆算
+  let z = Math.min((wrap.clientWidth - 10) / baseW, (wrap.clientHeight - 10) / baseH);
+  if (opts.max !== undefined) z = Math.min(z, opts.max);
+  BOARD_ZOOM = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, +z.toFixed(2)));
+  applyZoom();
+  wrap.scrollTo({ left: 0, top: 0 });
+}
 
 // ---------- 固定フローティングウィンドウ（ステータス／ログ／手札） ----------
 // 盤面をスクロールしても常に見える固定ウィンドウ。各ウィンドウは「✕」で一時的に隠せ、
@@ -362,6 +408,7 @@ function initHudWindows() {
     if (closeBtn) closeBtn.addEventListener("click", () => { win.classList.add("hidden"); renderHudTabs(); });
   });
   renderHudTabs();
+  initHandArrows();
 }
 
 // ---------- ログ ----------

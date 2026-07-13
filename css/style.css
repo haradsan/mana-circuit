@@ -261,6 +261,7 @@ body.in-game #hud-tabs { display: flex; }
 
 /* ---------- 手札（固定ウィンドウ） ---------- */
 #hand-count { font-size: 12px; color: var(--dim); }
+#hand-row { display: flex; align-items: stretch; gap: 4px; }
 #hand {
   display: flex;
   gap: 10px;
@@ -269,8 +270,27 @@ body.in-game #hud-tabs { display: flex; }
   overflow-y: hidden;
   max-width: min(94vw, 916px);
   padding-bottom: 4px;
+  /* スマホ: 手札スクロールが端に達してもブラウザの「戻る/進む」ナビゲーションへ連鎖させない */
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  /* scroll-behavior: smooth は環境によってプログラムスクロール（矢印送り）を殺すため使わない */
 }
 #hand .card, #hand .flip3d { flex: 0 0 auto; }
+/* 手札送りの矢印（オーバーフロー時のみ表示）。スワイプ不要でカードを見られる */
+.hand-arrow {
+  flex: none;
+  width: 30px;
+  align-self: stretch;
+  background: var(--panel);
+  color: var(--gold);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+}
+.hand-arrow:hover { border-color: var(--gold); }
+.hand-arrow:disabled { opacity: 0.25; cursor: default; }
 
 /* カード = 額縁＋アート窓＋コスト宝珠＋魔力の光沢。属性色の縁取りとレア度の輝きで差をつける */
 .card {
@@ -1121,6 +1141,19 @@ body.in-game #hud-tabs { display: flex; }
   #win-log { top: 258px; }
   /* Androidのジェスチャーバー（ホームバー）と重ならないように */
   #win-hand { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); max-width: 96vw; }
+  /* 手札カードを縮小してスクロール量を減らす（戻るジェスチャーとの衝突を減らし、矢印送りの回数も少なく） */
+  #hand { gap: 7px; }
+  #hand .card { width: 98px; font-size: 10.5px; padding: 4px 5px 5px; }
+  #hand .c-art { height: 48px; }
+  #hand .c-elem { top: 36px; font-size: 11px; }
+  #hand .c-cost { width: 21px; height: 21px; font-size: 10px; }
+  #hand .c-name { font-size: 10.5px; }
+  #hand .c-desc { font-size: 9.5px; min-height: 36px; }
+  #hand .c-stats { font-size: 11px; }
+  #hand .ab { font-size: 9.5px; padding: 0 4px; }
+  #hand .card.facedown { width: 98px; height: 137px; }
+  /* フリップ演出（手札オープン）の固定サイズカードもTCG比率を保ったまま縮小 */
+  #hand .card.fixed { height: 137px; }
   #hud-tabs { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
   #peek-restore { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
   /* ステージ選択の世界観ヘッダーは狭い画面ではコンパクトに */

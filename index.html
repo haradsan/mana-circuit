@@ -15,6 +15,7 @@
       <button id="zoom-out" class="btn small" title="盤面を縮小">－</button>
       <button id="zoom-label" class="btn small" title="等倍に戻す">100%</button>
       <button id="zoom-in" class="btn small" title="盤面を拡大">＋</button>
+      <button id="zoom-fit" class="btn small" title="盤面全体が画面に収まる倍率に調整する">⛶ 全体</button>
     </div>
     <button id="discard-btn" class="btn small in-game-only" title="両者の捨てカードを確認する">🗑 捨札</button>
     <button id="surrender-btn" class="btn small danger hidden" title="自分の番でダイスを振る前にゲームを投了できます">🏳 投了</button>
@@ -43,7 +44,12 @@
 <div id="win-log" class="hud-win"><div id="log"></div><button class="win-close" title="一時的に隠す">✕</button></div>
 <div id="win-hand" class="hud-win framed">
   <div class="win-head"><span id="hand-count"></span></div>
-  <div id="hand"></div>
+  <!-- 手札は矢印ボタンで1枚ずつ送れる（スマホでスワイプすると戻るジェスチャーと衝突するため） -->
+  <div id="hand-row">
+    <button id="hand-prev" class="hand-arrow hidden" title="手札を左へ送る">◀</button>
+    <div id="hand"></div>
+    <button id="hand-next" class="hand-arrow hidden" title="手札を右へ送る">▶</button>
+  </div>
   <button class="win-close" title="一時的に隠す">✕</button>
 </div>
 

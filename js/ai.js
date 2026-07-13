@@ -71,6 +71,9 @@ function aiChooseSpell(g, p) {
     if (c.spell === "dicedouble" && aiWantDiceDouble(g, p)) return id;
     if (c.spell === "vanish" && aiPickVanishTarget(g, p)) return id;
     if (c.spell === "gust" && aiPickGustTarget(g, p)) return id;
+    if (c.spell === "teleport" && aiPickTeleportTarget(g, p)) return id;
+    if (c.spell === "transport" && aiPickTransportTarget(g, p)) return id;
+    if (c.spell === "leap" && aiPickLeapTarget(g, p)) return id;
     if (c.spell === "quake" && ownedLands(g, opp.id).some(t => t.level >= 3)) return id;
     if (c.spell === "growth" && aiPickGrowthTarget(g, p)) return id;
     if (c.spell === "eleshift" && aiPickShiftTarget(g, p)) return id;
@@ -313,6 +316,65 @@ function aiPickGustTarget(g, p) {
     const chain = chainCount(g, opp.id, src.element);
     const score = landValue(src) * 0.4 + (chain >= 2 ? chain * 120 : 0) - landValue(dst) * 0.3;
     if (score > bestScore) { bestScore = score; best = { src, dst }; }
+  }
+  return best;
+}
+
+// テレポート（v17）: 進路上（1〜6マス先）に高額な敵地が待ち構えているとき、
+// 実りの多い位置（着地評価の平均が高く・未通過の関門に近い）へ跳んで危険を回避する
+function aiPickTeleportTarget(g, p) {
+  let danger = 0;
+  for (let n = 1; n <= 6; n++) {
+    const t = walkAhead(g, p.pos, n);
+    if (t.type === "LAND" && t.owner !== null && t.owner !== p.id) danger = Math.max(danger, tollOf(g, t));
+  }
+  if (danger < 250) return null; // 高額地が迫っていないなら温存
+  let best = null, bestScore = 60; // 逃げた先にうまみが無ければ使わない
+  for (const tile of g.tiles) {
+    if (tile.id === p.pos || tile.type === "CASTLE") continue;
+    let s = 0;
+    for (let n = 1; n <= 6; n++) {
+      const t = walkAhead(g, tile.id, n);
+      s += aiLandingScore(g, p, t) / 6;
+      if (t.type === "GATE" && !p.gates.has(t.id)) s += 25;
+    }
+    if (s > bestScore) { bestScore = s; best = tile; }
+  }
+  return best;
+}
+
+// トランスポート（v17）: 自分のクリーチャーを好きな空き地へ転送。
+// 元の土地は失うので「価値差＋連鎖の伸び＋属性一致」で移す価値を採点する（marchの採点と同型）
+// 返り値: { src, dst } または null
+function aiPickTransportTarget(g, p) {
+  let best = null, bestScore = 100; // スペル代80Gぶんのうまみが要る
+  for (const src of ownedLands(g, p.id)) {
+    if (!src.creature || CARD_BY_ID[src.creature.cardId].ab.includes("immobile")) continue;
+    const card = CARD_BY_ID[src.creature.cardId];
+    for (const dst of g.tiles) {
+      if (dst.type !== "LAND" || dst.owner !== null) continue;
+      let s = landValue(dst) - landValue(src)
+        + (chainCount(g, p.id, dst.element) - (chainCount(g, p.id, src.element) - 1)) * 40;
+      if (card.element === dst.element && card.element !== src.element) s += 30;
+      if (s > bestScore) { bestScore = s; best = { src, dst }; }
+    }
+  }
+  return best;
+}
+
+// リープ（v17）: 2マス先の空き地への跳躍。トランスポートと同じ採点を跳躍範囲に適用（安いぶん閾値は低め）
+// 返り値: { src, dst } または null
+function aiPickLeapTarget(g, p) {
+  let best = null, bestScore = 60;
+  for (const src of ownedLands(g, p.id)) {
+    if (!src.creature || CARD_BY_ID[src.creature.cardId].ab.includes("immobile")) continue;
+    const card = CARD_BY_ID[src.creature.cardId];
+    for (const dst of leapDests(g, src)) {
+      let s = landValue(dst) - landValue(src)
+        + (chainCount(g, p.id, dst.element) - (chainCount(g, p.id, src.element) - 1)) * 40;
+      if (card.element === dst.element && card.element !== src.element) s += 30;
+      if (s > bestScore) { bestScore = s; best = { src, dst }; }
+    }
   }
   return best;
 }

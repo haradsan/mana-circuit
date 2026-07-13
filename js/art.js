@@ -459,6 +459,8 @@ const CREATURE_ART = {
   chimera:      { arch: "chimera" },
   phantom:      { arch: "humanoid", o: { genie: 1 } },
   mirage:       { arch: "fairy" },
+  doppelganger: { arch: "humanoid", o: { genie: 1, small: 1 } }, // v17: 影のような写し身
+  sphinx:       { arch: "beast",    o: { cat: 1, big: 1 } },     // v17: 獅子身の番人
   // v15: 各属性の術士（魔法攻撃持ち）
   flamemage:    { arch: "humanoid", o: { hat: 1, staff: 1 } },
   druid:        { arch: "humanoid", o: { leafhair: 1, staff: 1 } },
@@ -571,6 +573,7 @@ const ITEM_ART = {
   elementalorb: { arch: "orb" }, luckycharm: { arch: "charm" }, vampirelance: { arch: "lance" },
   warbanner: { arch: "banner" }, dispelward: { arch: "scroll" }, mirrorshield: { arch: "mirror" },
   magicwand: { arch: "wand" }, arcanarod: { arch: "wand", o: { big: 1 } },
+  greedfang: { arch: "dagger", o: { dual: 1 } }, // v17: 吸奪の双牙
 };
 
 // ---------- 背景シーン（属性の魔力が満ちる空間＋魔法陣＋地面の影） ----------

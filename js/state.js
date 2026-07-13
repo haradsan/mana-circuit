@@ -99,6 +99,19 @@ function gustDests(g, srcTile) {
   return neighborsOf(g, srcTile).filter(t => t.type === "LAND" && t.owner === null);
 }
 
+// リープ（跳躍スペル・v17）で自分のクリーチャーを移動できる先＝ちょうど2マス先（グラフ前後両方向）の空き地。
+// 隣接マス（1マス先）と自分自身は含めない＝「2つ先のマスに移動させる」
+function leapDests(g, srcTile) {
+  const d1 = neighborsOf(g, srcTile);
+  const d1Ids = new Set(d1.map(t => t.id));
+  const out = new Map();
+  d1.forEach(n => neighborsOf(g, n).forEach(t => {
+    if (t.id === srcTile.id || d1Ids.has(t.id)) return;
+    if (t.type === "LAND" && t.owner === null) out.set(t.id, t);
+  }));
+  return [...out.values()];
+}
+
 // ②通過アクションの対象になる自領のtile id列。
 // 「このターン通過した自領」（lastPath の末尾＝停止マスは除く）のみが対象。
 // 出発マス（ターン開始時にいたマス）は含めない——前のターンに①（到達アクション）で命令できたマスなので、

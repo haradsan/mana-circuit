@@ -36,6 +36,7 @@ async function startGame(stageIdx, opts = {}) {
   hud.style.width = hudPos.width;
   document.getElementById("log").innerHTML = "";
   renderAll(G);
+  fitBoard({ max: 1 }); // 開始時は盤面全体が見える倍率に（見えないマスを無くす。拡大はしない）
   log(`=== ${G.stage.icon} STAGE ${stageIdx + 1}「${G.stage.name}」 ===`, "sys");
   log(G.hotseat ? `🎮 2人対戦: 🔵${G.players[0].name} vs 🔴${G.players[1].name}` : `VS ${G.players[1].name}`, "sys");
   log(G.stage.desc, "sys");
@@ -568,6 +569,90 @@ async function castSpell(p, cardId) {
     src.owner = null;
     src.creature = null;
     log(`🌬️ ${p.name}のガスト！ ${moved.name}は${tileName(src)}から${tileName(dst)}へ吹き飛ばされた`, "warn");
+
+  } else if (c.spell === "teleport") {
+    // 自分のコマを盤面の好きなマス（城以外）へ飛ばす。移動はその後のダイスで通常どおり行う。
+    // 飛んだだけではマスの効果・関門通過は発生しない（城はリコールの役割なので対象外）
+    let target;
+    if (p.isCPU) {
+      target = aiPickTeleportTarget(G, p);
+      if (!target) return false;
+    } else {
+      const candidates = G.tiles.filter(t => t.id !== p.pos && t.type !== "CASTLE");
+      target = await humanPickTileOnMap(candidates, {
+        title: "💫 テレポート — 飛び先を選択",
+        body: "自分のコマを盤面の好きなマス（<b>城以外</b>）へ飛ばします。<br>飛んだだけではマスの効果・関門通過は発生しません。そのあと通常どおりダイスを振って移動します。",
+        cancelable: true,
+        labelFn: t => t.type === "LAND"
+          ? `${ELEMENTS[t.element].icon} ${tileName(t)}${t.owner !== null ? `（${t.owner === p.id ? "自領" : "敵領"} Lv${t.level}）` : "（空き地）"}`
+          : `#${t.id} ${tileName(t)}`,
+      });
+      if (!target) return false;
+    }
+    pay();
+    p.pos = target.id;
+    log(`💫 ${p.name}のテレポート！ ${tileName(target)}へ飛んだ`);
+    renderBoard(G);
+
+  } else if (c.spell === "transport") {
+    // 自分のクリーチャー1体を盤面の好きな空き地へ転送（現在HPごと・元の土地は空き地に戻る）。不動は対象外
+    const movable = ownedLands(G, p.id).filter(t =>
+      t.creature && !CARD_BY_ID[t.creature.cardId].ab.includes("immobile"));
+    const empties = G.tiles.filter(t => t.type === "LAND" && t.owner === null);
+    let src, dst;
+    if (p.isCPU) {
+      const pick = aiPickTransportTarget(G, p);
+      if (!pick) return false;
+      src = pick.src; dst = pick.dst;
+    } else {
+      if (empties.length === 0) { log("転送先の空き地がありません", "warn"); return false; }
+      src = await humanPickLand(movable,
+        "🚪 トランスポート — 転送するクリーチャーを選択",
+        "盤面の<b>好きな空き地</b>へ転送する自分のクリーチャーを選んでください（<b>不動は対象外</b>）<br>元の土地は空き地に戻ります（レベルは残る）",
+        "転送できるクリーチャーがいません（不動は対象外）");
+      if (!src) return false;
+      dst = await humanPickLand(empties,
+        `🚪 ${CARD_BY_ID[src.creature.cardId].name} をどこへ転送する？`,
+        "転送先の空き地を選んでください（クリーチャーが現在HPのまま移り、その土地を入手します）",
+        "転送先の空き地がありません");
+      if (!dst) return false;
+    }
+    pay();
+    const moved = CARD_BY_ID[src.creature.cardId];
+    dst.owner = p.id;
+    dst.creature = src.creature; // 現在HPごと移動
+    src.owner = null;
+    src.creature = null;
+    log(`🚪 ${p.name}のトランスポート！ ${moved.name}が${tileName(dst)}へ転送された（元の土地は空き地に）`);
+
+  } else if (c.spell === "leap") {
+    // 自分のクリーチャー1体を「ちょうど2マス先」の空き地へ跳躍させる。不動は対象外
+    const movable = ownedLands(G, p.id).filter(t =>
+      t.creature && !CARD_BY_ID[t.creature.cardId].ab.includes("immobile") && leapDests(G, t).length > 0);
+    let src, dst;
+    if (p.isCPU) {
+      const pick = aiPickLeapTarget(G, p);
+      if (!pick) return false;
+      src = pick.src; dst = pick.dst;
+    } else {
+      src = await humanPickLand(movable,
+        "🐇 リープ — 跳躍するクリーチャーを選択",
+        "<b>2マス先の空き地</b>へ跳躍させる自分のクリーチャーを選んでください（<b>不動は対象外</b>）<br>元の土地は空き地に戻ります（レベルは残る）",
+        "跳躍できるクリーチャーがいません（2マス先に空き地が必要・不動は対象外）");
+      if (!src) return false;
+      dst = await humanPickLand(leapDests(G, src),
+        `🐇 ${CARD_BY_ID[src.creature.cardId].name} の跳躍先を選択`,
+        "2マス先の空き地から跳躍先を選んでください（クリーチャーが現在HPのまま移り、その土地を入手します）",
+        "跳躍先の空き地がありません");
+      if (!dst) return false;
+    }
+    pay();
+    const moved = CARD_BY_ID[src.creature.cardId];
+    dst.owner = p.id;
+    dst.creature = src.creature; // 現在HPごと移動
+    src.owner = null;
+    src.creature = null;
+    log(`🐇 ${p.name}のリープ！ ${moved.name}が${tileName(dst)}へ跳躍した（元の土地は空き地に）`);
 
   } else if (c.spell === "regen") {
     const target = p.isCPU ? aiPickRegenTarget(G, p)
@@ -1161,6 +1246,7 @@ async function enemyLandFlow(p, tile) {
         (defCard.ab.includes("capture") ? `<br><b>⚠ 捕縛持ち</b>：侵略に失敗すると次のターン拘束されます` : "") +
         (defCard.ab.includes("physnull") ? `<br><b>⚠ 物理無効持ち</b>：<b>✨魔法攻撃</b>（魔法攻撃持ちクリーチャー／マジックワンド等の装備）以外ではダメージを与えられません` : "") +
         (defCard.ab.includes("physreflect") ? `<br><b>⚠ 物理反射持ち</b>：物理攻撃は<b>そっくり跳ね返されます</b>（✨魔法攻撃なら通る）` : "") +
+        (defCard.ab.includes("mimic") ? `<br><b>⚠ 模倣持ち</b>：バトルであなたのクリーチャーの<b>基本ST・HP・能力を写し取って</b>戦います（送り込んだ強さがそのまま返ってくる）` : "") +
         `<br>侵略はコストのみ（勝てば通行料は不要）。ただし<b>敗れると通行料${toll}Gも徴収</b>され、カードも失います`,
       cards: creatures.map(id => ({ card: CARD_BY_ID[id], disabled: CARD_BY_ID[id].cost > p.magic })),
       peek: true,
@@ -1230,6 +1316,22 @@ async function fightFor(p, tile, attCard, attItem) {
   openBattleView(G, p.name, attCard, attItem, tile, defItem);
   await sleep(600);
   await playBattleLines(result.log);
+  // 吸奪武器（グリードファング＝drainMagic）: バトルで奪った魔力をここで実際に移動する
+  // （resolveBattle は状態非破壊のため。相手の所持魔力が上限）
+  if (result.attDrain) {
+    const amt = Math.min(result.attDrain, defender.magic);
+    defender.magic -= amt;
+    p.magic += amt;
+    if (amt < result.attDrain) log(`（${defender.name}の魔力が足りず、強奪は${amt}Gにとどまった）`, "warn");
+    renderPanels(G);
+  }
+  if (result.defDrain) {
+    const amt = Math.min(result.defDrain, p.magic);
+    p.magic -= amt;
+    defender.magic += amt;
+    if (amt < result.defDrain) log(`（${p.name}の魔力が足りず、強奪は${amt}Gにとどまった）`, "warn");
+    renderPanels(G);
+  }
   await sleep(UI.battleSkip ? 250 : 900);
   closeBattleView();
   return result;
@@ -1546,18 +1648,23 @@ function showHelp() {
       <span class="ab">連撃</span>バトルで続けて2回攻撃する ／
       <span class="ab">物理無効</span>物理攻撃（魔法以外）が効かない ／
       <span class="ab">物理反射</span>物理攻撃をそっくり攻撃側へ跳ね返す ／
-      <span class="ab">魔法攻撃</span>攻撃が魔法＝物理無効・物理反射を貫く<br>
+      <span class="ab">魔法攻撃</span>攻撃が魔法＝物理無効・物理反射を貫く ／
+      <span class="ab">模倣</span>バトル時、相手の基本ST・HP・能力をそっくり写し取って戦う（ドッペルゲンガー）<br>
       ※無属性の<b>ファントム（物理無効）・ミラージュ（物理反射）</b>には通常の攻撃が通らない。対策は
       <b>✨魔法攻撃</b>（魔法攻撃持ちクリーチャー or マジックワンド等の装備）か、除去スペル（☄️メテオ等）。そのぶん両者ともHPは低い。<br><br>
       <b>アイテム</b>: バトル時に⚔️武器（ST+）や🛡️防具（HP+）を装備できる（使い切り）。防衛側も応戦可能。<br>
       ・🚫 <b>ディスペルワード</b> … 相手のアイテム効果を打ち消す ／ 🪞 <b>ミラーシールド</b> … 受けた攻撃の一部を反射<br>
       ・✨ <b>マジックワンド／アルカナロッド</b> … 武器よりST補正は控えめだが<b>攻撃が魔法になる</b>＝物理無効・物理反射を貫く（防衛時の反撃にも有効）<br>
+      ・💰 <b>グリードファング</b> … ST+25の吸奪武器。<b>与えたダメージ×2倍の魔力を相手から強奪</b>する（攻撃が通らなければ強奪もなし）<br>
       <b>逆転のスペル</b>: リベンジ（劣勢時に資産を奪う）、リコール（城へ帰還。達成で勝利、領地コントロール発動、関門が揃えば周回ボーナスも）、
       💰 <b>プランダー</b>（相手の所持金の半分を奪う）、🎲 <b>ダイスブースト</b>（次の出目を2倍）など<br>
       <b>除去・妨害スペル</b>: ☄️ <b>メテオ</b>（安価・敵1体に40ダメージ＝削り／削り切れば破壊）、
       ✨ <b>バニッシュ</b>（高価・レジェンド／敵1体を<b>HP不問で確実に消滅</b>）、
       🌬️ <b>ガスト</b>（敵クリーチャーを隣の空き地へ<b>強制移動</b>＝連鎖崩し・防衛どかし）<br>
       <b>資金スペル</b>: ⚗️ <b>アルケミー</b>（手札1枚を捨てて120Gに変える＝使わないカードを資金化）<br>
+      <b>移動スペル</b>: 💫 <b>テレポート</b>（自分のコマを好きなマスへ飛ばす。城以外・マスの効果や関門通過は発生せず、その後ダイスで移動）、
+      🚪 <b>トランスポート</b>（自分のクリーチャーを好きな<b>空き地</b>へ転送＝連鎖の組み替え・遠征）、
+      🐇 <b>リープ</b>（自分のクリーチャーを<b>2マス先</b>の空き地へ跳躍）。どちらも元の土地は空き地に戻る（レベルは残る・不動は対象外）<br>
       <b>🗑 捨札の確認</b>: ヘッダーの<b>🗑 捨札</b>で両者の捨てカードを確認できる。<b>山札が尽きると捨札を切り直して山札に戻り</b>、ログ（📜）で「🔀」と合図する。<br>
       <b>⚙ 難易度</b>: タイトル画面で<b>イージー／ノーマル／ハード</b>を選べる。相手ごとの強さの違いはそのままに、CPUの積極性・デッキ・資金力が変わる。<br>
       <b>👤 プレイヤー</b>: タイトル画面の「👤」で<b>5人まで</b>切り替えられる。プレイヤーごとに<b>コレクション・デッキ（5つまで保存）・ステージ進行度</b>が別々に記録される（名前は「✎」で変更）。<br>
@@ -1611,6 +1718,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("zoom-in").addEventListener("click", () => zoomBoard(ZOOM_STEP));
   document.getElementById("zoom-out").addEventListener("click", () => zoomBoard(-ZOOM_STEP));
   document.getElementById("zoom-label").addEventListener("click", resetZoom);
+  document.getElementById("zoom-fit").addEventListener("click", () => fitBoard());
   // Ctrl + マウスホイールで盤面を拡大縮小（ブラウザ拡大の代わりに盤面だけ拡大）
   const boardWrap = document.getElementById("board-wrap");
   boardWrap.addEventListener("wheel", e => {

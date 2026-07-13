@@ -43,6 +43,8 @@ const ABILITY_INFO = {
   physnull:    { name: "物理無効", desc: "物理攻撃（魔法攻撃以外）を無効化する＝ダメージ0。魔法攻撃は通る" },
   physreflect: { name: "物理反射", desc: "物理攻撃を無効化し、そのダメージをそっくり攻撃側へ跳ね返す。魔法攻撃は通る" },
   magicatk:    { name: "魔法攻撃", desc: "攻撃が魔法になる。物理無効・物理反射に妨げられず、通常どおりダメージを与える" },
+  // v17: 模倣＝バトル時に相手カードの基本値をそっくりコピーする（ドッペルゲンガー）
+  mimic:       { name: "模倣", desc: "バトル時、相手クリーチャーの基本ST・基本HP・能力をそっくり写し取って戦う（属性は無のまま・装備や土地の加護はコピーしない）" },
 };
 
 // レア度: カードの希少度。card.rarity で個別指定、無ければコストとタイプから推定。
@@ -166,6 +168,11 @@ const CARD_DB = [
   //     ＝「対策を積んでいるか」で強さが激変するメタカード。HPは意図的に低い（物理無効=低め／物理反射=極小）---
   { id: "phantom",      name: "ファントム",       type: "creature", element: "neutral", cost: 75,  st: 30, hp: 35, ab: ["physnull"],    rarity: "rare" },
   { id: "mirage",       name: "ミラージュ",       type: "creature", element: "neutral", cost: 55,  st: 10, hp: 15, ab: ["physreflect"], rarity: "rare" },
+  // --- 無属性（v17追加）: ドッペルゲンガー＝相手をそっくり真似るトリックスター（原さん要望）。
+  //     素のST/HPは最弱クラスだが、バトルでは常に「相手と同じ強さ」＝強敵ほど良い写し身になる。
+  //     スフィンクス＝無属性初の魔法攻撃持ち。守護も併せ持つ万能の番人（ファントム/ミラージュ対策にもなる）
+  { id: "doppelganger", name: "ドッペルゲンガー", type: "creature", element: "neutral", cost: 90,  st: 10, hp: 30, ab: ["mimic"],               rarity: "legendary" },
+  { id: "sphinx",       name: "スフィンクス",     type: "creature", element: "neutral", cost: 95,  st: 45, hp: 50, ab: ["magicatk", "guard"],   rarity: "rare" },
   // --- アイテム（バトル時に装備、使い切り） ---
   { id: "longsword",     name: "ロングソード",     type: "item", cost: 40,  st: 20, hp: 0,  desc: "バトル時 ST+20" },
   { id: "battleaxe",     name: "バトルアックス",   type: "item", cost: 70,  st: 40, hp: 0,  desc: "バトル時 ST+40" },
@@ -188,6 +195,9 @@ const CARD_DB = [
   //     ＝物理無効・物理反射（ファントム/ミラージュ）を貫いて掃討できる（防衛時の反撃にも有効） ---
   { id: "magicwand",     name: "マジックワンド",   type: "item", cost: 50,  st: 15, hp: 0,  magicatk: true, rarity: "uncommon", desc: "バトル時 ST+15・攻撃が魔法になる（物理無効・物理反射を貫く）" },
   { id: "arcanarod",     name: "アルカナロッド",   type: "item", cost: 90,  st: 35, hp: 0,  magicatk: true, rarity: "rare",     desc: "バトル時 ST+35・攻撃が魔法になる（物理無効・物理反射を貫く）" },
+  // --- v17追加: 吸奪武器（原さん要望「攻撃したポイント分×2倍の魔力を強奪する武器」）。
+  //     drainMagic=与えたダメージに掛ける倍率。実際の魔力移動は fightFor（main.js）が行う ---
+  { id: "greedfang",     name: "グリードファング", type: "item", cost: 85,  st: 25, hp: 0,  drainMagic: 2, rarity: "rare", desc: "バトル時 ST+25・与えたダメージ×2倍の魔力を相手から強奪する（攻撃が通らなければ強奪もなし）" },
   // --- スペル ---
   { id: "manadrain", name: "マナドレイン",   type: "spell", cost: 50,  spell: "drain",    desc: "相手から200Gを奪う（低コスト高効率）" },
   { id: "holyword",  name: "ホーリーワード", type: "spell", cost: 60,  spell: "holyword", desc: "次のダイスの目を自由に選ぶ" },
@@ -209,6 +219,10 @@ const CARD_DB = [
   { id: "salvage",   name: "サルベージ",     type: "spell", cost: 40,  spell: "salvage",  icon: "♻️", desc: "自分の捨て札からカード1枚を選んで手札に戻す" },
   // --- v13追加スペル ---
   { id: "alchemy",   name: "アルケミー",     type: "spell", cost: 40,  spell: "alchemy",  icon: "⚗️", desc: "手札から1枚を選んで捨て、120Gに変える（使わないカードを資金に）" },
+  // --- v17追加スペル: 移動3種（原さん要望）。自分を飛ばす／配下を好きな空き地へ／配下を2マス先へ ---
+  { id: "teleport",  name: "テレポート",     type: "spell", cost: 90,  spell: "teleport",  rarity: "rare",     icon: "💫", desc: "自分のコマを盤面の好きなマス（城以外）へ飛ばす。そのあと通常どおりダイスで移動する（飛んだだけではマスの効果・関門通過は発生しない）" },
+  { id: "transport", name: "トランスポート", type: "spell", cost: 80,  spell: "transport", rarity: "rare",     icon: "🚪", desc: "自分のクリーチャー1体を盤面の好きな空き地へ転送する（現在HPのまま移動・元の土地は空き地に戻りレベルは残る／不動は対象外）" },
+  { id: "leap",      name: "リープ",         type: "spell", cost: 45,  spell: "leap",      rarity: "uncommon", icon: "🐇", desc: "自分のクリーチャー1体を2マス先の空き地へ跳躍させる（元の土地は空き地に戻りレベルは残る／不動は対象外）" },
   // --- v5追加スペル/アイテム ---
   { id: "plunder",     name: "プランダー",       type: "spell", cost: 95, spell: "plunder",    rarity: "rare",     icon: "💰", desc: "相手の所持金の半分を奪う（相手が富むほど大きい）" },
   { id: "hyperdice",   name: "ダイスブースト",   type: "spell", cost: 50, spell: "dicedouble", rarity: "uncommon", icon: "🎲", desc: "次のダイスの出目を2倍にする（最大12マス進む）" },

@@ -14,9 +14,24 @@ const CRIT_RATE_LUCKY = 0.25; // 豪運持ちの会心確率
 // ※状態は変更しない（AIのシミュレーションにも使う）
 function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {}) {
   const rng = !!opts.rng;
-  const defCard = CARD_BY_ID[tile.creature.cardId];
-  const defBaseHp = tile.creature.hp ?? defCard.hp; // 戦闘後HP残量（前回の傷を引き継ぐ）
+  let defCard = CARD_BY_ID[tile.creature.cardId];
   const log = [];
+
+  // 模倣（mimic・v17）: 相手カードの「基本ST・基本HP・能力」をそっくり写し取って戦う。
+  // 名前と属性（無）はそのまま＝属性相性・土地の加護は発生しない。装備アイテムはコピーしない。
+  // 両者が模倣なら互いに写し合うだけなので発動しない。防衛側の傷は「受けたダメージ量」として写し身へ引き継ぐ。
+  const attMimicSwap = (attCard.ab || []).includes("mimic") && !(defCard.ab || []).includes("mimic");
+  const defMimicSwap = (defCard.ab || []).includes("mimic") && !(attCard.ab || []).includes("mimic");
+  const defWound = defCard.hp - (tile.creature.hp ?? defCard.hp); // これまでに受けているダメージ
+  if (attMimicSwap) {
+    log.push(`🎭 ${attCard.name}の模倣！ ${defCard.name}の力を写し取った（ST${defCard.st}/HP${defCard.hp}${defCard.ab.length ? "・" + defCard.ab.map(a => ABILITY_INFO[a].name).join("・") : ""}）`);
+    attCard = { ...attCard, st: defCard.st, hp: defCard.hp, ab: defCard.ab.slice() };
+  }
+  if (defMimicSwap) {
+    log.push(`🎭 ${defCard.name}の模倣！ ${attCard.name}の力を写し取った（ST${attCard.st}/HP${attCard.hp}${attCard.ab.length ? "・" + attCard.ab.map(a => ABILITY_INFO[a].name).join("・") : ""}）`);
+    defCard = { ...defCard, st: attCard.st, hp: attCard.hp, ab: attCard.ab.slice() };
+  }
+  const defBaseHp = Math.max(1, defCard.hp - defWound); // 戦闘後HP残量（前回の傷を引き継ぐ）
 
   // アイテム打消し（ディスペルワード）: 相手がnullifyアイテムを装備していたら、こちらのアイテム効果は無効化される
   const attNull = !!(attItem && attItem.nullify);
@@ -134,16 +149,20 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
     log.push(`${strikerName}は跳ね返った${bounced}ダメージを受けた！（残りHP ${Math.max(0, remain)}）`);
     return remain;
   };
+  // 与えたダメージの累計（吸奪武器 drainMagic の強奪額計算用。無効・反射で0なら加算されない）
+  let attDealt = 0, defDealt = 0;
   // 侵略側の手番（1回）。連撃持ちなら相手が生き残っている限りもう1撃（合計2撃）
   const attTurn = () => {
     let r = strike(attCard.name, attSt, attAb, attMagic, defCard.name, defAb, defHp);
     defHp = r.remain;
+    attDealt += r.dmg;
     attHp = applyBounce(r.bounced, attCard.name, attHp); // 防衛側の物理反射
     attHp = reflectBack(defReflect, r.dmg, attCard.name, defCard.name, attHp); // 防衛側が反射
     if (defHp > 0 && attHp > 0 && attAb.has("double")) {
       log.push(`🐲 ${attCard.name}の連撃！`);
       r = strike(attCard.name, attSt, attAb, attMagic, defCard.name, defAb, defHp);
       defHp = r.remain;
+      attDealt += r.dmg;
       attHp = applyBounce(r.bounced, attCard.name, attHp);
       attHp = reflectBack(defReflect, r.dmg, attCard.name, defCard.name, attHp);
     }
@@ -152,12 +171,14 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   const defTurn = () => {
     let r = strike(defCard.name, defSt, defAb, defMagic, attCard.name, attAb, attHp);
     attHp = r.remain;
+    defDealt += r.dmg;
     defHp = applyBounce(r.bounced, defCard.name, defHp); // 侵略側の物理反射
     defHp = reflectBack(attReflect, r.dmg, defCard.name, attCard.name, defHp); // 侵略側が反射
     if (attHp > 0 && defHp > 0 && defAb.has("double")) {
       log.push(`🐲 ${defCard.name}の連撃！`);
       r = strike(defCard.name, defSt, defAb, defMagic, attCard.name, attAb, attHp);
       attHp = r.remain;
+      defDealt += r.dmg;
       defHp = applyBounce(r.bounced, defCard.name, defHp);
       defHp = reflectBack(attReflect, r.dmg, defCard.name, attCard.name, defHp);
     }
@@ -181,7 +202,13 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   } else {
     log.push(`⚖ 両者生存。侵略失敗！ ${attCard.name}は撤退した`);
   }
-  return { attackerWins, log, attHp, defHp, attExtra, defExtra };
+  // 吸奪武器（drainMagic・v17）: 打消し後の有効アイテムなら、与えたダメージ×倍率の魔力を相手から強奪する。
+  // この関数は状態を変更しないため、実際の魔力の移動は呼び出し側（fightFor）が行う（相手の所持魔力が上限）
+  const attDrain = (attItemEff && attItemEff.drainMagic && attDealt > 0) ? attDealt * attItemEff.drainMagic : 0;
+  const defDrain = (defItemEff && defItemEff.drainMagic && defDealt > 0) ? defDealt * defItemEff.drainMagic : 0;
+  if (attDrain) log.push(`💰 ${attItemEff.name}の吸奪！ 与えたダメージ${attDealt}×${attItemEff.drainMagic}＝${attDrain}Gを強奪！`);
+  if (defDrain) log.push(`💰 ${defItemEff.name}の吸奪！ 与えたダメージ${defDealt}×${defItemEff.drainMagic}＝${defDrain}Gを強奪！`);
+  return { attackerWins, log, attHp, defHp, attExtra, defExtra, attDrain, defDrain };
 }
 
 // 戦闘後にクリーチャーへ持ち越す実HP（ベース最大値でキャップ、生存中は最低1）
