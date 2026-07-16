@@ -41,6 +41,8 @@
 <!-- 固定フローティングウィンドウ: 盤面をスクロールしても常に見える。各「✕」で一時的に隠せ、右下のチップで再表示 -->
 <div id="win-p0" class="hud-win"><div id="panel-0" class="panel"></div><button class="win-close" title="一時的に隠す">✕</button></div>
 <div id="win-p1" class="hud-win"><div id="panel-1" class="panel"></div><button class="win-close" title="一時的に隠す">✕</button></div>
+<!-- 3人目のパネル（⚔三つ巴のときだけ表示。それ以外は .unused で非表示） -->
+<div id="win-p2" class="hud-win unused"><div id="panel-2" class="panel"></div><button class="win-close" title="一時的に隠す">✕</button></div>
 <div id="win-log" class="hud-win"><div id="log"></div><button class="win-close" title="一時的に隠す">✕</button></div>
 <div id="win-hand" class="hud-win framed">
   <div class="win-head"><span id="hand-count"></span></div>
@@ -72,6 +74,7 @@
 <script src="js/cards.js"></script>
 <script src="js/art.js"></script>
 <script src="js/stages.js"></script>
+<script src="js/chars.js"></script>
 <script src="js/weekly.js"></script>
 <script src="js/state.js"></script>
 <script src="js/battle.js"></script>

@@ -9,7 +9,8 @@
 //                  start=[x,y] でループの開始マスを回転指定（八の字の共有マス用）
 //   board.chords : 近道。{from:[x,y], cells:[[x,y]...], to:[x,y]} — from/to はリング上のマス
 //   board.warpPairs : [["x,y","x,y"]] 対応マスへ飛ぶ（typesでWARP指定すること）
-//   types        : {"x,y": "GATE"|"CARD"|"MAGIC"|"MAGMA"|"BOOST"|"WARP"} 指定なしはLAND
+//   types        : {"x,y": "GATE"|"CARD"|"MAGIC"|"MAGMA"|"BOOST"|"WARP"|"FORTUNE"|"SPRING"} 指定なしはLAND
+//   theme        : ステージの雰囲気カラー {glow, bg, path, dot}（背景グラデーション・回路の道の色）
 //   elements     : 属性ブロックの並び（短いパレット）。同属性を RUN マス連続で置いて連鎖を出やすくする。
 //                  先頭に4属性を並べれば小さい盤面でも全属性が出る。bias属性を多く入れると偏る。
 //   elemRun      : 属性ブロックの長さ（省略時3）。大きいほど同属性が固まり連鎖が強くなる
@@ -101,8 +102,10 @@ const STAGES = [
       "0,2": "GATE", "3,0": "GATE", "5,3": "GATE",
       "0,5": "CARD", "5,0": "CARD",
       "1,0": "MAGIC", "4,5": "MAGIC",
+      "1,5": "FORTUNE",
     },
     elements: ["fire", "wood", "earth", "water"],
+    theme: { glow: "#24402a", bg: "#121c13", path: "#1d2b20", dot: "#6f9a6f" },
     rules: { target: 3000, maxRounds: 32 },
   },
   {
@@ -115,8 +118,10 @@ const STAGES = [
       "1,5": "CARD", "5,0": "CARD",
       "1,0": "MAGIC", "5,5": "MAGIC",
       "0,0": "MAGMA", "6,1": "MAGMA",
+      "6,5": "FORTUNE",
     },
     elements: ["fire", "water", "wood", "earth", "fire"],
+    theme: { glow: "#40231a", bg: "#1c1210", path: "#2e1c16", dot: "#a06a4a" },
     rules: { target: 3200, maxRounds: 34 },
   },
   {
@@ -131,9 +136,11 @@ const STAGES = [
       "0,4": "GATE", "3,0": "GATE", "6,4": "GATE",
       "1,6": "CARD", "5,6": "CARD",
       "6,0": "MAGIC", "3,3": "MAGIC",
+      "0,0": "FORTUNE", "6,6": "SPRING",
     },
     elementAt: { "1,3": "water", "2,3": "water", "4,3": "water", "5,3": "water" },
     elements: ["water", "fire", "wood", "earth", "water"],
+    theme: { glow: "#1c2c4a", bg: "#0f1624", path: "#1a2338", dot: "#4a6a9a" },
     hud: { left: "50%", top: "72%", width: "46%" },
     rules: { target: 3500, maxRounds: 38 },
   },
@@ -147,8 +154,10 @@ const STAGES = [
       "2,0": "CARD", "7,3": "CARD",
       "1,3": "MAGIC", "8,0": "MAGIC",
       "3,0": "BOOST", "6,3": "BOOST",
+      "9,0": "FORTUNE", "0,3": "SPRING",
     },
     elements: ["wood", "fire", "water", "earth", "wood"],
+    theme: { glow: "#263c1e", bg: "#131a10", path: "#1e2a18", dot: "#7a9a5a" },
     hud: { left: "50%", top: "50%", width: "62%" },
     rules: { target: 3200, maxRounds: 36 },
   },
@@ -164,9 +173,11 @@ const STAGES = [
       "0,2": "GATE", "3,0": "GATE", "5,2": "GATE",
       "1,7": "CARD", "4,0": "CARD",
       "0,0": "MAGIC", "2,4": "MAGIC",
+      "5,7": "FORTUNE", "5,0": "SPRING",
     },
     elementAt: { "1,4": "earth", "3,4": "earth", "4,4": "earth" },
     elements: ["earth", "fire", "wood", "water", "earth"],
+    theme: { glow: "#3a2e1e", bg: "#191410", path: "#291f15", dot: "#8a7a5a" },
     hud: { left: "50%", top: "29%", width: "50%" },
     rules: { target: 3400, maxRounds: 38, magicTileG: 300 },
   },
@@ -186,9 +197,11 @@ const STAGES = [
       "1,4": "CARD", "7,4": "CARD",
       "4,0": "MAGIC", "4,8": "MAGIC",
       "0,0": "WARP", "8,8": "WARP",
+      "0,4": "FORTUNE", "8,4": "SPRING",
     },
     gatesNeeded: 3,
     elements: ["fire", "wood", "earth", "water"],
+    theme: { glow: "#33204a", bg: "#140f20", path: "#251a38", dot: "#8a6ab8" },
     hud: { left: "24%", top: "76%", width: "42%" },
     rules: { target: 3000, maxRounds: 40 },
   },
@@ -201,8 +214,10 @@ const STAGES = [
       "0,3": "GATE", "4,0": "GATE", "7,4": "GATE",
       "1,0": "CARD", "6,7": "CARD",
       "0,0": "MAGIC", "7,0": "MAGIC",
+      "0,7": "FORTUNE", "7,7": "FORTUNE",
     },
     elements: ["water", "fire", "wood", "earth", "water"],
+    theme: { glow: "#403618", bg: "#19150c", path: "#2c2512", dot: "#b89a4a" },
     rules: { target: 4200, maxRounds: 40, tollRate: 0.85, magicTileG: 250, gateBonus: 150 },
   },
   {
@@ -217,6 +232,7 @@ const STAGES = [
     },
     gatesNeeded: 2,
     elements: ["earth", "fire", "water", "wood", "earth"],
+    theme: { glow: "#40202a", bg: "#180f12", path: "#2c181e", dot: "#a05a6a" },
     rules: { target: 4000, maxRounds: 40, invaderSt: 10, landHpMult: 2 },
   },
   {
@@ -236,8 +252,10 @@ const STAGES = [
       "0,0": "MAGIC", "6,2": "MAGIC",
       "1,3": "BOOST", "3,4": "BOOST",
       "4,3": "MAGMA", "3,2": "MAGMA",
+      "0,6": "FORTUNE", "6,6": "SPRING",
     },
     elements: ["water", "fire", "earth", "wood", "water"],
+    theme: { glow: "#2c3140", bg: "#0f131c", path: "#1e2330", dot: "#7a86b0" },
     hud: { left: "27%", top: "30%", width: "38%" },
     rules: { target: 3200, maxRounds: 42 },
   },
@@ -254,9 +272,11 @@ const STAGES = [
       "1,6": "CARD", "7,0": "CARD",
       "0,0": "MAGIC", "8,0": "MAGIC",
       "3,6": "MAGMA", "5,6": "MAGMA", "4,2": "MAGMA", "4,4": "MAGMA",
+      "0,6": "FORTUNE", "8,6": "SPRING",
     },
     elementAt: { "4,1": "fire", "4,3": "fire", "4,5": "fire" },
     elements: ["fire", "water", "wood", "earth", "fire"],
+    theme: { glow: "#401820", bg: "#140c10", path: "#2a141c", dot: "#904a5a" },
     hud: { left: "26%", top: "50%", width: "40%" },
     rules: { target: 4500, maxRounds: 45, cpuMagicBonus: 200 },
   },
@@ -284,11 +304,39 @@ const STAGES = [
       "3,3": "MAGIC",
       "1,0": "CARD", "5,6": "CARD",
       "5,2": "MAGIC", "1,4": "MAGIC",
+      "0,5": "FORTUNE", "6,5": "SPRING",
     },
     gatesNeeded: "all",
     elements: ["fire", "wood", "earth", "water"],
+    theme: { glow: "#1e2440", bg: "#0d1120", path: "#181e33", dot: "#5a6ab0" },
     hud: { left: "50%", top: "43%", width: "32%" },
     rules: { target: 3200, maxRounds: 44 },
+  },
+  {
+    // ★ v18追加: 三つ巴のために設計した大型盤面。外周の大環に「三本の腕」が刺さり、
+    //   どの腕も中央のハブ(3,3)を経て城へ流れ込む＝終盤の凱旋レースが熱い。
+    id: "s12", name: "円卓の三叉界", icon: "🎭",
+    cpuName: "円卓の盟主アルヴィス", ai: "hard",
+    desc: "外周28マスの大環に、三方から城へ流れ込む「円卓の腕」が交わる40マスの決戦場。⚔三つ巴で真価を発揮する広さ——🎰運命と⛲泉が波乱を呼ぶ。",
+    board: {
+      rings: [{ w: 8, h: 8 }],
+      chords: [
+        { from: [3, 0], cells: [[3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6]], to: [3, 7] }, // 北の腕（城まで一直線）
+        { from: [0, 3], cells: [[1, 3], [2, 3]], to: [3, 3] },                                 // 西の腕（ハブへ）
+        { from: [7, 3], cells: [[6, 3], [5, 3], [4, 3]], to: [3, 3] },                         // 東の腕（ハブへ）
+      ],
+    },
+    types: {
+      "0,4": "GATE", "7,4": "GATE", "3,0": "GATE",
+      "3,3": "MAGIC", "0,0": "MAGIC", "7,0": "MAGIC",
+      "1,7": "CARD", "6,0": "CARD",
+      "0,7": "FORTUNE", "7,7": "FORTUNE",
+      "3,5": "SPRING",
+    },
+    elements: ["fire", "wood", "earth", "water"],
+    theme: { glow: "#3a2a40", bg: "#160f20", path: "#291f36", dot: "#9a6ab8" },
+    hud: { left: "69%", top: "70%", width: "28%" },
+    rules: { target: 3600, maxRounds: 46 },
   },
 ];
 

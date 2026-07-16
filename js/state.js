@@ -21,6 +21,21 @@ const DEFAULT_RULES = {
 let RULES = { ...DEFAULT_RULES };
 
 const HAND_LIMIT  = 6;
+// ---------- 決着モード（対戦の長さ・全員共通の設定） ----------
+// 目標資産とラウンド上限に倍率を掛けて、短期決戦〜じっくり長期戦を選べる（トレーニングには適用しない）
+const MATCH_LENGTH_KEY = "mana-circuit-matchlen";
+const MATCH_LENGTHS = {
+  blitz:  { label: "短期戦", icon: "⚡", targetMul: 0.75, roundsMul: 0.85, desc: "目標資産 -25%・ラウンド上限 -15%。テンポよくサクッと決着" },
+  normal: { label: "標準",   icon: "🏳", targetMul: 1,    roundsMul: 1,    desc: "ステージ本来の目標資産とラウンド上限で戦う" },
+  long:   { label: "長期戦", icon: "🛡", targetMul: 1.35, roundsMul: 1.25, desc: "目標資産 +35%・ラウンド上限 +25%。逆転の余地が大きい" },
+  epic:   { label: "大戦",   icon: "👑", targetMul: 1.7,  roundsMul: 1.5,  desc: "目標資産 +70%・ラウンド上限 +50%。盤面を制する大長期戦" },
+};
+function loadMatchLength() {
+  try { const k = localStorage.getItem(MATCH_LENGTH_KEY); if (MATCH_LENGTHS[k]) return k; } catch (e) { /* private mode */ }
+  return "normal";
+}
+function saveMatchLength(k) { if (MATCH_LENGTHS[k]) { try { localStorage.setItem(MATCH_LENGTH_KEY, k); } catch (e) {} } }
+
 const LAND_VALUE  = [100, 240, 480, 900, 1600]; // レベル1〜5の土地価値
 const SELL_RATE   = 0.7;   // 強制売却の換金率
 const COMEBACK_RATIO = 0.7; // 総資産が相手の7割未満なら劣勢（周回ボーナス1.5倍）
@@ -199,27 +214,38 @@ function rollDice(p) {
 
 // opts.training: トレーニング（ウィークリールールを適用しない）
 // opts.versus:   2人対戦（ホットシート）。{p0, p1}＝両プレイヤーのプロファイルindex
+// opts.royale:   三つ巴（人間1 + CPU2）。ステージ本来の相手＋他ステージの乱入キャラで3人戦
 function newGame(stageIdx = 0, opts = {}) {
   const stage = STAGES[stageIdx];
   RULES = { ...DEFAULT_RULES, ...(stage.rules || {}) };
   // ウィークリールール（ONのとき・トレーニング以外）: RULES をさらに上書きして週替わりの対戦にする
   const weekly = (!opts.training && typeof activeWeeklyRule === "function") ? activeWeeklyRule() : null;
   if (weekly && weekly.apply) weekly.apply(RULES);
+  // 決着モード（短期戦/標準/長期戦/大戦）: 目標資産とラウンド上限に倍率を掛ける（トレーニング以外）
+  const matchLen = (!opts.training && typeof MATCH_LENGTHS !== "undefined") ? MATCH_LENGTHS[loadMatchLength()] : null;
+  if (matchLen) {
+    RULES.target = Math.max(1000, Math.round(RULES.target * matchLen.targetMul / 100) * 100);
+    RULES.maxRounds = Math.max(16, Math.round(RULES.maxRounds * matchLen.roundsMul));
+  }
   const versus = opts.versus || null;
   // CPUの実効プロファイル（相手ごとのプロファイル × 全体難易度）。デッキ上限・初期魔力補正に使う
-  const cpuProfile = (typeof resolveAIProfile === "function") ? resolveAIProfile(stage.ai)
-    : ((typeof AI_PROFILES !== "undefined" && AI_PROFILES[stage.ai]) || null);
-  const cpuMaxCost = (cpuProfile && cpuProfile.deckMaxCost) || Infinity;
-  // CPU初期魔力＝基準 + ステージ補正(cpuMagicBonus) + プロファイル/難易度補正(magicBonus)。最低150を保証
-  const cpuMagicBonus = RULES.cpuMagicBonus + ((cpuProfile && cpuProfile.magicBonus) || 0);
-  const cpuStartMagic = Math.max(150, RULES.startMagic + cpuMagicBonus);
-  const mkPlayer = (id, name, isCPU, bias, deckOverride) => {
+  const profileFor = aiKey => (typeof resolveAIProfile === "function") ? resolveAIProfile(aiKey)
+    : ((typeof AI_PROFILES !== "undefined" && AI_PROFILES[aiKey]) || null);
+  const cpuProfile = profileFor(stage.ai);
+  const mkPlayer = (id, name, isCPU, bias, deckOverride, profile) => {
     // 人間側は構築デッキがあればそれを使う（未構築なら従来の自動デッキ・上限なし）。CPUは常に自動デッキ（難易度で上限）
     // deckOverride: 2人対戦で各プロファイルのデッキを指定する（null＝自動デッキ）
+    // profile: このCPU個人の実効プロファイル（三つ巴では相手ごとに異なる）。省略時はステージ既定
+    const prof = profile || cpuProfile;
+    const cpuMaxCost = (prof && prof.deckMaxCost) || Infinity;
+    // CPU初期魔力＝基準 + ステージ補正(cpuMagicBonus) + プロファイル/難易度補正(magicBonus)。最低150を保証
+    const cpuStartMagic = Math.max(150, RULES.startMagic + RULES.cpuMagicBonus + ((prof && prof.magicBonus) || 0));
     const custom = deckOverride !== undefined ? deckOverride
       : (!isCPU && typeof getPlayerDeck === "function") ? getPlayerDeck() : null;
     return {
       id, name, isCPU,
+      aiProfile: isCPU ? prof : null, // このCPU個人の判断プロファイル（ai.js の aiProf が参照）
+      charKey: null,                  // 対戦キャラのid（chars.js のセリフ・顔絵用。CPU生成側でセット）
       magic: isCPU ? cpuStartMagic : RULES.startMagic,
       pos: 0,
       deck: custom ? shuffle(custom) : buildDeck(bias, isCPU ? cpuMaxCost : Infinity),
@@ -236,6 +262,13 @@ function newGame(stageIdx = 0, opts = {}) {
       skipReason: null,   // skipTurnの理由: "capture"=🕸️捕縛 / "freeze"=❄️フリーズ（表示メッセージの出し分け用）
     };
   };
+  // CPUプレイヤーを1体作る（ステージ定義 or 三つ巴の乱入キャラ定義から）。charKey でセリフ・顔絵が紐づく
+  const mkCpu = (id, def) => {
+    const p = mkPlayer(id, def.cpuName || "CPU", true, def.cpuBias, undefined, profileFor(def.ai));
+    p.charKey = def.id;
+    return p;
+  };
+  const humanName = (typeof currentProfileName === "function" && currentProfileName()) || "あなた";
   const g = {
     stageIdx,
     stage,
@@ -246,10 +279,17 @@ function newGame(stageIdx = 0, opts = {}) {
         mkPlayer(0, profileName(versus.p0), false, null, getPlayerDeckFor(versus.p0)),
         mkPlayer(1, profileName(versus.p1), false, null, getPlayerDeckFor(versus.p1)),
       ]
+      : opts.royale
+      // 三つ巴: ステージ本来の相手 ＋ 他ステージからの乱入キャラ（毎回ランダム）で3人戦
+      ? [
+        mkPlayer(0, humanName, false, null),
+        mkCpu(1, stage),
+        mkCpu(2, pickRoyaleRival(stage)),
+      ]
       : [
         // 人間側の名前は選択中のプレイヤープロファイル名（👤プレイヤー選択で切替・変更できる）
-        mkPlayer(0, (typeof currentProfileName === "function" && currentProfileName()) || "あなた", false, null),
-        mkPlayer(1, stage.cpuName || "CPU", true, stage.cpuBias),
+        mkPlayer(0, humanName, false, null),
+        mkCpu(1, stage),
       ],
     current: 0,
     round: 1,
@@ -287,7 +327,21 @@ function drawCard(g, p) {
   return id;
 }
 
-function opponentOf(g, p) { return g.players[1 - p.id]; }
+// 相手プレイヤー全員（三つ巴では2人）
+function opponentsOf(g, p) { return g.players.filter(q => q.id !== p.id); }
+// 筆頭の相手＝総資産が最も多い相手（2人対戦では唯一の相手そのもの）。
+// 劣勢判定・リベンジ・AIの「勝ちに近い相手を警戒する」判断はこれを基準にする
+function opponentOf(g, p) {
+  return opponentsOf(g, p).reduce((a, b) => assetsOf(g, b) > assetsOf(g, a) ? b : a);
+}
+// 魔力（所持金）が最も多い相手（ドレイン/プランダーの狙い先）
+function richestOpponent(g, p) {
+  return opponentsOf(g, p).reduce((a, b) => b.magic > a.magic ? b : a);
+}
+// 相手（誰か）の所有する土地すべて（スペルの対象候補）
+function enemyLandsOf(g, p) {
+  return g.tiles.filter(t => t.type === "LAND" && t.owner !== null && t.owner !== p.id);
+}
 
 // 同属性の所有土地数（連鎖数）
 function chainCount(g, playerId, element) {
@@ -336,7 +390,8 @@ function landHpBonus(tile, creatureCard) {
   return tile.level * 10 * RULES.landHpMult;
 }
 
-// 支払い。足りなければ土地を売却。それでも足りなければ破産(falseを返す)。
+// 支払い。足りなければ土地を売却。全て売っても足りなければ「再起」——
+// 破産で決着はしない（v18で廃止）。持てる魔力を全て渡したあと、城へ戻って初期魔力で再スタートする。
 // chooseFn(lands, amount) -> Promise<tile>|tile : 売却する土地を選ぶ（人間は選択可）。
 //   省略/nullを返すと既定＝最高額の土地を自動売却。UIに依存しないよう state.js からはコールバックで受ける。
 async function forcePay(g, payer, amount, receiver, logFn, chooseFn = null) {
@@ -352,11 +407,17 @@ async function forcePay(g, payer, amount, receiver, logFn, chooseFn = null) {
     logFn(`${payer.name}は魔力不足！ ${tileName(t)}を売却して${gain}Gを得た`);
   }
   if (payer.magic < amount) {
+    // 🏰 再起: あるだけ支払い、城へ帰還して初期魔力を受け取り仕切り直す（残債は帳消し・敗北にはならない）
     receiver && (receiver.magic += payer.magic);
-    payer.magic = 0;
-    payer.alive = false;
-    logFn(`${payer.name}は支払い不能… 破産した！`);
-    return false;
+    logFn(`💸 ${payer.name}は${payer.magic}Gを支払ったが、まだ足りない……`);
+    payer.magic = RULES.startMagic;
+    payer.pos = 0;
+    payer.gates.clear();
+    payer.lastPath = [];
+    logFn(`🏰 ${payer.name}は全てを失い、城へ帰還して再起を図る（初期魔力${RULES.startMagic}Gで再スタート）`, "warn");
+    if (typeof SFX !== "undefined" && SFX.lose) SFX.spell();
+    if (typeof cpuSay === "function") cpuSay(payer, "restart");
+    return true;
   }
   payer.magic -= amount;
   if (receiver) receiver.magic += amount;
@@ -384,6 +445,8 @@ function tileName(tile) {
     case "WARP":   return "ワープマス";
     case "MAGMA":  return "マグママス";
     case "BOOST":  return "疾風マス";
+    case "FORTUNE": return "運命マス";
+    case "SPRING": return "泉マス";
     default:       return `${ELEMENTS[tile.element].name}の土地 #${tile.id}`;
   }
 }

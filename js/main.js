@@ -15,6 +15,7 @@ async function startGame(stageIdx, opts = {}) {
   G = newGame(stageIdx, opts);
   G.training = !!opts.training; // トレーニング（練習対戦・進行度を更新せず勝利でカード3枚）
   G.hotseat = !!opts.versus;    // 2人対戦（ホットシート・報酬/進行度なし）
+  G.royale = !!opts.royale;     // 三つ巴（人間1+CPU2・勝利でカード獲得・進行度は変化しない）
   G.versusSetup = opts.versus || null; // 「もう一度」用に対戦設定を保持
   GAME_SPEED = G.training ? 0.28 : 1; // トレーニングは演出を高速化（時短）。通常は等倍
   // トレーニングは目標資産・ラウンド上限を下げて短時間で決着（時短・簡易）
@@ -22,12 +23,16 @@ async function startGame(stageIdx, opts = {}) {
     RULES.target = Math.round(RULES.target * 0.6 / 100) * 100;
     RULES.maxRounds = Math.min(RULES.maxRounds, 24);
   }
-  AI_PROFILE = resolveAIProfile(G.stage.ai); // 相手ごとのプロファイル × 全体難易度（イージー/ノーマル/ハード）
+  AI_PROFILE = resolveAIProfile(G.stage.ai); // ステージ既定の実効プロファイル（各CPUは p.aiProfile を優先）
   const w = Math.max(...G.tiles.map(t => t.x)) + 1;
   const h = Math.max(...G.tiles.map(t => t.y)) + 1;
   const svg = document.getElementById("board");
   svg.setAttribute("viewBox", `0 0 ${w * 100} ${h * 100}`);
   svg.style.aspectRatio = `${w} / ${h}`;
+  // ステージのテーマカラーで背景を染める（盤面ごとの空気を変える。タイトルへ戻るとき解除）
+  const th = G.stage.theme;
+  document.body.style.background = th
+    ? `radial-gradient(ellipse at 50% 0%, ${th.glow} 0%, ${th.bg} 60%)` : "";
   // 中央HUDが盤面中心のマス（八の字の城・十字路など）を隠すステージでは位置をずらす
   const hud = document.getElementById("center-hud");
   const hudPos = G.stage.hud || { left: "50%", top: "50%", width: "52%" };
@@ -38,10 +43,16 @@ async function startGame(stageIdx, opts = {}) {
   renderAll(G);
   fitBoard({ max: 1 }); // 開始時は盤面全体が見える倍率に（見えないマスを無くす。拡大はしない）
   log(`=== ${G.stage.icon} STAGE ${stageIdx + 1}「${G.stage.name}」 ===`, "sys");
-  log(G.hotseat ? `🎮 2人対戦: 🔵${G.players[0].name} vs 🔴${G.players[1].name}` : `VS ${G.players[1].name}`, "sys");
+  log(G.hotseat ? `🎮 2人対戦: 🔵${G.players[0].name} vs 🔴${G.players[1].name}`
+    : G.royale ? `⚔ 三つ巴: 🔵${G.players[0].name} vs 🔴${G.players[1].name} vs 🟢${G.players[2].name}`
+    : `VS ${G.players[1].name}`, "sys");
   log(G.stage.desc, "sys");
   if (G.weekly) log(`🎪 今週のルール「${G.weekly.icon}${G.weekly.name}」: ${G.weekly.desc}`, "warn");
-  log(`総資産 ${RULES.target}G に達して城に戻れば勝利です`, "sys");
+  log(`総資産 ${RULES.target}G に達して城に戻れば勝利です（魔力が尽きても敗北にはならず、城で再起できます）`, "sys");
+  // 対戦前の口上: 相手キャラのポートレートと挨拶（トレーニング・2人対戦・リトライでは省略）
+  if (!G.hotseat && !G.training && !opts.skipIntro && typeof showMatchIntro === "function") {
+    await showMatchIntro(G);
+  }
   // 開幕演出: 手札が表紙（カードバック）側で配られ、1枚ずつめくれて対戦が始まる。
   // 2人対戦は交代画面が手札を管理するため対象外（1P の手札が先に見えてしまうのを防ぐ）
   if (!G.hotseat && !G.players[0].isCPU) {
@@ -57,12 +68,12 @@ async function gameLoop() {
     await playTurn(g.players[g.current]);
     if (g !== G) return; // リトライ等で新ゲームが始まっていたら旧ループを止める
     if (g.over) break;
-    g.current = 1 - g.current;
+    g.current = (g.current + 1) % g.players.length; // 三つ巴では3人で順番に回す
     if (g.current === 0) {
       g.round++;
       if (g.round > RULES.maxRounds) {
-        const [a, b] = g.players.map(p => assetsOf(g, p));
-        endGame(a >= b ? g.players[0] : g.players[1], "ラウンド上限。総資産の多い方の勝ち!");
+        const ranked = g.players.slice().sort((a, b) => assetsOf(g, b) - assetsOf(g, a));
+        endGame(ranked[0], "ラウンド上限。総資産の最も多いプレイヤーの勝ち!");
       }
     }
   }
@@ -101,6 +112,39 @@ async function showGameOver() {
 
   const youWin = G.winner.id === 0;
   if (youWin) SFX.win(); else SFX.lose();
+  // 敗者・勝者のキャラのセリフ（存在感の演出）: 勝ったCPUは勝ち名乗り、負けたCPUは負け惜しみ
+  const winnerQuote = (!youWin && typeof charLine === "function") ? charLine(G.winner, "win") : "";
+  const loserQuotes = (youWin && typeof charLine === "function")
+    ? G.players.filter(p => p.isCPU).map(p => ({ p, line: charLine(p, "lose") })).filter(q => q.line) : [];
+  const quoteHtml =
+    (winnerQuote ? `<br><br>「${esc(winnerQuote)}」 — ${esc(G.winner.name)}` : "") +
+    loserQuotes.map(q => `<br><br>「${esc(q.line)}」 — ${esc(q.p.name)}`).join("");
+
+  // 三つ巴: 勝てばカードを獲得（進行度は変化しない）。順位表を表示
+  if (G.royale) {
+    const ranked = G.players.slice().sort((a, b) => assetsOf(G, b) - assetsOf(G, a));
+    const standings = ranked.map((p, i) =>
+      `${["🥇", "🥈", "🥉"][i]} ${P_ICONS[p.id]} ${esc(p.name)}: 総資産 ${assetsOf(G, p)}G`).join("<br>");
+    setMessage(youWin ? "🏆 三つ巴を制覇！" : `💀 ${G.winner.name}の勝利…`);
+    if (youWin) await playVictoryFx("VICTORY!", "⚔ 三つ巴を制覇！");
+    let gained = 0;
+    if (youWin && typeof grantWinCards === "function") {
+      const pack = grantWinCards(REWARD_WIN);
+      if (pack) { gained = pack.length; await showPackReveal(pack, "🏆 三つ巴 勝利報酬！", `カードを${pack.length}枚手に入れた！`); }
+    }
+    const res = await showDialog({
+      title: youWin ? "🏆 三つ巴を制覇！" : "💀 敗北…",
+      body: `${esc(G.winner.name)}の勝ち！<br><br>${standings}` +
+        (gained ? `<br><br>💚 カードを${gained}枚獲得しました` : "") + quoteHtml,
+      buttons: [
+        { label: "🔁 もう一度（乱入者は毎回ランダム）", value: "retry", primary: true },
+        { label: "🗺 メニューへ", value: "menu" },
+      ],
+    });
+    if (res.action === "retry") startGame(G.stageIdx, { royale: true });
+    else titleScreen();
+    return;
+  }
 
   // トレーニング（練習対戦）: 進行度は更新せず、勝てばカードを3枚獲得（時短仕様）
   if (G.training) {
@@ -166,11 +210,12 @@ async function showGameOver() {
     title: youWin ? `🏆 STAGE ${G.stageIdx + 1} クリア！` : "💀 敗北…",
     body: `${esc(G.winner.name)}の勝ち！<br>あなたの総資産: ${assetsOf(G, G.players[0])}G ／ ${esc(G.players[1].name)}: ${assetsOf(G, G.players[1])}G` +
       (firstClear && hasNext ? `<br><br>🎉 <b>STAGE ${nextIdx + 1}「${esc(STAGES[nextIdx].name)}」が解放された！</b>` : "") +
-      (youWin && !hasNext ? `<br><br>👑 <b>全ステージ制覇！ あなたは真のセプターだ！</b>` : ""),
+      (youWin && !hasNext ? `<br><br>👑 <b>全ステージ制覇！ あなたは真のセプターだ！</b>` : "") +
+      quoteHtml,
     buttons,
   });
   if (res.action === "next") startGame(nextIdx);
-  else if (res.action === "retry") startGame(G.stageIdx);
+  else if (res.action === "retry") startGame(G.stageIdx, { skipIntro: true });
   else titleScreen();
 }
 
@@ -223,7 +268,7 @@ async function requestSurrender() {
     ],
   });
   _surrendering = false;
-  if (r2.action === "retry") startGame(G.stageIdx, { training: G.training, versus: G.versusSetup });
+  if (r2.action === "retry") startGame(G.stageIdx, { training: G.training, versus: G.versusSetup, royale: G.royale, skipIntro: !G.royale });
   else titleScreen();
 }
 
@@ -248,7 +293,11 @@ async function playTurn(p) {
   if (G.hotseat && !p.isCPU) await hotseatHandoff(p);
   setMessage(`${p.name}のターン（ラウンド${G.round}）`);
   renderAll(G);
-  if (p.isCPU) await sleep(CPU_WAIT);
+  if (p.isCPU) {
+    // ときどきキャラがつぶやく（存在感の演出・非ブロッキング）
+    if (Math.random() < 0.22 && typeof cpuSay === "function") cpuSay(p, "taunt");
+    await sleep(CPU_WAIT);
+  }
 
   // 1. ドロー（人間は山札からカードがめくれて手札へ吸い込まれる演出つき）
   const drawn = drawCard(G, p);
@@ -294,7 +343,26 @@ async function playTurn(p) {
   //    このターン通過した自領について侵攻/交代/レベルアップを1つ行える。
   //    例外: 周回達成ターン（城ぴったり到達・リコール＝passAllLands）は①で行動していても付与し、全自領を対象にする。
   if (!acted || p.passAllLands) await passActionPhase(p);
+  notifyReach();
   renderAll(G);
+}
+
+// 目標資産に到達／転落したときの通知（⚑凱旋リーチ）。ターンの終わりに全員ぶんチェックする。
+// 「あとは城へ帰るだけ」の状態を全員に見えるようにして、凱旋レースの緊張感を作る
+function notifyReach() {
+  if (G.over) return;
+  G.players.forEach(p => {
+    const reached = assetsOf(G, p) >= RULES.target;
+    if (reached && !p.reached) {
+      p.reached = true;
+      SFX.coin();
+      log(`⚑ ${p.name}は目標資産${RULES.target}Gに到達！ 🏰城へ凱旋すれば勝利だ！`, "warn");
+      if (typeof cpuSay === "function") cpuSay(p, "reach");
+    } else if (!reached && p.reached) {
+      p.reached = false;
+      log(`${p.name}の総資産が目標を割り込んだ（凱旋リーチ解除）`, "warn");
+    }
+  });
 }
 
 // ---------- 2人対戦（ホットシート）: 手番の交代画面 ----------
@@ -417,17 +485,35 @@ function waitSpellClick() {
   return new Promise(r => { _spellClickResolve = r; });
 }
 
+// 相手プレイヤーを1人選ぶ（人間用）。相手が1人だけなら聞かずにその相手を返す。キャンセルなら null
+async function humanPickOpponent(p, title, body, filterFn = null) {
+  let cands = opponentsOf(G, p);
+  if (filterFn) cands = cands.filter(filterFn);
+  if (cands.length === 0) return null;
+  if (cands.length === 1) return cands[0];
+  const res = await showDialog({
+    title, body, peek: true,
+    buttons: cands.map(q => ({
+      label: `${P_ICONS[q.id]} ${q.name}（魔力${q.magic}G／総資産${assetsOf(G, q)}G／手札${q.hand.length}枚）`,
+      value: String(q.id),
+    })).concat([{ label: "やめる", value: "cancel" }]),
+  });
+  if (res.action === "cancel" || res.action === "dismiss") return null;
+  return G.players[Number(res.action)];
+}
+
 // ---------- スペル効果 ----------
 // 成功したら true。対象がない/キャンセルなら false（コストは消費しない）
+// 三つ巴では「相手」を選ぶスペル（ドレイン等）は対象プレイヤーを選択する（2人対戦では従来どおり自動）
 async function castSpell(p, cardId) {
   const c = CARD_BY_ID[cardId];
-  const opp = opponentOf(G, p);
+  const opp = opponentOf(G, p); // 筆頭の相手（総資産トップ）。リベンジ・劣勢判定の基準
   if (c.cost > p.magic) return false;
   const pay = () => { p.magic -= c.cost; discardFromHand(p, cardId); };
 
   if (c.spell === "quake") {
     const target = p.isCPU ? aiPickQuakeTarget(G, p)
-      : await humanPickLand(ownedLands(G, opp.id).filter(t => t.level > 1 && !isSanctuaryProtected(G, t)),
+      : await humanPickLand(enemyLandsOf(G, p).filter(t => t.level > 1 && !isSanctuaryProtected(G, t)),
         "✨ クエイク — 対象を選択", "レベルを1下げる敵の土地を選んでください",
         "クエイクの対象となる土地（敵のLv2以上）がありません");
     if (!target) return false;
@@ -436,19 +522,25 @@ async function castSpell(p, cardId) {
     log(`✨ ${p.name}のクエイク！ ${tileName(target)}のレベルが${target.level}に下がった`);
 
   } else if (c.spell === "drain") {
+    const target = p.isCPU ? richestOpponent(G, p)
+      : await humanPickOpponent(p, "✨ マナドレイン — 相手を選択", "最大200Gを奪う相手を選んでください");
+    if (!target) return false;
     pay();
-    const amount = Math.min(200, opp.magic);
-    opp.magic -= amount;
+    const amount = Math.min(200, target.magic);
+    target.magic -= amount;
     p.magic += amount;
-    log(`✨ ${p.name}のマナドレイン！ ${opp.name}から${amount}Gを奪った`);
+    log(`✨ ${p.name}のマナドレイン！ ${target.name}から${amount}Gを奪った`);
 
   } else if (c.spell === "plunder") {
+    const target = p.isCPU ? richestOpponent(G, p)
+      : await humanPickOpponent(p, "💰 プランダー — 相手を選択", "所持金の半分を奪う相手を選んでください");
+    if (!target) return false;
     pay();
-    const amount = Math.floor(opp.magic / 2);
-    opp.magic -= amount;
+    const amount = Math.floor(target.magic / 2);
+    target.magic -= amount;
     p.magic += amount;
     SFX.coin();
-    log(`💰 ${p.name}のプランダー！ ${opp.name}の所持金の半分 ${amount}G を奪った`, "warn");
+    log(`💰 ${p.name}のプランダー！ ${target.name}の所持金の半分 ${amount}G を奪った`, "warn");
 
   } else if (c.spell === "dicedouble") {
     pay();
@@ -529,13 +621,13 @@ async function castSpell(p, cardId) {
   } else if (c.spell === "vanish") {
     const target = p.isCPU ? aiPickVanishTarget(G, p)
       : await humanPickLand(
-        ownedLands(G, opp.id).filter(t => t.creature && !isSanctuaryProtected(G, t) && !isSpellProof(t)),
+        enemyLandsOf(G, p).filter(t => t.creature && !isSanctuaryProtected(G, t) && !isSpellProof(t)),
         "✨ バニッシュ — 対象を選択", "消滅させる敵クリーチャーの土地を選んでください（<b>HP不問＝どんな相手でも確実に破壊</b>）<br>土地は空き地に戻ります（レベルは残る）※<b>護法</b>持ちは対象外",
         "バニッシュの対象となる敵クリーチャーがいません（結界・護法は対象外）");
     if (!target) return false;
     pay();
     const victim = CARD_BY_ID[target.creature.cardId];
-    opp.discard.push(target.creature.cardId);
+    G.players[target.owner].discard.push(target.creature.cardId);
     target.creature = null;
     target.owner = null;
     log(`✨ ${p.name}のバニッシュ！ ${victim.name}は消し飛び、${tileName(target)}は空き地に戻った`, "warn");
@@ -550,7 +642,7 @@ async function castSpell(p, cardId) {
       if (!pick) return false;
       src = pick.src; dst = pick.dst;
     } else {
-      src = await humanPickLand(ownedLands(G, opp.id).filter(pushable),
+      src = await humanPickLand(enemyLandsOf(G, p).filter(pushable),
         "🌬️ ガスト — 押し出す敵クリーチャーを選択",
         "隣接する空き地へ吹き飛ばす敵クリーチャーを選んでください（<b>不動・結界・護法は対象外</b>）<br>元の土地は空き地に戻ります（レベルは残る）",
         "押し出せる敵クリーチャー（隣に空き地がある相手）がいません");
@@ -679,7 +771,7 @@ async function castSpell(p, cardId) {
   } else if (c.spell === "meteor") {
     const target = p.isCPU ? aiPickMeteorTarget(G, p)
       : await humanPickLand(
-        ownedLands(G, opp.id).filter(t => t.creature && !isSanctuaryProtected(G, t) && !isSpellProof(t)),
+        enemyLandsOf(G, p).filter(t => t.creature && !isSanctuaryProtected(G, t) && !isSpellProof(t)),
         "☄️ メテオ — 対象を選択", "40ダメージを与える敵クリーチャーの土地を選んでください<br>現在HPが0以下になれば破壊され、土地は空き地に戻ります（レベルは残る）※<b>護法</b>持ちは対象外",
         "対象にできる敵クリーチャーがいません（結界・護法は対象外）");
     if (!target) return false;
@@ -687,7 +779,7 @@ async function castSpell(p, cardId) {
     const victim = CARD_BY_ID[target.creature.cardId];
     const newHp = currentHp(target.creature) - 40;
     if (newHp <= 0) {
-      opp.discard.push(target.creature.cardId);
+      G.players[target.owner].discard.push(target.creature.cardId);
       const nm = tileName(target);
       target.creature = null; target.owner = null;
       log(`☄️ ${p.name}のメテオ！ ${victim.name}に40ダメージ — 倒れて${nm}は空き地に戻った`, "warn");
@@ -697,11 +789,14 @@ async function castSpell(p, cardId) {
     }
 
   } else if (c.spell === "freeze") {
-    if (opp.skipTurn) { if (!p.isCPU) log("相手はすでに足止めされています", "warn"); return false; }
+    const target = p.isCPU ? aiPickFreezeTarget(G, p)
+      : await humanPickOpponent(p, "❄️ フリーズ — 相手を選択", "次のターン動けなくする相手を選んでください",
+        q => !q.skipTurn);
+    if (!target) { if (!p.isCPU) log("フリーズできる相手がいません（すでに足止め中）", "warn"); return false; }
     pay();
-    opp.skipTurn = true;
-    opp.skipReason = "freeze";
-    log(`❄️ ${p.name}のフリーズ！ ${opp.name}は次のターン動けない`, "warn");
+    target.skipTurn = true;
+    target.skipReason = "freeze";
+    log(`❄️ ${p.name}のフリーズ！ ${target.name}は次のターン動けない`, "warn");
 
   } else if (c.spell === "treasure") {
     const n = ownedLands(G, p.id).length;
@@ -713,12 +808,15 @@ async function castSpell(p, cardId) {
     log(`💰 ${p.name}のトレジャー！ 所有地${n}マスから+${gain}G`);
 
   } else if (c.spell === "steal") {
-    if (opp.hand.length === 0) { if (!p.isCPU) log("相手の手札は空です", "warn"); return false; }
+    const target = p.isCPU ? aiPickStealTarget(G, p)
+      : await humanPickOpponent(p, "🎭 スティール — 相手を選択", "手札から1枚をランダムに奪う相手を選んでください",
+        q => q.hand.length > 0);
+    if (!target) { if (!p.isCPU) log("手札を持っている相手がいません", "warn"); return false; }
     pay();
-    const idx = Math.floor(Math.random() * opp.hand.length);
-    const stolen = opp.hand.splice(idx, 1)[0];
+    const idx = Math.floor(Math.random() * target.hand.length);
+    const stolen = target.hand.splice(idx, 1)[0];
     p.hand.push(stolen);
-    log(`🎭 ${p.name}のスティール！ ${opp.name}の手札から${p.isCPU ? "カード1枚" : CARD_BY_ID[stolen].name}を奪った`, "warn");
+    log(`🎭 ${p.name}のスティール！ ${target.name}の手札から${p.isCPU ? "カード1枚" : CARD_BY_ID[stolen].name}を奪った`, "warn");
     await enforceHandLimit(p);
 
   } else if (c.spell === "salvage") {
@@ -872,6 +970,7 @@ function arriveCastle(g, p, exact = true) {
     if (bonus.comeback) log(`🔥 逆転の風が吹く！ 劣勢ボーナス1.5倍`, "warn");
     healAllCreatures(g, p); // 周回ボーナス＝魔力＋全回復（城の通過・停止どちらでも）
     log(`🏰 ${p.name}は周回達成！ +${bonus.gold}G — 自軍クリーチャーのHPが全回復！`);
+    if (typeof cpuSay === "function") cpuSay(p, "lap");
     result = "lap";
   }
   if (exact) {
@@ -935,6 +1034,44 @@ async function tileAction(p, tile) {
       await movePlayer(p, 2);
       if (G.over) return false;
       return await tileAction(p, G.tiles[p.pos]); // 進んだ先のマスの判定を引き継ぐ
+    }
+    case "FORTUNE": {
+      // 🎰 運命マス: 何が出るかはお楽しみ（期待値はややプラス・15%ではずれ）
+      SFX.dice();
+      log(`🎰 ${p.name}は運命のルーレットを回した——`);
+      await sleep(550);
+      const r = Math.random();
+      if (r < 0.10) {
+        p.magic += 300; SFX.coin();
+        log(`🎉 大当り！ 女神の祝福で +300G！`, "warn");
+      } else if (r < 0.40) {
+        p.magic += 150; SFX.coin();
+        log(`💰 当り！ +150G`);
+      } else if (r < 0.65) {
+        const a = drawCard(G, p), b = drawCard(G, p);
+        log(`🎴 運命の導き！ カードを${(a ? 1 : 0) + (b ? 1 : 0)}枚ドロー`);
+        if (a && !p.isCPU) await animateDraw(CARD_BY_ID[a]);
+        if (b && !p.isCPU) await animateDraw(CARD_BY_ID[b]);
+        await enforceHandLimit(p);
+      } else if (r < 0.85) {
+        p.diceMult = 2;
+        log(`🎲 追い風の予感！ 次のダイスの出目が2倍になる`);
+      } else {
+        const loss = Math.min(100, p.magic);
+        p.magic -= loss; SFX.hit();
+        log(`💨 はずれ… -${loss}G`, "warn");
+      }
+      return false;
+    }
+    case "SPRING": {
+      // ⛲ 泉マス: 自軍クリーチャー全回復＋少額の魔力（周回を待たずに前線を立て直せる）
+      const wounded = G.tiles.filter(t =>
+        t.type === "LAND" && t.owner === p.id && t.creature && isWounded(t.creature)).length;
+      healAllCreatures(G, p);
+      p.magic += 60;
+      SFX.coin();
+      log(`⛲ ${p.name}は癒しの泉で安らいだ +60G${wounded ? `・負傷クリーチャー${wounded}体が全回復！` : ""}`);
+      return false;
     }
     case "CASTLE":
     case "GATE":
@@ -1265,9 +1402,10 @@ async function enemyLandFlow(p, tile) {
     // 魔力不足などで侵略が成立しなかった → 通行料の支払いへフォールバック
   }
   log(`${p.name}は通行料${toll}Gを${owner.name}に支払う`);
-  const ok = await forcePay(G, p, toll, owner, log, landSellChooser(p));
+  await forcePay(G, p, toll, owner, log, landSellChooser(p)); // 払いきれなければ城で再起（敗北はしない）
+  // 高額の通行料をせしめた相手キャラはほくそ笑む（存在感の演出）
+  if (toll >= 150 && typeof cpuSay === "function") cpuSay(owner, "tollGain");
   renderAll(G);
-  if (!ok) endGame(opponentOf(G, p), `${p.name}が破産！`);
   return false;
 }
 
@@ -1350,10 +1488,16 @@ async function doInvade(p, tile, cardId, itemId = null) {
   removeFromHand(p, cardId);
   if (itemId) discardFromHand(p, itemId);
   log(`⚔ ${p.name}は${c.name}で${tileName(tile)}に侵略開始！`, "battle");
+  if (typeof cpuSay === "function") cpuSay(p, "invade");
   renderAll(G);
 
   const defender = G.players[tile.owner];
   const result = await fightFor(p, tile, c, attItem);
+  // バトルの勝敗にキャラが反応する（攻守どちらのCPUも）
+  if (typeof cpuSay === "function") {
+    if (result.attackerWins) { cpuSay(p, "battleWin"); cpuSay(defender, "battleLose"); }
+    else { cpuSay(defender, "battleWin"); cpuSay(p, "battleLose"); }
+  }
 
   if (result.attackerWins) {
     defender.discard.push(tile.creature.cardId); // 倒された防衛クリーチャー
@@ -1373,9 +1517,8 @@ async function doInvade(p, tile, cardId, itemId = null) {
     const toll = tollOf(G, tile);
     if (toll > 0) {
       log(`${p.name}は侵略に失敗し、通行料${toll}Gを${defender.name}に支払う`, "warn");
-      const ok = await forcePay(G, p, toll, defender, log, landSellChooser(p));
+      await forcePay(G, p, toll, defender, log, landSellChooser(p)); // 払いきれなければ城で再起
       renderAll(G);
-      if (!ok) { endGame(opponentOf(G, p), `${p.name}が破産！`); return; }
     }
   }
   renderAll(G);
@@ -1510,7 +1653,7 @@ function showTileInfo(tile) {
   let cards = null;
   if (tile.type === "LAND") {
     const ownerTxt = tile.owner === null ? "空き地"
-      : `<b style="color:${PLAYER_COLORS[tile.owner]}">${tile.owner === 0 ? "🔵" : "🔴"} ${esc(G.players[tile.owner].name)}の領地</b>`;
+      : `<b style="color:${PLAYER_COLORS[tile.owner]}">${P_ICONS[tile.owner]} ${esc(G.players[tile.owner].name)}の領地</b>`;
     parts.push(`${ELEMENTS[tile.element].icon} ${ELEMENTS[tile.element].name}属性 ／ Lv${tile.level} ／ 価値 ${landValue(tile)}G ／ ${ownerTxt}`);
     if (tile.owner !== null) {
       parts.push(`通行料 <b>${tollOf(G, tile)}G</b>（${ELEMENTS[tile.element].icon}連鎖 ${chainCount(G, tile.owner, tile.element)}）`);
@@ -1541,6 +1684,8 @@ function showTileInfo(tile) {
       WARP:   "🌀 ワープマス — 止まると対のマスへ移動する",
       MAGMA:  `🌋 マグママス — 止まると魔力を失う（-${RULES.magmaLoss}G）`,
       BOOST:  "💨 疾風マス — 止まるとさらに2マス進む",
+      FORTUNE: "🎰 運命マス — 止まるとルーレット！ 大当り+300G／+150G／2枚ドロー／次のダイス2倍／はずれ-100G のどれかが起きる",
+      SPRING: "⛲ 泉マス — 止まると自軍クリーチャーのHPが全回復＋60G",
     };
     parts.push(descs[tile.type] || "");
   }
@@ -1557,6 +1702,7 @@ function showTileInfo(tile) {
 // ---------- タイトル（ステージ選択）画面 ----------
 async function titleScreen() {
   document.body.classList.remove("in-game"); // タイトルでは固定ウィンドウを隠す
+  document.body.style.background = ""; // ステージのテーマ背景を解除して既定に戻す
   showSurrenderButton(false);
   while (true) {
     const res = await showStageSelect();
@@ -1565,8 +1711,19 @@ async function titleScreen() {
     if (res === "album") { await showAlbum(); continue; }
     if (res === "deck") { await showDeckBuilder(); continue; }
     if (res === "difficulty") { await showDifficultyPicker(); continue; }
+    if (res === "matchlen") { await showMatchLengthPicker(); continue; }
     if (res === "workshop") { await showWorkshop(); continue; }
     if (res === "weekly") { await showWeeklyDialog(); continue; }
+    if (res === "royale") {
+      // ⚔ 三つ巴（人間1 + CPU2）: 全ステージから盤面を選ぶ。乱入者は対戦ごとにランダム
+      while (true) {
+        const t = await showStageSelect({ royale: true });
+        if (typeof t === "number") { startGame(t, { royale: true }); return; }
+        if (t === "difficulty") { await showDifficultyPicker(); continue; }
+        break; // "back"
+      }
+      continue;
+    }
     if (res === "versus") {
       // 2人対戦（ホットシート）: 2人のプロファイルを選ぶ → 全ステージからステージを選ぶ
       const setup = await showVersusSetup();
@@ -1595,8 +1752,11 @@ function showHelp() {
   return showDialog({
     title: "❓ 遊び方",
     body: `
-      <b>勝利条件</b>: 総資産（魔力＋土地価値）がステージの目標に達した状態で🏰城に到達する。
-      相手を破産させても勝ち。ラウンド上限で決着しない場合は総資産の多い方が勝ち。<br><br>
+      <b>勝利条件</b>: 総資産（魔力＋土地価値）がステージの目標に達した状態で🏰城に到達（凱旋）する。
+      目標に達すると<b>⚑凱旋リーチ</b>が表示される。ラウンド上限で決着しない場合は総資産の多い方が勝ち。<br>
+      <b>💸 魔力が尽きても敗北にはならない</b>: 支払いきれないときは土地を売却し、それでも足りなければ
+      持てる魔力を全て渡して<b>🏰城へ帰還し、初期魔力で再スタート</b>する（相手を身ぐるみ剥いでも決着はつかない——勝つには自分が凱旋するしかない）。<br>
+      <b>⏱ 決着モード</b>: タイトルの「⏱ 決着」で<b>短期戦／標準／長期戦／大戦</b>を選べる。目標資産とラウンド上限が変わり、対戦の長さを好みに調整できる。<br><br>
       <b>ターンの流れ</b>: カードを1枚引く → （任意で手札のスペルをクリックして使用・1回まで）→ 🎲ダイスで移動<br><br>
       <b>マスに止まったとき — このターンの「能動的な行動」は合計1回だけ（その発動場所が①到達マスか②通過マスに変わる）</b><br>
       <b>① 到着マスのイベント</b>: 空き地は召喚、自分の土地はレベルアップ／交代、
@@ -1630,7 +1790,9 @@ function showHelp() {
       ・自分の土地 … 土地レベルアップ、またはクリーチャーを手札と<b>交代</b>できる<br>
       ・敵の土地 … 通行料を支払う or クリーチャーで侵略バトル<br>
       ・🎴カード＝1枚ドロー ／ 💎魔力＝魔力ゲット ／ ⛩️関門＝通過でボーナス<br>
-      ・🌀ワープ＝対のマスへ移動 ／ 🌋マグマ＝魔力を失う ／ 💨疾風＝さらに2マス進む<br><br>
+      ・🌀ワープ＝対のマスへ移動 ／ 🌋マグマ＝魔力を失う ／ 💨疾風＝さらに2マス進む<br>
+      ・🎰<b>運命</b>＝ルーレット（大当り+300G／+150G／2枚ドロー／次のダイス2倍／はずれ-100G） ／
+      ⛲<b>泉</b>＝自軍クリーチャー全回復＋60G<br><br>
       <b>連鎖</b>: 同じ属性の土地を複数持つと通行料が倍増（2つ→×1.5、3つ→×2.0、4つ以上→×2.5）<br>
       <b>周回</b>: 関門を規定数そろえて城を<b>通過または停止</b>すると<b>周回ボーナス＝魔力（所有土地が多いほど増額）＋自軍クリーチャーHP全回復</b>。大きく劣勢のときは魔力<b>1.5倍</b>！<br>
       <b>🏰 領地コントロール</b>: 城にコマが<b>ぴったり停止（通過ではなく丁度）</b>すると、周回に関係なく<b>支配する全領地を対象に1回だけ行動</b>できる（侵攻／交代／レベルアップ）。
@@ -1669,6 +1831,8 @@ function showHelp() {
       <b>⚙ 難易度</b>: タイトル画面で<b>イージー／ノーマル／ハード</b>を選べる。相手ごとの強さの違いはそのままに、CPUの積極性・デッキ・資金力が変わる。<br>
       <b>👤 プレイヤー</b>: タイトル画面の「👤」で<b>5人まで</b>切り替えられる。プレイヤーごとに<b>コレクション・デッキ（5つまで保存）・ステージ進行度</b>が別々に記録される（名前は「✎」で変更）。<br>
       <b>レア度</b>: カードには★（コモン）〜★★★★（レジェンド）のレア度があり、パックでは低レアほど出やすい。<br><br>
+      <b>⚔ 三つ巴</b>: あなた＋ステージの主＋<b>ランダムな乱入キャラ</b>の3人で戦うモード。<b>全ステージ</b>から選べ、勝てばカードを獲得（進行度は変化しない）。
+      対象を選ぶスペル（ドレイン・フリーズ等）は<b>相手を選択</b>して撃つ。3人だと相手を金欠にしても止まらないので、<b>自分の凱旋</b>を最短で狙うのが鍵。<br>
       <b>🎮 2人対戦（ホットシート）</b>: 同じ端末を交互に操作する<b>人間同士の対戦</b>。プレイヤーを2人選び、<b>全ステージ</b>から盤面を選べる。
       各自の<b>使用中デッキ</b>（未構築ならおまかせ）で戦い、手番の交代時は手札が伏せられる（報酬・進行度は変化しない）。<br>
       <b>♻️ カード工房</b>: 同名<b>4枚目以降の余剰カード</b>を<b>🔮マナの欠片</b>に分解し、欠片で<b>好きなカードを生成</b>できる

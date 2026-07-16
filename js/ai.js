@@ -20,6 +20,17 @@ const AI_PROFILES = {
 };
 let AI_PROFILE = AI_PROFILES.normal;
 
+// プレイヤー個人の実効プロファイル。三つ巴ではCPUごとに異なる（newGame の mkCpu がセット）。
+// 未設定なら従来どおりグローバルの AI_PROFILE（ステージ既定 × 全体難易度）を使う
+function aiProf(p) { return (p && p.aiProfile) || AI_PROFILE; }
+
+// 相手全員（三つ巴では2人）が既定ルートで1〜6マス以内に踏み得るマスidの集合（防衛系スペルの判断用）
+function aiNearTilesOfOpponents(g, p) {
+  const near = new Set();
+  opponentsOf(g, p).forEach(q => { for (let n = 1; n <= 6; n++) near.add(walkAhead(g, q.pos, n).id); });
+  return near;
+}
+
 // ---------- ゲーム難易度（イージー / ノーマル / ハード） ----------
 // 各ステージ固有のプロファイル（相手ごとの違い）に、プレイヤーが選ぶ全体難易度の補正を掛け合わせる。
 // ＝「相手ごとの強さの違い」と「全体の手ごたえ」を独立に調整できる（req11）。
@@ -57,33 +68,33 @@ function aiHandCards(p) { return p.hand.map(id => CARD_BY_ID[id]); }
 
 // --- ターン開始時のスペル選択。使うカードidを返す（使わないなら null） ---
 function aiChooseSpell(g, p) {
-  const opp = opponentOf(g, p);
+  const opp = opponentOf(g, p); // 筆頭の相手（総資産トップ）。三つ巴では最も勝ちに近い相手を警戒する
   for (const id of p.hand) {
     const c = CARD_BY_ID[id];
-    if (c.type !== "spell" || c.cost > p.magic - AI_PROFILE.reserve) continue;
+    if (c.type !== "spell" || c.cost > p.magic - aiProf(p).reserve) continue;
     if (c.spell === "recall" && p.pos !== 0 && assetsOf(g, p) - c.cost >= RULES.target) return id;
     // 大きく劣勢で関門が規定数揃っているなら、リコールで即周回（劣勢1.5倍ボーナス＋全回復）して立て直す
     if (c.spell === "recall" && p.pos !== 0 && p.gates.size >= gatesNeededOf(g) &&
         assetsOf(g, p) < assetsOf(g, opp) * COMEBACK_RATIO) return id;
     if (c.spell === "revenge" && assetsOf(g, opp) - assetsOf(g, p) >= 600 && opp.magic >= 150) return id;
-    if (c.spell === "drain" && opp.magic >= 150) return id;
-    if (c.spell === "plunder" && opp.magic >= 260) return id; // 相手が富んでいる時ほど半額奪取が刺さる
+    if (c.spell === "drain" && richestOpponent(g, p).magic >= 150) return id;
+    if (c.spell === "plunder" && richestOpponent(g, p).magic >= 260) return id; // 相手が富んでいる時ほど半額奪取が刺さる
     if (c.spell === "dicedouble" && aiWantDiceDouble(g, p)) return id;
     if (c.spell === "vanish" && aiPickVanishTarget(g, p)) return id;
     if (c.spell === "gust" && aiPickGustTarget(g, p)) return id;
     if (c.spell === "teleport" && aiPickTeleportTarget(g, p)) return id;
     if (c.spell === "transport" && aiPickTransportTarget(g, p)) return id;
     if (c.spell === "leap" && aiPickLeapTarget(g, p)) return id;
-    if (c.spell === "quake" && ownedLands(g, opp.id).some(t => t.level >= 3)) return id;
+    if (c.spell === "quake" && enemyLandsOf(g, p).some(t => t.level >= 3)) return id;
     if (c.spell === "growth" && aiPickGrowthTarget(g, p)) return id;
     if (c.spell === "eleshift" && aiPickShiftTarget(g, p)) return id;
     if (c.spell === "sanctuary" && aiPickSanctuaryTarget(g, p)) return id;
     if (c.spell === "ensnare" && aiPickEnsnareTarget(g, p)) return id;
     if (c.spell === "regen" && aiWantRegen(g, p)) return id;
     if (c.spell === "meteor" && aiPickMeteorTarget(g, p)) return id;
-    if (c.spell === "freeze" && aiWantFreeze(g, p)) return id;
+    if (c.spell === "freeze" && aiPickFreezeTarget(g, p)) return id;
     if (c.spell === "treasure" && ownedLands(g, p.id).length >= 3) return id;
-    if (c.spell === "steal" && opp.hand.length >= 5) return id;
+    if (c.spell === "steal" && aiPickStealTarget(g, p)) return id;
     if (c.spell === "salvage" && aiPickSalvage(g, p)) return id;
     if (c.spell === "alchemy" && aiPickAlchemy(g, p, id)) return id;
     if (c.spell === "renew" && aiWantRenew(g, p)) return id;
@@ -99,7 +110,7 @@ function aiChooseSpell(g, p) {
 // ホーリーワードで狙う価値のある目（1〜6）を探す。なければ null
 // 「連鎖が伸びる空き地」に一致属性クリーチャーを置ける場合のみ使う
 function aiPickHolywordDice(g, p, spellCost) {
-  const budget = p.magic - spellCost - AI_PROFILE.reserve;
+  const budget = p.magic - spellCost - aiProf(p).reserve;
   for (let n = 1; n <= 6; n++) {
     const t = walkAhead(g, p.pos, n); // 分岐は既定ルートで近似
     if (t.type !== "LAND" || t.owner !== null) continue;
@@ -126,7 +137,7 @@ function aiChooseDiscard(g, p) {
 
 // --- 空き地: 召喚するクリーチャーを選ぶ（しないなら null） ---
 function aiChooseSummon(g, p, tile) {
-  const budget = p.magic - AI_PROFILE.reserve;
+  const budget = p.magic - aiProf(p).reserve;
   const candidates = aiHandCards(p).filter(c => c.type === "creature" && c.cost <= budget);
   if (candidates.length === 0) return null;
   // 属性一致 > 連鎖が伸びる属性 > 安い、で採点
@@ -164,9 +175,9 @@ function aiChooseInvade(g, p, tile) {
   combos.sort((a, b) => a.cost - b.cost);
   const best = combos[0];
   const gain = landValue(tile) + toll; // 奪う価値 + 払わずに済む通行料
-  if (gain > best.cost * AI_PROFILE.invadeRatio) {
+  if (gain > best.cost * aiProf(p).invadeRatio) {
     // 弱い相手は「勝てる戦い」でも一定確率で見送る（＝冷徹に最善手を取り続けない）
-    if (AI_PROFILE.hesitateProb && Math.random() < AI_PROFILE.hesitateProb) return null;
+    if (aiProf(p).hesitateProb && Math.random() < aiProf(p).hesitateProb) return null;
     return best;
   }
   return null;
@@ -174,7 +185,7 @@ function aiChooseInvade(g, p, tile) {
 
 // --- 防衛時: アイテムを使うか。使うならカードid、使わないなら null ---
 function aiChooseDefenseItem(g, defender, tile, attCard, attItem) {
-  if (!AI_PROFILE.useDefItems) return null;
+  if (!aiProf(defender).useDefItems) return null;
   const noItem = resolveBattle(attCard, tile, attItem, null, { g });
   if (!noItem.attackerWins) return null; // 素で守れるなら温存
   const items = aiHandCards(defender).filter(c => c.type === "item" && c.cost <= defender.magic - 50);
@@ -192,7 +203,7 @@ function aiOwnLand(g, p, tile) {
   const cur = CARD_BY_ID[tile.creature.cardId];
   // 属性不一致なら、一致するクリーチャーへの交代を検討（土地の加護で守りが固くなる）
   if (cur.element !== tile.element) {
-    const budget = p.magic - AI_PROFILE.reserve;
+    const budget = p.magic - aiProf(p).reserve;
     const cands = aiHandCards(p).filter(c =>
       c.type === "creature" && c.element === tile.element && c.cost <= budget &&
       c.st + c.hp >= cur.st + cur.hp - 10);
@@ -216,7 +227,7 @@ function aiMarchFromTile(g, p, src) {
   const card = CARD_BY_ID[src.creature.cardId];
   if (card.ab.includes("immobile")) return null;
   const cost = marchCost(card);
-  if (p.magic - AI_PROFILE.reserve < cost) return null;
+  if (p.magic - aiProf(p).reserve < cost) return null;
   let best = null, bestScore = 40; // 最低限のうまみが無ければ動かさない
   for (const dst of marchTargets(g, p, src)) {
     let score = -cost;
@@ -236,11 +247,11 @@ function aiMarchFromTile(g, p, src) {
 // --- 自分の土地: レベルアップするか ---
 function aiChooseLevelUp(g, p, tile) {
   const cost = levelUpCost(tile);
-  if (!isFinite(cost) || cost > p.magic - AI_PROFILE.reserve * 2) return false;
+  if (!isFinite(cost) || cost > p.magic - aiProf(p).reserve * 2) return false;
   const chain = chainCount(g, p.id, tile.element);
   // 連鎖のある土地を優先的に伸ばす。単発土地もある程度は投資する
   if (chain >= 2) return true;
-  return tile.level < AI_PROFILE.levelSingle && p.magic > cost + 300;
+  return tile.level < aiProf(p).levelSingle && p.magic > cost + 300;
 }
 
 // --- 分かれ道: どちらへ進むか。next のタイルidを返す ---
@@ -271,6 +282,12 @@ function aiLandingScore(g, p, t) {
     case "CARD":  return 40;
     case "MAGMA": return -RULES.magmaLoss;
     case "BOOST": return 20;
+    case "FORTUNE": return 70;  // 期待値プラスのくじ引き
+    case "SPRING": {
+      // 負傷クリーチャーがいるほど泉の価値が上がる
+      const wounded = g.tiles.filter(t => t.type === "LAND" && t.owner === p.id && t.creature && isWounded(t.creature)).length;
+      return 30 + wounded * 25;
+    }
     case "LAND":
       if (t.owner === null) return 60 + chainCount(g, p.id, t.element) * 30;
       if (t.owner === p.id) return 30;
@@ -281,8 +298,7 @@ function aiLandingScore(g, p, t) {
 
 // ---------- スペルのターゲット選択ヘルパー ----------
 function aiPickQuakeTarget(g, p) {
-  const opp = opponentOf(g, p);
-  const lands = ownedLands(g, opp.id).filter(t => t.level > 1 && !isSanctuaryProtected(g, t));
+  const lands = enemyLandsOf(g, p).filter(t => t.level > 1 && !isSanctuaryProtected(g, t));
   if (lands.length === 0) return null;
   lands.sort((a, b) => b.level - a.level);
   return lands[0];
@@ -291,29 +307,27 @@ function aiPickQuakeTarget(g, p) {
 // バニッシュ: 敵の最も価値の高い（＝主力の）土地のクリーチャーを無条件で消滅させる（HP不問）。
 // レジェンド級の確定除去なので、相手の要となる高額地・連鎖地に温存して撃つ。
 function aiPickVanishTarget(g, p) {
-  const opp = opponentOf(g, p);
-  const lands = ownedLands(g, opp.id).filter(t =>
+  const lands = enemyLandsOf(g, p).filter(t =>
     t.creature && landValue(t) >= 480 && !isSanctuaryProtected(g, t) && !isSpellProof(t));
   if (lands.length === 0) return null;
   lands.sort((a, b) =>
-    (landValue(b) + chainCount(g, opp.id, b.element) * 200) -
-    (landValue(a) + chainCount(g, opp.id, a.element) * 200));
+    (landValue(b) + chainCount(g, b.owner, b.element) * 200) -
+    (landValue(a) + chainCount(g, a.owner, a.element) * 200));
   return lands[0];
 }
 
 // ガスト（強制移動）: 敵の連鎖地・高額地のクリーチャーを、隣接する最も安い空き地へ押し出して連鎖・防衛を崩す
 // 返り値: { src, dst } または null
 function aiPickGustTarget(g, p) {
-  const opp = opponentOf(g, p);
   let best = null, bestScore = 60; // 最低限のうまみが無ければ撃たない
-  for (const src of ownedLands(g, opp.id)) {
+  for (const src of enemyLandsOf(g, p)) {
     if (!src.creature || isSanctuaryProtected(g, src) || isSpellProof(src)) continue;
     if (CARD_BY_ID[src.creature.cardId].ab.includes("immobile")) continue;
     const dests = gustDests(g, src);
     if (dests.length === 0) continue;
     dests.sort((a, b) => landValue(a) - landValue(b)); // 相手の得を最小化＝最も安い空き地へ
     const dst = dests[0];
-    const chain = chainCount(g, opp.id, src.element);
+    const chain = chainCount(g, src.owner, src.element);
     const score = landValue(src) * 0.4 + (chain >= 2 ? chain * 120 : 0) - landValue(dst) * 0.3;
     if (score > bestScore) { bestScore = score; best = { src, dst }; }
   }
@@ -394,8 +408,7 @@ function aiPickRegenTarget(g, p) {
 
 // メテオ: 40ダメージで倒せる敵クリーチャー（現在HP<=40）を優先、無ければ高額地を削る
 function aiPickMeteorTarget(g, p) {
-  const opp = opponentOf(g, p);
-  const lands = ownedLands(g, opp.id).filter(t => t.creature && !isSanctuaryProtected(g, t) && !isSpellProof(t));
+  const lands = enemyLandsOf(g, p).filter(t => t.creature && !isSanctuaryProtected(g, t) && !isSpellProof(t));
   if (lands.length === 0) return null;
   const killable = lands.filter(t => currentHp(t.creature) <= 40 && landValue(t) >= 240);
   const pool = killable.length ? killable : lands.filter(t => landValue(t) >= 900); // 削る価値のある高額地のみ
@@ -411,11 +424,21 @@ function aiWantDiceDouble(g, p) {
   return true;
 }
 
-// フリーズ: 相手が勝ちに近い or 資産で大きく先行しているとき、動きを止める
-function aiWantFreeze(g, p) {
-  const opp = opponentOf(g, p);
-  if (opp.skipTurn) return false;
-  return assetsOf(g, opp) >= RULES.target * 0.75 || assetsOf(g, opp) > assetsOf(g, p) + 800;
+// フリーズ: 勝ちに近い or 資産で大きく先行している相手の動きを止める。対象プレイヤーを返す（いなければ null）
+function aiPickFreezeTarget(g, p) {
+  const cands = opponentsOf(g, p).filter(q => !q.skipTurn &&
+    (assetsOf(g, q) >= RULES.target * 0.75 || assetsOf(g, q) > assetsOf(g, p) + 800));
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => assetsOf(g, b) - assetsOf(g, a)); // 最も勝ちに近い相手を止める
+  return cands[0];
+}
+
+// スティール: 手札の潤沢な相手から奪う。対象プレイヤーを返す（いなければ null）
+function aiPickStealTarget(g, p) {
+  const cands = opponentsOf(g, p).filter(q => q.hand.length >= 5);
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => b.hand.length - a.hand.length);
+  return cands[0];
 }
 
 // アルケミー: 魔力が乏しく手札が渋滞しているとき、使い道の薄い1枚を120Gに変える。
@@ -445,9 +468,8 @@ function aiPickSalvage(g, p) {
 
 // リジェネを使う価値があるか: 相手が近づいている高額地に、深く傷ついた防衛クリーチャーがいる
 function aiWantRegen(g, p) {
-  if (p.magic < CARD_BY_ID.regen.cost + AI_PROFILE.reserve) return false;
-  const opp = opponentOf(g, p);
-  const near = aiNearTiles(g, opp);
+  if (p.magic < CARD_BY_ID.regen.cost + aiProf(p).reserve) return false;
+  const near = aiNearTilesOfOpponents(g, p);
   return ownedLands(g, p.id).some(t => {
     if (!t.creature || !isWounded(t.creature)) return false;
     const c = CARD_BY_ID[t.creature.cardId];
@@ -474,8 +496,7 @@ function aiNearTiles(g, player) {
 
 // スネアトラップ: 相手がすぐ踏みそうな自分の高額地に罠を仕掛け、足止めしつつ通行料を取る
 function aiPickEnsnareTarget(g, p) {
-  const opp = opponentOf(g, p);
-  const near = aiNearTiles(g, opp);
+  const near = aiNearTilesOfOpponents(g, p);
   const cands = g.tiles.filter(t =>
     t.type === "LAND" && t.owner === p.id && !overlayOf(g, t) &&
     near.has(t.id) && tollOf(g, t) >= 120);
@@ -487,7 +508,7 @@ function aiPickEnsnareTarget(g, p) {
 // 引き直し: クリーチャーがほぼ無く手札が渋滞している時に手札をリフレッシュ
 function aiWantRenew(g, p) {
   const cost = CARD_BY_ID.renew.cost;
-  if (p.magic < cost + AI_PROFILE.reserve + 60) return false;
+  if (p.magic < cost + aiProf(p).reserve + 60) return false;
   const creatures = aiHandCards(p).filter(c => c.type === "creature").length;
   return creatures <= 1 && p.hand.length >= 4;
 }
@@ -496,7 +517,7 @@ function aiWantRenew(g, p) {
 function aiChoosePassLevelUp(g, p) {
   const cands = passLevelupSources(g, p).filter(t =>
     chainCount(g, p.id, t.element) >= 2 && t.level <= 3 &&
-    levelUpCost(t) <= p.magic - AI_PROFILE.reserve);
+    levelUpCost(t) <= p.magic - aiProf(p).reserve);
   if (cands.length === 0) return null;
   cands.sort((a, b) => (chainCount(g, p.id, b.element) - chainCount(g, p.id, a.element)) || (levelUpCost(a) - levelUpCost(b)));
   return cands[0];
@@ -505,7 +526,7 @@ function aiChoosePassLevelUp(g, p) {
 // クリーチャー交代（②通過アクション）: 通過した自領で属性不一致の駐留を、一致クリーチャーへ入れ替える
 // 返り値: { tile, cardId } または null
 function aiChoosePassSwap(g, p) {
-  const budget = p.magic - AI_PROFILE.reserve;
+  const budget = p.magic - aiProf(p).reserve;
   let best = null, bestScore = 60; // 最低限のうまみが無ければ交代しない
   for (const t of passSwapSources(g, p)) {
     const cur = CARD_BY_ID[t.creature.cardId];
@@ -525,8 +546,7 @@ function aiChoosePassSwap(g, p) {
 
 // サンクチュアリ: 相手がすぐ踏みそうな自分の高額地(Lv3以上)を結界で守る
 function aiPickSanctuaryTarget(g, p) {
-  const opp = opponentOf(g, p);
-  const near = aiNearTiles(g, opp);
+  const near = aiNearTilesOfOpponents(g, p);
   const cands = ownedLands(g, p.id).filter(t =>
     !overlayOf(g, t) && landValue(t) >= 480 && near.has(t.id));
   if (cands.length === 0) return null;

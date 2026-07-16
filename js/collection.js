@@ -532,12 +532,12 @@ function showDiscardViewer() {
             <span class="pi-icon">${cardIconOf(c)}</span><span class="pi-name">${esc(c.name)}</span><span class="di-count">×${counts[id]}</span></div>`; }).join("")
         : `<div class="deck-empty">捨札はまだありません</div>`;
       return `<div class="builder-col">
-        <div class="bc-title" style="color:${PLAYER_COLORS[p.id]}">${p.id === 0 ? "🔵" : "🔴"} ${esc(p.name)}｜山札 ${p.deck.length} ／ 捨札 ${p.discard.length}</div>
+        <div class="bc-title" style="color:${PLAYER_COLORS[p.id]}">${P_ICONS[p.id]} ${esc(p.name)}｜山札 ${p.deck.length} ／ 捨札 ${p.discard.length}</div>
         <div class="deck-list">${list}</div></div>`;
     };
     box.innerHTML = `<h2>🗑 捨てカード確認</h2>
-      <p class="dlg-body">両者の捨札（使用済み・失ったカード）の一覧です。<b>山札が尽きると捨札を切り直して山札に戻り</b>、そのときはログ（📜）で「🔀 山札が一巡！」と合図します。</p>
-      <div class="builder">${section(G.players[0])}${section(G.players[1])}</div>
+      <p class="dlg-body">全員の捨札（使用済み・失ったカード）の一覧です。<b>山札が尽きると捨札を切り直して山札に戻り</b>、そのときはログ（📜）で「🔀 山札が一巡！」と合図します。</p>
+      <div class="builder">${G.players.map(section).join("")}</div>
       <div class="dlg-buttons"><button class="btn primary" data-value="close">閉じる</button></div>`;
     overlay.classList.add("show");
     box.querySelector("[data-value=close]").addEventListener("click", () => { overlay.classList.remove("show"); resolve(); });

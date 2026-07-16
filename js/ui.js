@@ -18,15 +18,23 @@ function closePassiveDialog() {
 }
 function setSelectableTiles(ids) { UI.selectableTiles = ids instanceof Set ? ids : new Set(ids); }
 function clearSelectableTiles() { UI.selectableTiles = null; }
-const PLAYER_COLORS = ["#4da3ff", "#ff5b5b"];
+const PLAYER_COLORS = ["#4da3ff", "#ff5b5b", "#7ed957"]; // 🔵自分 / 🔴相手1 / 🟢相手2（三つ巴）
+const P_ICONS = ["🔵", "🔴", "🟢"];   // パネル・ログ・ダイアログで使うプレイヤー印
+const P_MINI  = ["🔹", "🔸", "💚"];   // ルートプレビューで土地の所有者を示す小印
 const CELL = 100, TILE = 90;
+// 盤面上の駒の位置（同じマスに複数人が重なっても見分けられるよう左右＋中央にずらす）
+const TOKEN_OFFSETS = [
+  { dx: 20, dy: -8 },        // P0: 左上
+  { dx: TILE - 20, dy: -8 }, // P1: 右上
+  { dx: TILE / 2, dy: -16 }, // P2: 中央やや上（三つ巴）
+];
 
 // 演出速度の倍率。トレーニングでは小さくして時短にする（startGameで設定）
 let GAME_SPEED = 1;
 function sleep(ms) { return new Promise(r => setTimeout(r, ms * GAME_SPEED)); }
 
-const TILE_ICONS = { CASTLE: "🏰", GATE: "⛩️", CARD: "🎴", MAGIC: "💎", WARP: "🌀", MAGMA: "🌋", BOOST: "💨" };
-const TILE_LABELS = { CASTLE: "城", GATE: "関門", CARD: "カード", MAGIC: "魔力", WARP: "ワープ", MAGMA: "マグマ", BOOST: "疾風" };
+const TILE_ICONS = { CASTLE: "🏰", GATE: "⛩️", CARD: "🎴", MAGIC: "💎", WARP: "🌀", MAGMA: "🌋", BOOST: "💨", FORTUNE: "🎰", SPRING: "⛲" };
+const TILE_LABELS = { CASTLE: "城", GATE: "関門", CARD: "カード", MAGIC: "魔力", WARP: "ワープ", MAGMA: "マグマ", BOOST: "疾風", FORTUNE: "運命", SPRING: "泉" };
 
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
@@ -42,14 +50,17 @@ function tilePx(tile) { return { x: tile.x * CELL + 5, y: tile.y * CELL + 5 }; }
 function renderBoard(g) {
   const svg = document.getElementById("board");
   let html = "";
-  // マナの回路（マスをつなぐ道）: タイルの下層に描く。外周の太い道＋中央を流れる魔力の点線
+  // マナの回路（マスをつなぐ道）: タイルの下層に描く。外周の太い道＋中央を流れる魔力の点線。
+  // 色はステージのテーマ（stage.theme）で変わり、盤面ごとの雰囲気を出す
+  const th = g.stage.theme || {};
+  const pathCol = th.path || "#241e33", dotCol = th.dot || "#5c5480";
   g.tiles.forEach(tile => {
     const c1 = tilePx(tile);
     tile.next.forEach(nid => {
       const c2 = tilePx(g.tiles[nid]);
       const [x1, y1, x2, y2] = [c1.x + TILE / 2, c1.y + TILE / 2, c2.x + TILE / 2, c2.y + TILE / 2];
-      html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#241e33" stroke-width="16" stroke-linecap="round"/>`;
-      html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#5c5480" stroke-width="2.5" stroke-dasharray="2 9" stroke-linecap="round" opacity="0.9"/>`;
+      html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${pathCol}" stroke-width="16" stroke-linecap="round"/>`;
+      html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${dotCol}" stroke-width="2.5" stroke-dasharray="2 9" stroke-linecap="round" opacity="0.9"/>`;
     });
   });
   g.tiles.forEach(tile => {
@@ -152,7 +163,7 @@ function renderBoard(g) {
   g.players.forEach(p => {
     if (!p.alive) return;
     const { x, y } = tilePx(g.tiles[p.pos]);
-    const off = p.id === 0 ? { dx: 20, dy: -8 } : { dx: TILE - 20, dy: -8 };
+    const off = TOKEN_OFFSETS[p.id] || TOKEN_OFFSETS[0];
     const cx = x + off.dx, cy = y + off.dy;
     const active = g.current === p.id && !g.over;
     html += `<g class="token">`;
@@ -164,7 +175,7 @@ function renderBoard(g) {
     html += `<circle cx="${cx}" cy="${cy + 1.5}" r="13" fill="#000" opacity="0.35"/>`;
     html += `<circle cx="${cx}" cy="${cy}" r="13" fill="url(#tokP${p.id})" stroke="#fff" stroke-width="2"/>`;
     html += `<ellipse cx="${cx - 4}" cy="${cy - 5}" rx="4.5" ry="3" fill="#fff" opacity="0.45"/>`;
-    html += `<text x="${cx}" y="${cy + 5}" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold" style="text-shadow:0 1px 2px #000">${g.hotseat ? p.id + 1 : (p.id === 0 ? "P" : "C")}</text>`;
+    html += `<text x="${cx}" y="${cy + 5}" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold" style="text-shadow:0 1px 2px #000">${(g.hotseat || g.players.length > 2) ? p.id + 1 : (p.id === 0 ? "P" : "C")}</text>`;
     html += `</g>`;
   });
   svg.innerHTML = html;
@@ -172,8 +183,12 @@ function renderBoard(g) {
 
 // ---------- プレイヤーパネル ----------
 function renderPanels(g) {
+  // 三つ巴のときだけ3人目のウィンドウ（#win-p2）を表示する
+  const w2 = document.getElementById("win-p2");
+  if (w2) w2.classList.toggle("unused", g.players.length < 3);
   g.players.forEach(p => {
     const el = document.getElementById(`panel-${p.id}`);
+    if (!el) return;
     const assets = assetsOf(g, p);
     const chains = Object.keys(ELEMENTS)
       .map(e => ({ e, n: chainCount(g, p.id, e) }))
@@ -181,10 +196,15 @@ function renderPanels(g) {
       .map(c => `${ELEMENTS[c.e].icon}${c.n}`).join(" ") || "－";
     const needed = gatesNeededOf(g);
     const gates = "●".repeat(Math.min(p.gates.size, needed)) + "○".repeat(Math.max(0, needed - p.gates.size));
+    const reached = assets >= RULES.target; // 目標達成＝城へ凱旋すれば勝ち（⚑リーチ表示）
     el.classList.toggle("active", g.current === p.id && !g.over);
     el.classList.toggle("dead", !p.alive);
+    el.classList.toggle("reached", reached && !g.over);
+    // CPUはキャラの顔絵（chars.js）を名前の横に出して「相手の存在」を感じさせる
+    const ch = (typeof charOf === "function") ? charOf(p) : null;
+    const face = ch ? `<span class="p-face">${charPortraitSVG(ch, 22)}</span>` : P_ICONS[p.id];
     el.innerHTML = `
-      <div class="p-name" style="color:${PLAYER_COLORS[p.id]}">${p.id === 0 ? "🔵" : "🔴"} ${esc(p.name)}</div>
+      <div class="p-name" style="color:${PLAYER_COLORS[p.id]}">${face} ${esc(p.name)}${reached ? ` <span class="p-reach" title="目標資産に到達！ 城へ凱旋すれば勝利">⚑凱旋リーチ</span>` : ""}</div>
       <div class="p-row"><span>魔力</span><b>${p.magic}G</b></div>
       <div class="p-row big"><span>総資産</span><b>${assets}G / ${RULES.target}G</b></div>
       <div class="p-bar"><div style="width:${Math.min(100, assets / RULES.target * 100)}%; background:${PLAYER_COLORS[p.id]}"></div></div>
@@ -193,9 +213,11 @@ function renderPanels(g) {
     `;
   });
   const diff = DIFFICULTIES[loadDifficulty()];
-  const mode = g.hotseat ? "🎮 2人対戦" : `難易度 ${diff.icon}${diff.label}`;
+  const mode = g.hotseat ? "🎮 2人対戦" : g.royale ? `⚔ 三つ巴｜${diff.icon}${diff.label}` : `難易度 ${diff.icon}${diff.label}`;
+  const ml = (typeof MATCH_LENGTHS !== "undefined") ? MATCH_LENGTHS[loadMatchLength()] : null;
   document.getElementById("round-info").textContent =
     `${g.stage.icon} STAGE ${g.stageIdx + 1}｜ラウンド ${Math.min(g.round, RULES.maxRounds)} / ${RULES.maxRounds}｜${mode}` +
+    (ml && !g.training && loadMatchLength() !== "normal" ? `｜${ml.icon}${ml.label}` : "") +
     (g.weekly ? `｜🎪 ${g.weekly.name}` : "");
 }
 
@@ -386,6 +408,7 @@ function fitBoard(opts = {}) {
 const HUD_WINDOWS = [
   { id: "win-p0",   chip: "🔵 あなた" },
   { id: "win-p1",   chip: "🔴 相手" },
+  { id: "win-p2",   chip: "🟢 相手2" }, // 三つ巴のときだけ実体が表示される（それ以外は .unused）
   { id: "win-log",  chip: "📜 ログ" },
   { id: "win-hand", chip: "🃏 手札" },
 ];
@@ -393,7 +416,11 @@ function renderHudTabs() {
   const tabs = document.getElementById("hud-tabs");
   if (!tabs) return;
   tabs.innerHTML = HUD_WINDOWS
-    .filter(w => { const el = document.getElementById(w.id); return el && el.classList.contains("hidden"); })
+    .filter(w => {
+      const el = document.getElementById(w.id);
+      // .unused（この対戦では使わないウィンドウ＝2人対戦時の win-p2）はチップも出さない
+      return el && el.classList.contains("hidden") && !el.classList.contains("unused");
+    })
     .map(w => `<button class="hud-tab" data-win="${w.id}">${w.chip}</button>`).join("");
   tabs.querySelectorAll(".hud-tab").forEach(btn => btn.addEventListener("click", () => {
     const win = document.getElementById(btn.dataset.win);
@@ -539,19 +566,21 @@ function humanPickTileOnMap(candidates, opts) {
 // ---------- ステージ選択画面 ----------
 // opts.training: トレーニング（練習対戦）モードのステージ選択
 // opts.versus:   2人対戦のステージ選択 {names:[1P名, 2P名]}（全ステージ選択可）
-// 解決値: ステージ index（数値）／ "help" / "album" / "deck" / "training" / "versus" / "workshop" / "weekly" / "back"
+// opts.royale:   三つ巴（人間1 + CPU2）のステージ選択（全ステージ選択可）
+// 解決値: ステージ index（数値）／ "help" / "album" / "deck" / "training" / "versus" / "royale" / "workshop" / "weekly" / "matchlen" / "back"
 function showStageSelect(opts = {}) {
   const training = !!opts.training;
   const versus = opts.versus || null;
+  const royale = !!opts.royale;
   return new Promise(resolve => {
     const overlay = document.getElementById("overlay");
     const box = document.getElementById("dialog");
     const prog = loadProgress();
     const rows = STAGES.map((s, i) => {
-      const unlocked = versus || isStageUnlocked(i); // 2人対戦は全ステージから選べる
+      const unlocked = versus || royale || isStageUnlocked(i); // 2人対戦・三つ巴は全ステージから選べる
       const cleared = !!prog.cleared[s.id];
       const desc = unlocked
-        ? `${versus ? "" : `VS ${esc(s.cpuName)}｜`}${buildBoard(s).length}マス｜目標 ${((s.rules && s.rules.target) || 4000)}G<br>${esc(s.desc)}`
+        ? `${versus ? "" : royale ? `VS ${esc(s.cpuName)} ＋ 乱入者1名｜` : `VS ${esc(s.cpuName)}｜`}${buildBoard(s).length}マス｜目標 ${((s.rules && s.rules.target) || 4000)}G<br>${esc(s.desc)}`
         : "？？？（前のステージをクリアで解放）";
       return `<button class="stage-btn ${unlocked ? "" : "locked"}" data-idx="${i}" ${unlocked ? "" : "disabled"}>
         <span class="st-bg" aria-hidden="true">${unlocked ? s.icon : "🔒"}</span>
@@ -575,11 +604,18 @@ function showStageSelect(opts = {}) {
           ${chips(chipArr)}
         </div>
       </div>`;
+    const ml = MATCH_LENGTHS[loadMatchLength()];
+    const mlChip = loadMatchLength() !== "normal" ? `⏱ 決着: <b>${ml.icon}${ml.label}</b>` : "";
     const weeklyChip = wOn ? `🎪 今週のルール: <b>${esc(wr.name)}</b>` : "";
     const header = versus
       ? hero("🎮 決闘の間",
         `同じ卓を囲み、端末を手渡して覇を競う——友との真剣勝負。<b>全ステージから選択可</b>（報酬・進行度は変化しません）。`,
-        [`🔵 <b>${esc(versus.names[0])}</b> vs 🔴 <b>${esc(versus.names[1])}</b>`, weeklyChip])
+        [`🔵 <b>${esc(versus.names[0])}</b> vs 🔴 <b>${esc(versus.names[1])}</b>`, weeklyChip, mlChip])
+      : royale
+      ? hero("⚔ 三つ巴の戦場",
+        `🔵あなた・🔴ステージの主・🟢乱入者——<b>3人の魔導師</b>が同じ盤上で覇を競う。乱入者は毎回ランダム！
+         勝てばカードを${REWARD_WIN}枚獲得（進行度は変化しません）。<b>全ステージから選択可</b>。`,
+        [`👤 <b>${esc(currentProfileName())}</b>`, `⚙ 難易度: <b>${diff.icon} ${diff.label}</b>`, weeklyChip, mlChip])
       : training
       ? hero("🎯 修練の間",
         `腕とデッキを磨く練習対戦。<b>勝つとカードを${REWARD_TRAINING}枚獲得</b>（何度でも）。` +
@@ -588,16 +624,18 @@ function showStageSelect(opts = {}) {
       : hero("✦ 遠征の書 — 旅路を選べ ✦",
         `大地に張り巡らされた魔力の回路。クリーチャーを従えて土地を繋ぎ、連鎖で通行料を吊り上げ、
          目標資産を成して🏰城へ帰還せよ。初クリアの<b>カードパック</b>と勝利の<b>カード</b>で、自分だけのデッキを組み上げろ。`,
-        [`👤 <b>${esc(currentProfileName())}</b>`, `⚙ 難易度: <b>${diff.icon} ${diff.label}</b>`, weeklyChip]);
-    const buttons = (versus || training)
-      ? (training ? `<button class="btn" data-value="difficulty">⚙ 難易度: ${diff.icon}${diff.label}</button>` : "") +
+        [`👤 <b>${esc(currentProfileName())}</b>`, `⚙ 難易度: <b>${diff.icon} ${diff.label}</b>`, weeklyChip, mlChip]);
+    const buttons = (versus || training || royale)
+      ? (training || royale ? `<button class="btn" data-value="difficulty">⚙ 難易度: ${diff.icon}${diff.label}</button>` : "") +
         `<button class="btn" data-value="back">← 戻る</button>`
       : `<button class="btn" data-value="profile">👤 ${esc(currentProfileName())}</button>
          <button class="btn" data-value="difficulty">⚙ 難易度: ${diff.icon}${diff.label}</button>
+         <button class="btn" data-value="matchlen">⏱ 決着: ${ml.icon}${ml.label}</button>
          <button class="btn" data-value="album">📚 アルバム（${distinctOwned()}/${CARD_DB.length}）</button>
          <button class="btn" data-value="deck">🛠 デッキ構築</button>
          <button class="btn" data-value="workshop">♻️ 工房（🔮${shardCount()}）</button>
          <button class="btn" data-value="training">🎯 トレーニング</button>
+         <button class="btn" data-value="royale">⚔ 三つ巴</button>
          <button class="btn" data-value="versus">🎮 2人対戦</button>
          <button class="btn" data-value="weekly">🎪 週替り: ${wr.icon}${esc(wr.name)}${wOn ? "" : "（OFF）"}</button>
          <button class="btn" data-value="help">❓ 遊び方</button>`;
@@ -633,6 +671,35 @@ function showDifficultyPicker() {
     const close = () => { overlay.classList.remove("show"); resolve(); };
     box.querySelectorAll("[data-diff]").forEach(btn => btn.addEventListener("click", () => {
       saveDifficulty(btn.dataset.diff); close();
+    }));
+    box.querySelector("[data-value=back]").addEventListener("click", close);
+  });
+}
+
+// ---------- 決着モード選択（短期戦/標準/長期戦/大戦） ----------
+// 目標資産とラウンド上限に倍率を掛けて、対戦の長さを好みに調整する（v18・トレーニング以外の全モードに適用）
+function showMatchLengthPicker() {
+  return new Promise(resolve => {
+    const overlay = document.getElementById("overlay");
+    const box = document.getElementById("dialog");
+    const cur = loadMatchLength();
+    const rows = Object.keys(MATCH_LENGTHS).map(k => {
+      const m = MATCH_LENGTHS[k];
+      return `<button class="stage-btn ${k === cur ? "diff-current" : ""}" data-ml="${k}">
+        <span class="st-icon">${m.icon}</span>
+        <span class="st-main"><b>${m.label}${k === cur ? "（現在）" : ""}</b><small>${esc(m.desc)}</small></span>
+        <span class="st-star">${k === cur ? "✔" : ""}</span>
+      </button>`;
+    }).join("");
+    box.innerHTML = `<h2>⏱ 決着モード（対戦の長さ）</h2>
+      <p class="dlg-body">ステージの<b>目標資産</b>と<b>ラウンド上限</b>に倍率を掛けて、決着までの長さを調整します。
+      正規対戦・三つ巴・2人対戦に適用（トレーニングは常に時短）。次の対戦から反映されます。</p>
+      <div class="stage-list">${rows}</div>
+      <div class="dlg-buttons"><button class="btn" data-value="back">← 戻る</button></div>`;
+    overlay.classList.add("show");
+    const close = () => { overlay.classList.remove("show"); resolve(); };
+    box.querySelectorAll("[data-ml]").forEach(btn => btn.addEventListener("click", () => {
+      saveMatchLength(btn.dataset.ml); close();
     }));
     box.querySelector("[data-value=back]").addEventListener("click", close);
   });
@@ -799,7 +866,7 @@ function routePreview(g, startId, steps) {
   for (let s = 0; s < shown; s++) {
     const t = g.tiles[cur];
     let ic = t.type === "LAND" ? ELEMENTS[t.element].icon : TILE_ICONS[t.type];
-    if (t.type === "LAND" && t.owner !== null) ic += t.owner === 0 ? "🔹" : "🔸";
+    if (t.type === "LAND" && t.owner !== null) ic += P_MINI[t.owner] || "🔸";
     icons.push(s === steps - 1 ? `【${ic}】` : ic);
     cur = t.next[0];
   }
@@ -807,9 +874,12 @@ function routePreview(g, startId, steps) {
 }
 
 async function humanChooseDirection(p, tile, stepsLeft) {
+  const legend = G.hotseat ? "🔹=🔵1P 🔸=🔴2P"
+    : G.players.length > 2 ? `🔹=自分 🔸=${esc(G.players[1].name)} 💚=${esc(G.players[2].name)}`
+    : "🔹=自分 🔸=敵";
   const res = await showDialog({
     title: "🔀 分かれ道",
-    body: `残り${stepsLeft}マス。進む方向を選んでください（【】=止まる予定のマス、${G.hotseat ? "🔹=🔵1P 🔸=🔴2P" : "🔹=自分 🔸=敵"}の土地）`,
+    body: `残り${stepsLeft}マス。進む方向を選んでください（【】=止まる予定のマス、${legend}の土地）`,
     peek: true,
     buttons: tile.next.map(nid => ({
       label: `${dirArrow(tile, G.tiles[nid])} ${routePreview(G, nid, stepsLeft)}`,

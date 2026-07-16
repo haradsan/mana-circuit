@@ -55,6 +55,9 @@ function artDefsSVG() {
     <radialGradient id="tokP1" cx="35%" cy="30%" r="80%">
       <stop offset="0%" stop-color="#ffc4b8"/><stop offset="60%" stop-color="#ff5b5b"/><stop offset="100%" stop-color="#9c221d"/>
     </radialGradient>
+    <radialGradient id="tokP2" cx="35%" cy="30%" r="80%">
+      <stop offset="0%" stop-color="#d2f5bc"/><stop offset="60%" stop-color="#7ed957"/><stop offset="100%" stop-color="#3c7a1e"/>
+    </radialGradient>
   </defs></svg>`;
 }
 document.addEventListener("DOMContentLoaded", () => {
