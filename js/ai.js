@@ -103,8 +103,155 @@ function aiChooseSpell(g, p) {
       const n = aiPickHolywordDice(g, p, c.cost);
       if (n) { p.aiHolyword = n; return id; }
     }
+    // ---------- 第二弾スペル（v20） ----------
+    if (c.spell === "elembless" && ownedLands(g, p.id).filter(t => t.element === c.elem).length >= 2) return id;
+    if (c.spell === "goldrush" && p.magic >= 500) return id;
+    if (c.spell === "taxcollect" && opponentsOf(g, p).reduce((s, q) => s + ownedLands(g, q.id).length, 0) >= 4) return id;
+    if (c.spell === "revelation" && p.hand.length <= 5) return id;
+    if (c.spell === "inspiration" && p.hand.length <= 3) return id;
+    if (c.spell === "gravecall" && p.discard.length >= 2 && aiHandCards(p).filter(x => x.type === "creature").length <= 1) return id;
+    if (c.spell === "deport" && aiPickDeportTarget(g, p)) return id;
+    if ((c.spell === "cursedice" || c.spell === "mudswamp") && aiPickSlowTarget(g, p)) return id;
+    if (c.spell === "whisper" && aiPickStealTarget(g, p)) return id;
+    if (c.spell === "manaburn" && richestOpponent(g, p).magic >= 450) return id;
+    if (c.spell === "nullfog" && aiPickNullfogTarget(g, p)) return id;
+    if (c.spell === "silencefog" && aiPickSilenceTarget(g, p)) return id;
+    if (c.spell === "truce" && assetsOf(g, p) - assetsOf(g, opp) >= 600 && ownedLands(g, p.id).length >= 3) return id;
+    if (c.spell === "freezerain" && opponentsOf(g, p).filter(q => !q.skipTurn &&
+        assetsOf(g, q) >= RULES.target * 0.75).length >= Math.min(2, opponentsOf(g, p).length)) return id;
+    if (c.spell === "miragefield" && ownedLands(g, p.id).filter(t => landValue(t) >= 480).length >= 2) return id;
+    if (c.spell === "curseland" && aiPickCurselandTarget(g, p)) return id;
+    if (c.spell === "veinfind" && g.round <= RULES.maxRounds / 2 && aiPickVeinTarget(g, p)) return id;
+    if (c.spell === "fortify" && aiPickFortifyTarget(g, p)) return id;
+    if (c.spell === "blessing" && aiPickBlessingTarget(g, p)) return id;
+    if (c.spell === "grandquake" && aiPickGrandquakeTargets(g, p)) return id;
+    // 儀式は「捧げる手札」が別に要る（このカード＋1枚）
+    if (c.spell === "r_harvest" && p.hand.length >= 3 && p.magic < 300) return id;
+    if (c.spell === "r_blaze" && p.hand.length >= 2 && aiPickBlazeTarget(g, p)) return id;
+    if (c.spell === "r_revive" && p.hand.length >= 2 && aiPickReviveTarget(g, p)) return id;
+    if (c.spell === "r_ages" && p.hand.length >= 2 && aiPickAgesTarget(g, p)) return id;
+    if (c.spell === "r_storm" && p.hand.length >= 2 && enemyLandsOf(g, p).filter(t =>
+        t.creature && currentHp(t.creature) <= 25 && !isSanctuaryProtected(g, t) && !isSpellProof(t)).length >= 2) return id;
+    if (c.spell === "r_time" && p.hand.length >= 2 && assetsOf(g, p) >= RULES.target && p.pos !== 0) return id;
+    if (c.spell === "r_purify" && p.hand.length >= 2 &&
+        ownedLands(g, p.id).filter(t => t.creature && isWounded(t.creature)).length >= 2) return id;
+    if (c.spell === "fx_market" && p.hand.length <= 2) return id;
+    if (c.spell === "fx_bud" && ownedLands(g, p.id).filter(t => t.creature && isWounded(t.creature)).length >= 2) return id;
+    if (c.spell === "fx_war" && assetsOf(g, p) < assetsOf(g, opp) &&
+        aiHandCards(p).filter(x => x.type === "creature").length >= 3) return id;
+    if (c.spell === "fx_manastorm" && ownedLands(g, p.id).length >= ownedLands(g, opp.id).length + 2) return id;
+    if (c.spell === "fx_silence" && assetsOf(g, p) >= RULES.target) return id;
+    if (c.spell === "fx_goddess" && ownedLands(g, p.id).filter(t =>
+        t.creature && CARD_BY_ID[t.creature.cardId].element === t.element).length >= 2) return id;
   }
   return null;
+}
+
+// ---------- 第二弾スペルのターゲット選択（v20） ----------
+// 儀式の捧げ物: 使い道の薄い最安カード（クリーチャーは2枚まで温存）
+function aiPickSacrifice(g, p, selfId) {
+  const idx = p.hand.indexOf(selfId);
+  const pool = p.hand.slice(0, idx).concat(p.hand.slice(idx + 1)).map(id => CARD_BY_ID[id]);
+  if (pool.length === 0) return null;
+  const creatures = pool.filter(c => c.type === "creature");
+  const cands = (creatures.length <= 2) ? pool.filter(c => c.type !== "creature") : pool;
+  const sorted = (cands.length ? cands : pool).slice().sort((a, b) => a.cost - b.cost);
+  return sorted[0].id;
+}
+// 強制送還: 凱旋間際（目標到達・城以外）の相手を押し戻す
+function aiPickDeportTarget(g, p) {
+  const cands = opponentsOf(g, p).filter(q => q.pos !== 0 && assetsOf(g, q) >= RULES.target);
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => assetsOf(g, b) - assetsOf(g, a));
+  return cands[0];
+}
+// 呪いのダイス/泥沼: 勝ちに近い相手の歩みを鈍らせる
+function aiPickSlowTarget(g, p) {
+  const cands = opponentsOf(g, p).filter(q => q.pos !== 0 && assetsOf(g, q) >= RULES.target * 0.85);
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => assetsOf(g, b) - assetsOf(g, a));
+  return cands[0];
+}
+// 沈黙の霧: 勝ちに近い相手のスペル（リコール等）を封じる
+function aiPickSilenceTarget(g, p) {
+  const cands = opponentsOf(g, p).filter(q => assetsOf(g, q) >= RULES.target * 0.85);
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => assetsOf(g, b) - assetsOf(g, a));
+  return cands[0];
+}
+// 無力化の霧: 能力2つ以上の高額地の敵クリーチャーを丸裸に
+function aiPickNullfogTarget(g, p) {
+  const cands = enemyLandsOf(g, p).filter(t => t.creature && !isSanctuaryProtected(g, t) &&
+    !isSpellProof(t) && !creatureNulled(g, t.creature) &&
+    CARD_BY_ID[t.creature.cardId].ab.length >= 2 && landValue(t) >= 480);
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => landValue(b) - landValue(a));
+  return cands[0];
+}
+// カースランド: 高額な敵地の通行料を半減
+function aiPickCurselandTarget(g, p) {
+  const cands = enemyLandsOf(g, p).filter(t => !landSpellShielded(g, t) && !landCursed(g, t) && tollOf(g, t) >= 250);
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => tollOf(g, b) - tollOf(g, a));
+  return cands[0];
+}
+// 城塞化: 相手の進路上にある属性一致・高Lvの自領を鉄壁に
+function aiPickFortifyTarget(g, p) {
+  const near = aiNearTilesOfOpponents(g, p);
+  const cands = ownedLands(g, p.id).filter(t => !t.fortified && t.level >= 3 &&
+    t.creature && CARD_BY_ID[t.creature.cardId].element === t.element && near.has(t.id));
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => landValue(b) - landValue(a));
+  return cands[0];
+}
+// 鉱脈発見: 最も価値の高い自領に（長期の収入源）
+function aiPickVeinTarget(g, p) {
+  const cands = ownedLands(g, p.id).filter(t => t.veinOwner === undefined || t.veinOwner === null);
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => landValue(b) - landValue(a));
+  return cands[0];
+}
+// ブレッシング: 高Lv地の主力を永続強化
+function aiPickBlessingTarget(g, p) {
+  const cands = ownedLands(g, p.id).filter(t => t.creature && (t.creature.grown || 0) < 4 && t.level >= 3);
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => landValue(b) - landValue(a));
+  return cands[0];
+}
+// グランドクエイク: Lv3以上の敵地が2つあるときだけ撃つ（高いほうから2つ）
+function aiPickGrandquakeTargets(g, p) {
+  const cands = enemyLandsOf(g, p).filter(t => t.level >= 3 && !landSpellShielded(g, t));
+  if (cands.length < 2) return null;
+  cands.sort((a, b) => b.level - a.level || landValue(b) - landValue(a));
+  return cands.slice(0, 2);
+}
+// 猛火の儀: 70ダメージで倒せる高額地の敵を焼く
+function aiPickBlazeTarget(g, p) {
+  const cands = enemyLandsOf(g, p).filter(t => t.creature && !isSanctuaryProtected(g, t) &&
+    !isSpellProof(t) && currentHp(t.creature) <= 70 && landValue(t) >= 480);
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => landValue(b) - landValue(a));
+  return cands[0];
+}
+// 蘇生の儀: 捨て札の強クリーチャーを連鎖の伸びる空き地へ
+function aiPickReviveTarget(g, p) {
+  const creatures = [...new Set(p.discard)].map(id => CARD_BY_ID[id])
+    .filter(c => c.type === "creature" && c.st + c.hp >= 100);
+  if (creatures.length === 0) return null;
+  creatures.sort((a, b) => (b.st + b.hp) - (a.st + a.hp));
+  const empties = g.tiles.filter(t => t.type === "LAND" && t.owner === null);
+  if (empties.length === 0) return null;
+  empties.sort((a, b) =>
+    (landValue(b) + chainCount(g, p.id, b.element) * 40) -
+    (landValue(a) + chainCount(g, p.id, a.element) * 40));
+  return { cardId: creatures[0].id, tile: empties[0] };
+}
+// 星霜の儀: 連鎖2以上の低Lv地を一気に育てる
+function aiPickAgesTarget(g, p) {
+  const cands = ownedLands(g, p.id).filter(t => t.level <= 2 && chainCount(g, p.id, t.element) >= 2);
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => chainCount(g, p.id, b.element) - chainCount(g, p.id, a.element));
+  return cands[0];
 }
 
 // ホーリーワードで狙う価値のある目（1〜6）を探す。なければ null
@@ -160,12 +307,14 @@ function aiChooseInvade(g, p, tile) {
   const creatures = aiHandCards(p).filter(c => c.type === "creature" && !c.ab.includes("immobile") && c.cost <= budget);
   const items = aiHandCards(p).filter(c => c.type === "item");
   const combos = [];
+  const bopts = { g, attackerId: p.id }; // 群れ（pack）の集計に侵略側プレイヤーを渡す（v19）
   for (const c of creatures) {
-    if (resolveBattle(c, tile, null, null, { g }).attackerWins) {
+    if (resolveBattle(c, tile, null, null, bopts).attackerWins) {
       combos.push({ cardId: c.id, itemId: null, cost: c.cost });
     } else {
       for (const it of items) {
-        if (c.cost + it.cost <= budget && resolveBattle(c, tile, it, null, { g }).attackerWins) {
+        if (it.escape) continue; // 💨煙玉は防衛側専用（v19）
+        if (c.cost + it.cost <= budget && resolveBattle(c, tile, it, null, bopts).attackerWins) {
           combos.push({ cardId: c.id, itemId: it.id, cost: c.cost + it.cost });
         }
       }
@@ -186,14 +335,21 @@ function aiChooseInvade(g, p, tile) {
 // --- 防衛時: アイテムを使うか。使うならカードid、使わないなら null ---
 function aiChooseDefenseItem(g, defender, tile, attCard, attItem) {
   if (!aiProf(defender).useDefItems) return null;
-  const noItem = resolveBattle(attCard, tile, attItem, null, { g });
+  const bopts = { g, attackerId: g.current }; // 侵略は手番プレイヤーが行う（群れの集計用・v19）
+  const noItem = resolveBattle(attCard, tile, attItem, null, bopts);
   if (!noItem.attackerWins) return null; // 素で守れるなら温存
   const items = aiHandCards(defender).filter(c => c.type === "item" && c.cost <= defender.magic - 50);
-  const savers = items.filter(it => !resolveBattle(attCard, tile, attItem, it, { g }).attackerWins);
-  if (savers.length === 0) return null;
-  savers.sort((a, b) => a.cost - b.cost);
-  // 守る価値がある土地か（アイテム代 < 土地価値）
-  if (savers[0].cost < landValue(tile)) return savers[0].id;
+  const savers = items.filter(it => !it.escape && !resolveBattle(attCard, tile, attItem, it, bopts).attackerWins);
+  if (savers.length > 0) {
+    savers.sort((a, b) => a.cost - b.cost);
+    // 守る価値がある土地か（アイテム代 < 土地価値）
+    if (savers[0].cost < landValue(tile)) return savers[0].id;
+    return null;
+  }
+  // 💨煙玉（v19）: どうやっても守れないとき、高価なクリーチャーなら土地を明け渡して手札へ退避させる
+  const smoke = items.find(c => c.escape);
+  const defCard = CARD_BY_ID[tile.creature.cardId];
+  if (smoke && defCard.cost >= 80 && !defCard.structure) return smoke.id;
   return null;
 }
 
@@ -223,7 +379,8 @@ function aiOwnLand(g, p, tile) {
 // aiChooseMarch（②通過アクション）と同じ採点を、単一の出撃元に適用する。
 // 返り値: { dst } または null
 function aiMarchFromTile(g, p, src) {
-  if (!src.creature) return null;
+  if (!src.creature || truceActive(g)) return null; // 🏳️停戦協定（v20）: 侵攻不可
+
   const card = CARD_BY_ID[src.creature.cardId];
   if (card.ab.includes("immobile")) return null;
   const cost = marchCost(card);
@@ -236,7 +393,10 @@ function aiMarchFromTile(g, p, src) {
         + (chainCount(g, p.id, dst.element) - (chainCount(g, p.id, src.element) - 1)) * 40;
       if (card.element === dst.element && card.element !== src.element) score += 30;
     } else {
-      if (!resolveBattle(card, dst, null, null, { g }).attackerWins) continue;
+      if (!resolveBattle(card, dst, null, null, {
+        g, attackerId: p.id, attSrcId: src.id,
+        attGrown: card.ab.includes("grow") ? Math.min(5, src.creature.grown || 0) : 0,
+      }).attackerWins) continue;
       score += landValue(dst) + tollOf(g, dst) * 0.5 - landValue(src) * 0.3;
     }
     if (score > bestScore) { bestScore = score; best = { dst }; }
@@ -298,7 +458,7 @@ function aiLandingScore(g, p, t) {
 
 // ---------- スペルのターゲット選択ヘルパー ----------
 function aiPickQuakeTarget(g, p) {
-  const lands = enemyLandsOf(g, p).filter(t => t.level > 1 && !isSanctuaryProtected(g, t));
+  const lands = enemyLandsOf(g, p).filter(t => t.level > 1 && !landSpellShielded(g, t));
   if (lands.length === 0) return null;
   lands.sort((a, b) => b.level - a.level);
   return lands[0];
@@ -573,7 +733,10 @@ function aiChooseMarch(g, p) {
         if (card.element === dst.element && card.element !== src.element) score += 30;
       } else {
         // 敵地: 決定論シミュで勝てる時のみ検討（防衛アイテムで覆る可能性は許容）
-        if (!resolveBattle(card, dst, null, null, { g }).attackerWins) continue;
+        if (!resolveBattle(card, dst, null, null, {
+          g, attackerId: p.id, attSrcId: src.id,
+          attGrown: card.ab.includes("grow") ? Math.min(5, src.creature.grown || 0) : 0,
+        }).attackerWins) continue;
         score += landValue(dst) + tollOf(g, dst) * 0.5 - landValue(src) * 0.3;
       }
       if (score > bestScore) { bestScore = score; best = { src, dst, itemId: null }; }

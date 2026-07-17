@@ -45,6 +45,24 @@ const ABILITY_INFO = {
   magicatk:    { name: "魔法攻撃", desc: "攻撃が魔法になる。物理無効・物理反射に妨げられず、通常どおりダメージを与える" },
   // v17: 模倣＝バトル時に相手カードの基本値をそっくりコピーする（ドッペルゲンガー）
   mimic:       { name: "模倣", desc: "バトル時、相手クリーチャーの基本ST・基本HP・能力をそっくり写し取って戦う（属性は無のまま・装備や土地の加護はコピーしない）" },
+  // ---------- 第二弾「時流の回路」の新能力（v19） ----------
+  grow:     { name: "成長", desc: "自分のターン開始ごとに ST+5／最大HP+5（上限+25）。時間をかけるほど強くなる" },
+  pack:     { name: "群れ", desc: "盤面にいる自分の同属性クリーチャー1体につき ST+5（上限+30）。仲間が多いほど強い" },
+  ranged:   { name: "遠隔", desc: "侵略・侵攻のバトルで相手の反撃を受けない（相手が先制でも）。撃ち逃げの一撃" },
+  absorb:   { name: "吸収", desc: "与えたダメージの半分だけ自分のHPを回復する（そのバトル開始時のHPが上限）" },
+  armor:    { name: "硬殻", desc: "受けるダメージを常に10軽減する（最低0）。手数の多い相手に強い" },
+  lastward: { name: "背水", desc: "HPが半分以下のとき ST+25。追い詰められてからが本番" },
+  mine:     { name: "採掘", desc: "盤面にいる間、自分のターン開始時に魔力を得る（+15G）" },
+  merchant: { name: "商魂", desc: "駐留する土地の通行料が1.3倍になる" },
+  rebirth:  { name: "転生", desc: "バトルで倒されても消滅せず手札に戻る（土地は失う）" },
+  fly:      { name: "飛翔", desc: "侵攻（march）で2マス先まで移動できる" },
+  dispel:   { name: "看破", desc: "バトルで相手のアイテムを打ち消す（ディスペルワードを内蔵）" },
+  // 建造物のオーラ（個別効果）。建造物はST0・不動・バトルで反撃しない据え付けの施設
+  beacon:   { name: "烽火", desc: "隣接する自領の防衛クリーチャーの ST+10（援護に加算）" },
+  garden:   { name: "癒しの庭", desc: "隣接する自軍クリーチャーは自分のターン開始時に HP+10 回復する" },
+  harbor:   { name: "港湾", desc: "自分がこのマスを通過・停止するたび +40G" },
+  warfire:  { name: "戦意", desc: "自軍が侵略・侵攻のバトルに勝つたび +40G" },
+  festival: { name: "祝祭", desc: "自分の周回ボーナスが1.5倍になる" },
 };
 
 // レア度: カードの希少度。card.rarity で個別指定、無ければコストとタイプから推定。
@@ -65,15 +83,27 @@ function cardRarity(card) {
 }
 const RARITY_WEIGHT = Object.fromEntries(Object.entries(RARITY_META).map(([k, v]) => [k, v.weight]));
 const RARITY_ORDER = ["common", "uncommon", "rare", "legendary"];
-// レア度 → そのレア度のカードid一覧（パック排出で「レア度を決めてから一様に1枚選ぶ」ために使う）
+// カードの弾（set）。第一弾＝set未指定（=1）、第二弾＝set:2（v19）。パック・アルバムの仕切りに使う
+function cardSet(card) { return card.set || 1; }
+const CARD_SETS = [
+  { set: 1, name: "第一弾", icon: "✦" },
+  { set: 2, name: "第二弾「時流の回路」", icon: "⏳" },
+];
+// レア度 → そのレア度のカードid一覧（パック排出で「レア度を決めてから一様に1枚選ぶ」ために使う）。
+// set指定（1/2）でその弾だけに絞る（null＝全弾。ウィークリー英雄の週などデッキ注入用）
 let _cardsByRarity = null;
-function cardsOfRarity(rarity) {
+function cardsOfRarity(rarity, set = null) {
   if (!_cardsByRarity) {
-    _cardsByRarity = {};
-    RARITY_ORDER.forEach(r => { _cardsByRarity[r] = []; });
-    CARD_DB.forEach(c => { _cardsByRarity[cardRarity(c)].push(c.id); });
+    _cardsByRarity = { all: {}, 1: {}, 2: {} };
+    ["all", 1, 2].forEach(k => RARITY_ORDER.forEach(r => { _cardsByRarity[k][r] = []; }));
+    CARD_DB.forEach(c => {
+      const r = cardRarity(c);
+      _cardsByRarity.all[r].push(c.id);
+      _cardsByRarity[cardSet(c)][r].push(c.id);
+    });
   }
-  return _cardsByRarity[rarity] || [];
+  const table = set === null ? _cardsByRarity.all : (_cardsByRarity[set] || _cardsByRarity.all);
+  return table[rarity] || [];
 }
 
 const CARD_DB = [
@@ -233,6 +263,235 @@ const CARD_DB = [
     desc: "【盤面】自分の土地1つに2Rの結界。侵略・クリーチャー侵攻・敵スペルの対象にならない" },
   { id: "ensnare",   name: "スネアトラップ", type: "spell", cost: 110, spell: "ensnare",   fx: true, icon: "🕸️",
     desc: "【盤面】土地1つに2Rの罠。相手が通過・停止するとその場で足止め（移動終了）される" },
+
+  // ============================================================
+  // 第二弾「時流の回路」（v19・set:2）
+  // テーマ: 時間・成長・経済・連携。詳細は CARD_SET2_PLAN.md
+  // スペル約55種はフェーズ2で追加予定（このブロックはクリーチャー113＋アイテム32）
+  // ============================================================
+  // --- 火（遠隔・背水・会心） ---
+  { id: "firebaby",     name: "火の子トカゲ",     type: "creature", element: "fire", set: 2, cost: 30,  st: 20, hp: 20, ab: ["grow"] },
+  { id: "sparkimp",     name: "スパークインプ",   type: "creature", element: "fire", set: 2, cost: 35,  st: 25, hp: 20, ab: ["lucky"] },
+  { id: "cinderrat",    name: "シンダーラット",   type: "creature", element: "fire", set: 2, cost: 40,  st: 25, hp: 25, ab: ["pack"] },
+  { id: "heathawk",     name: "ヒートホーク",     type: "creature", element: "fire", set: 2, cost: 50,  st: 35, hp: 25, ab: [] },
+  { id: "hellbat",      name: "ヘルバット",       type: "creature", element: "fire", set: 2, cost: 55,  st: 30, hp: 30, ab: ["first"] },
+  { id: "blazesoldier", name: "ブレイズソルジャー", type: "creature", element: "fire", set: 2, cost: 60, st: 40, hp: 30, ab: [] },
+  { id: "flameboar",    name: "フレイムボア",     type: "creature", element: "fire", set: 2, cost: 65,  st: 45, hp: 30, ab: ["lastward"] },
+  { id: "firearcher",   name: "ファイアアーチャー", type: "creature", element: "fire", set: 2, cost: 60, st: 30, hp: 25, ab: ["ranged"], rarity: "uncommon" },
+  { id: "lavalizard",   name: "ラヴァリザード",   type: "creature", element: "fire", set: 2, cost: 70,  st: 45, hp: 35, ab: [] },
+  { id: "flarewitch",   name: "フレアウィッチ",   type: "creature", element: "fire", set: 2, cost: 80,  st: 45, hp: 30, ab: ["magicatk", "lucky"], rarity: "rare" },
+  { id: "bombturtle",   name: "ボムタートル",     type: "creature", element: "fire", set: 2, cost: 85,  st: 30, hp: 60, ab: ["guard"], rarity: "uncommon" },
+  { id: "flameogre",    name: "フレイムオーガ",   type: "creature", element: "fire", set: 2, cost: 90,  st: 55, hp: 40, ab: ["assault"], rarity: "uncommon" },
+  { id: "burstgriffon", name: "バーストグリフォン", type: "creature", element: "fire", set: 2, cost: 95, st: 50, hp: 45, ab: ["first"], rarity: "uncommon" },
+  { id: "ignislancer",  name: "イグニスランサー", type: "creature", element: "fire", set: 2, cost: 100, st: 55, hp: 45, ab: ["pierce"], rarity: "uncommon" },
+  { id: "calderagolem", name: "カルデラゴーレム", type: "creature", element: "fire", set: 2, cost: 105, st: 45, hp: 65, ab: [], rarity: "uncommon" },
+  { id: "amphisbaena",  name: "アンフィスバエナ", type: "creature", element: "fire", set: 2, cost: 110, st: 55, hp: 50, ab: ["double"], rarity: "rare" },
+  { id: "crimsonknight",name: "クリムゾンナイト", type: "creature", element: "fire", set: 2, cost: 115, st: 60, hp: 55, ab: ["lastward"], rarity: "rare" },
+  { id: "cannondrake",  name: "砲竜キャノンドレイク", type: "creature", element: "fire", set: 2, cost: 120, st: 60, hp: 50, ab: ["ranged"], rarity: "rare" },
+  { id: "suzaku",       name: "炎鳥スザク",       type: "creature", element: "fire", set: 2, cost: 130, st: 65, hp: 55, ab: ["first", "lucky"], rarity: "rare" },
+  { id: "hellflamedemon", name: "ヘルフレイムデーモン", type: "creature", element: "fire", set: 2, cost: 140, st: 75, hp: 50, ab: ["assault"], rarity: "rare" },
+  { id: "glendragon",   name: "焔竜グレンドラゴン", type: "creature", element: "fire", set: 2, cost: 150, st: 75, hp: 60, ab: ["ranged", "pierce"], rarity: "legendary" },
+  // --- 木（群れ・成長・捕縛） ---
+  { id: "leafrabbit",   name: "リーフラビット",   type: "creature", element: "wood", set: 2, cost: 30,  st: 15, hp: 25, ab: ["pack"] },
+  { id: "spriggan",     name: "スプリガン",       type: "creature", element: "wood", set: 2, cost: 40,  st: 20, hp: 30, ab: ["grow"] },
+  { id: "honeybee",     name: "ハニービー",       type: "creature", element: "wood", set: 2, cost: 45,  st: 30, hp: 25, ab: ["first"] },
+  { id: "mycolon",      name: "マイコロン",       type: "creature", element: "wood", set: 2, cost: 50,  st: 25, hp: 40, ab: [] },
+  { id: "matango",      name: "胞子撒きマタンゴ", type: "creature", element: "wood", set: 2, cost: 50,  st: 25, hp: 35, ab: ["rebirth"] },
+  { id: "ivysnake",     name: "アイビースネーク", type: "creature", element: "wood", set: 2, cost: 55,  st: 30, hp: 40, ab: ["capture"] },
+  { id: "youngent",     name: "若木のエント",     type: "creature", element: "wood", set: 2, cost: 60,  st: 25, hp: 50, ab: ["grow"] },
+  { id: "forestarcher", name: "フォレストアーチャー", type: "creature", element: "wood", set: 2, cost: 60, st: 30, hp: 30, ab: ["ranged"], rarity: "uncommon" },
+  { id: "packwolf",     name: "パックウルフ",     type: "creature", element: "wood", set: 2, cost: 65,  st: 35, hp: 35, ab: ["pack"] },
+  { id: "sylph",        name: "シルフ",           type: "creature", element: "wood", set: 2, cost: 70,  st: 40, hp: 35, ab: ["first"] },
+  { id: "barkbeetle",   name: "バークビートル",   type: "creature", element: "wood", set: 2, cost: 75,  st: 30, hp: 55, ab: ["armor"], rarity: "uncommon" },
+  { id: "mossshaman",   name: "モスシャーマン",   type: "creature", element: "wood", set: 2, cost: 80,  st: 40, hp: 40, ab: ["magicatk"], rarity: "uncommon" },
+  { id: "vinestrangler",name: "ヴァインストラングラー", type: "creature", element: "wood", set: 2, cost: 85, st: 45, hp: 45, ab: ["capture"], rarity: "uncommon" },
+  { id: "elvenhunter",  name: "エルヴンハンター", type: "creature", element: "wood", set: 2, cost: 90,  st: 45, hp: 40, ab: ["ranged", "pack"], rarity: "rare" },
+  { id: "treeguardian", name: "巨木の守り手",     type: "creature", element: "wood", set: 2, cost: 95,  st: 30, hp: 75, ab: ["guard"], rarity: "uncommon" },
+  { id: "greenhydra",   name: "グリーンヒュドラ", type: "creature", element: "wood", set: 2, cost: 100, st: 50, hp: 55, ab: ["grow"], rarity: "rare" },
+  { id: "fairyqueen",   name: "フェアリークイーン", type: "creature", element: "wood", set: 2, cost: 105, st: 45, hp: 50, ab: ["pack", "first"], rarity: "rare" },
+  { id: "kingmantis",   name: "キングマンティス", type: "creature", element: "wood", set: 2, cost: 110, st: 60, hp: 45, ab: ["first", "capture"], rarity: "rare" },
+  { id: "sequoiagiant", name: "セコイアジャイアント", type: "creature", element: "wood", set: 2, cost: 115, st: 55, hp: 70, ab: [], rarity: "uncommon" },
+  { id: "leafdragon",   name: "森竜リーフドラゴン", type: "creature", element: "wood", set: 2, cost: 125, st: 60, hp: 60, ab: ["pack"], rarity: "rare" },
+  { id: "spiritelder",  name: "翁樹スピリットエルダー", type: "creature", element: "wood", set: 2, cost: 145, st: 55, hp: 85, ab: ["grow", "capture"], rarity: "legendary" },
+  // --- 地（硬殻・採掘・重装） ---
+  { id: "pebbling",     name: "ペブルリング",     type: "creature", element: "earth", set: 2, cost: 35,  st: 15, hp: 30, ab: ["armor"] },
+  { id: "molminer",     name: "モールマイナー",   type: "creature", element: "earth", set: 2, cost: 45,  st: 25, hp: 30, ab: ["mine"] },
+  { id: "sandlizard",   name: "サンドリザード",   type: "creature", element: "earth", set: 2, cost: 45,  st: 30, hp: 35, ab: [] },
+  { id: "goblinsapper", name: "ゴブリンサッパー", type: "creature", element: "earth", set: 2, cost: 50,  st: 35, hp: 30, ab: ["assault"] },
+  { id: "quartzbeetle", name: "クォーツビートル", type: "creature", element: "earth", set: 2, cost: 55,  st: 25, hp: 45, ab: ["armor"] },
+  { id: "catapultdwarf",name: "カタパルトドワーフ", type: "creature", element: "earth", set: 2, cost: 65, st: 35, hp: 30, ab: ["ranged"], rarity: "uncommon" },
+  { id: "spikearmadillo", name: "スパイクアルマジロ", type: "creature", element: "earth", set: 2, cost: 70, st: 30, hp: 50, ab: ["armor"], rarity: "uncommon" },
+  { id: "gemeater",     name: "宝石喰いジェムイーター", type: "creature", element: "earth", set: 2, cost: 70, st: 30, hp: 45, ab: ["mine"], rarity: "uncommon" },
+  { id: "duneworm",     name: "デューンウォーム", type: "creature", element: "earth", set: 2, cost: 75,  st: 45, hp: 40, ab: ["pierce"] },
+  { id: "dwarfforeman", name: "ドワーフフォアマン", type: "creature", element: "earth", set: 2, cost: 80, st: 30, hp: 50, ab: ["mine", "guard"], rarity: "uncommon" },
+  { id: "gaiashaman",   name: "ガイアシャーマン", type: "creature", element: "earth", set: 2, cost: 85,  st: 40, hp: 45, ab: ["magicatk"], rarity: "uncommon" },
+  { id: "terracotta",   name: "テラコッタソルジャー", type: "creature", element: "earth", set: 2, cost: 85, st: 40, hp: 55, ab: [] },
+  { id: "hillgiant",    name: "ヒルジャイアント", type: "creature", element: "earth", set: 2, cost: 90,  st: 50, hp: 50, ab: [] },
+  { id: "stonesentinel",name: "ストーンセンチネル", type: "creature", element: "earth", set: 2, cost: 80, st: 20, hp: 70, ab: ["immobile"], rarity: "uncommon" },
+  { id: "mountainogre", name: "マウンテンオーガ", type: "creature", element: "earth", set: 2, cost: 95,  st: 55, hp: 45, ab: ["assault"], rarity: "uncommon" },
+  { id: "crystalgolem", name: "クリスタルゴーレム", type: "creature", element: "earth", set: 2, cost: 95, st: 40, hp: 65, ab: ["armor"], rarity: "rare" },
+  { id: "landturtle",   name: "ランドタートル",   type: "creature", element: "earth", set: 2, cost: 100, st: 20, hp: 80, ab: ["immobile", "armor"], rarity: "rare" },
+  { id: "earthwyvern",  name: "アースワイバーン", type: "creature", element: "earth", set: 2, cost: 110, st: 55, hp: 55, ab: ["pierce"], rarity: "uncommon" },
+  { id: "obsidianknight", name: "オブシディアンナイト", type: "creature", element: "earth", set: 2, cost: 115, st: 55, hp: 60, ab: ["armor"], rarity: "rare" },
+  { id: "terradragon",  name: "大地竜テラドラゴン", type: "creature", element: "earth", set: 2, cost: 130, st: 60, hp: 70, ab: ["grow"], rarity: "rare" },
+  { id: "atlas",        name: "山峰の巨人アトラス", type: "creature", element: "earth", set: 2, cost: 150, st: 70, hp: 85, ab: ["armor", "guard"], rarity: "legendary" },
+  // --- 水（吸収・魔法・流転） ---
+  { id: "bubblefish",   name: "バブルフィッシュ", type: "creature", element: "water", set: 2, cost: 30,  st: 15, hp: 30, ab: [] },
+  { id: "coralcrab",    name: "コーラルクラブ",   type: "creature", element: "water", set: 2, cost: 45,  st: 20, hp: 40, ab: ["armor"] },
+  { id: "streamotter",  name: "ストリームオター", type: "creature", element: "water", set: 2, cost: 45,  st: 30, hp: 30, ab: ["first"] },
+  { id: "snowfairy",    name: "スノーフェアリー", type: "creature", element: "water", set: 2, cost: 50,  st: 25, hp: 40, ab: ["pack"] },
+  { id: "leechslime",   name: "リーチスライム",   type: "creature", element: "water", set: 2, cost: 55,  st: 25, hp: 35, ab: ["absorb"] },
+  { id: "shellknight",  name: "シェルナイト",     type: "creature", element: "water", set: 2, cost: 55,  st: 30, hp: 45, ab: [] },
+  { id: "mistwisp",     name: "ミストウィスプ",   type: "creature", element: "water", set: 2, cost: 55,  st: 25, hp: 35, ab: ["magicatk"], rarity: "uncommon" },
+  { id: "frostwolf",    name: "フロストウルフ",   type: "creature", element: "water", set: 2, cost: 60,  st: 40, hp: 30, ab: ["first"] },
+  { id: "harpoonmerman",name: "ハープーンマーマン", type: "creature", element: "water", set: 2, cost: 65, st: 35, hp: 35, ab: ["ranged"], rarity: "uncommon" },
+  { id: "snowharpy",    name: "スノーハーピー",   type: "creature", element: "water", set: 2, cost: 70,  st: 40, hp: 35, ab: ["first"] },
+  { id: "nereid",       name: "水霊ネレイド",     type: "creature", element: "water", set: 2, cost: 75,  st: 35, hp: 45, ab: ["rebirth"], rarity: "uncommon" },
+  { id: "tidemaiden",   name: "潮の巫女タイドメイデン", type: "creature", element: "water", set: 2, cost: 75, st: 40, hp: 40, ab: ["magicatk"], rarity: "uncommon" },
+  { id: "abyssangler",  name: "アビスアングラー", type: "creature", element: "water", set: 2, cost: 80,  st: 45, hp: 45, ab: ["capture"], rarity: "uncommon" },
+  { id: "frostlancer",  name: "フロストランサー", type: "creature", element: "water", set: 2, cost: 90,  st: 50, hp: 45, ab: ["pierce"], rarity: "uncommon" },
+  { id: "tideserpent",  name: "タイドサーペント", type: "creature", element: "water", set: 2, cost: 95,  st: 50, hp: 55, ab: [] },
+  { id: "kelpie",       name: "ケルピー",         type: "creature", element: "water", set: 2, cost: 85,  st: 45, hp: 50, ab: [] },
+  { id: "glaciergolem", name: "グレイシャーゴーレム", type: "creature", element: "water", set: 2, cost: 105, st: 45, hp: 70, ab: ["armor"], rarity: "rare" },
+  { id: "oceanpriestess", name: "オーシャンプリーステス", type: "creature", element: "water", set: 2, cost: 110, st: 50, hp: 50, ab: ["absorb", "magicatk"], rarity: "rare" },
+  { id: "umibozu",      name: "ウミボウズ",       type: "creature", element: "water", set: 2, cost: 120, st: 60, hp: 60, ab: ["absorb"], rarity: "rare" },
+  { id: "frostdragon",  name: "氷竜フロストドラゴン", type: "creature", element: "water", set: 2, cost: 130, st: 65, hp: 60, ab: ["magicatk"], rarity: "rare" },
+  { id: "maelstrom",    name: "大渦の主メイルシュトローム", type: "creature", element: "water", set: 2, cost: 145, st: 65, hp: 75, ab: ["absorb", "capture"], rarity: "legendary" },
+  // --- 無属性（機械・時間・メタ。全員レア以上＝パック/交換所でのみ入手） ---
+  { id: "tinsoldier",   name: "ブリキ兵ティンソルジャー", type: "creature", element: "neutral", set: 2, cost: 50, st: 30, hp: 30, ab: ["pack"], rarity: "rare" },
+  { id: "clockbeetle",  name: "クロックワークビートル", type: "creature", element: "neutral", set: 2, cost: 55, st: 25, hp: 40, ab: ["armor"], rarity: "rare" },
+  { id: "willowisp",    name: "ウィルオーウィスプ", type: "creature", element: "neutral", set: 2, cost: 60, st: 25, hp: 25, ab: ["physnull"], rarity: "rare" },
+  { id: "shadow",       name: "シャドウ",         type: "creature", element: "neutral", set: 2, cost: 65,  st: 30, hp: 30, ab: ["ranged"], rarity: "rare" },
+  { id: "chronorabbit", name: "クロノラビット",   type: "creature", element: "neutral", set: 2, cost: 70,  st: 35, hp: 30, ab: ["first", "fly"], rarity: "rare" },
+  { id: "littlemimic",  name: "リトルミミック",   type: "creature", element: "neutral", set: 2, cost: 70,  st: 15, hp: 25, ab: ["mimic"], rarity: "rare" },
+  { id: "fortunecat",   name: "招き猫フォーチュンキャット", type: "creature", element: "neutral", set: 2, cost: 75, st: 30, hp: 40, ab: ["mine", "lucky"], rarity: "rare" },
+  { id: "joker",        name: "ジョーカー",       type: "creature", element: "neutral", set: 2, cost: 85,  st: 35, hp: 35, ab: ["lucky", "lastward"], rarity: "rare" },
+  { id: "gremlin",      name: "グレムリン",       type: "creature", element: "neutral", set: 2, cost: 85,  st: 30, hp: 40, ab: ["dispel"], rarity: "rare" },
+  { id: "livingarmor",  name: "リビングアーマー", type: "creature", element: "neutral", set: 2, cost: 90,  st: 40, hp: 60, ab: ["armor"], rarity: "rare" },
+  { id: "pegasus",      name: "ペガサス",         type: "creature", element: "neutral", set: 2, cost: 90,  st: 50, hp: 45, ab: ["first", "fly"], rarity: "rare" },
+  { id: "nightmare",    name: "ナイトメア",       type: "creature", element: "neutral", set: 2, cost: 95,  st: 50, hp: 40, ab: ["magicatk"], rarity: "rare" },
+  { id: "etherdrake",   name: "エーテルドレイク", type: "creature", element: "neutral", set: 2, cost: 110, st: 55, hp: 50, ab: ["magicatk", "spellproof"], rarity: "rare" },
+  { id: "mirrorknight", name: "鏡騎士ミラーナイト", type: "creature", element: "neutral", set: 2, cost: 120, st: 40, hp: 55, ab: ["physreflect"], rarity: "legendary" },
+  { id: "orichalcum",   name: "オリハルコンゴーレム", type: "creature", element: "neutral", set: 2, cost: 130, st: 60, hp: 80, ab: ["armor", "spellproof"], rarity: "legendary" },
+  { id: "chaoschimera", name: "カオスキメラ",     type: "creature", element: "neutral", set: 2, cost: 140, st: 60, hp: 55, ab: ["double", "lastward"], rarity: "legendary" },
+  // --- 🏛️建造物（クリーチャーのサブタイプ。ST0・不動・バトルで反撃しない据え付けの施設） ---
+  { id: "signaltower", name: "狼煙台",     type: "creature", element: "fire",    set: 2, cost: 60,  st: 0, hp: 45, ab: ["immobile", "warfire"],  structure: true, rarity: "uncommon" },
+  { id: "greenhouse",  name: "温室庭園",   type: "creature", element: "wood",    set: 2, cost: 65,  st: 0, hp: 55, ab: ["immobile", "garden"],   structure: true, rarity: "uncommon" },
+  { id: "miningtower", name: "採掘櫓",     type: "creature", element: "earth",   set: 2, cost: 75,  st: 0, hp: 55, ab: ["immobile", "mine"],     structure: true, mineGain: 30, rarity: "rare" },
+  { id: "lighthouse",  name: "灯台",       type: "creature", element: "water",   set: 2, cost: 60,  st: 0, hp: 50, ab: ["immobile", "harbor"],   structure: true, rarity: "uncommon" },
+  { id: "trademarket", name: "交易市場",   type: "creature", element: "neutral", set: 2, cost: 60,  st: 0, hp: 50, ab: ["immobile", "merchant"], structure: true, rarity: "uncommon" },
+  { id: "watchtower",  name: "見張り塔",   type: "creature", element: "neutral", set: 2, cost: 70,  st: 0, hp: 60, ab: ["immobile", "beacon"],   structure: true, rarity: "uncommon" },
+  { id: "fortress",    name: "大砦",       type: "creature", element: "earth",   set: 2, cost: 100, st: 0, hp: 95, ab: ["immobile", "armor"],    structure: true, rarity: "rare" },
+  { id: "cathedral",   name: "大聖堂",     type: "creature", element: "neutral", set: 2, cost: 120, st: 0, hp: 75, ab: ["immobile", "festival"], structure: true, rarity: "legendary" },
+  // --- 👑精霊王サイクル（300Gの別格レジェンド。各属性の新能力の象徴＝ボス級フィニッシャー） ---
+  { id: "ignisking",  name: "焔王イグニス",     type: "creature", element: "fire",    set: 2, cost: 300, st: 120, hp: 100, ab: ["ranged", "lucky"],       rarity: "legendary" },
+  { id: "sylvanking", name: "翠王シルヴァン",   type: "creature", element: "wood",    set: 2, cost: 300, st: 95,  hp: 135, ab: ["pack", "capture"],       rarity: "legendary" },
+  { id: "terraking",  name: "岩帝テラガイア",   type: "creature", element: "earth",   set: 2, cost: 300, st: 85,  hp: 155, ab: ["grow", "armor"],         rarity: "legendary" },
+  { id: "nereusking", name: "海王ネレウス",     type: "creature", element: "water",   set: 2, cost: 300, st: 105, hp: 125, ab: ["absorb", "magicatk"],    rarity: "legendary" },
+  { id: "aeonking",   name: "時空王アイオーン", type: "creature", element: "neutral", set: 2, cost: 300, st: 110, hp: 110, ab: ["first", "spellproof", "fly"], rarity: "legendary" },
+  // --- 武器（第二弾） ---
+  { id: "shortspear",  name: "ショートスピア",   type: "item", set: 2, cost: 30,  st: 15, hp: 0, desc: "バトル時 ST+15" },
+  { id: "flail",       name: "フレイル",         type: "item", set: 2, cost: 55,  st: 30, hp: 0, desc: "バトル時 ST+30" },
+  { id: "warhorn",     name: "ウォーホーン",     type: "item", set: 2, cost: 60,  st: 15, hp: 0, grant: ["pack"], rarity: "uncommon", desc: "ST+15・群れを得る（自分の同属性クリーチャー1体につきST+5）" },
+  { id: "braveblade",  name: "ブレイブブレイド", type: "item", set: 2, cost: 70,  st: 20, hp: 0, grant: ["lastward"], rarity: "uncommon", desc: "ST+20・背水を得る（HP半分以下でST+25）" },
+  { id: "warhammer",   name: "ウォーハンマー",   type: "item", set: 2, cost: 85,  st: 45, hp: 0, rarity: "uncommon", desc: "バトル時 ST+45" },
+  { id: "hunterbow",   name: "ハンターボウ",     type: "item", set: 2, cost: 90,  st: 20, hp: 0, grant: ["ranged"], rarity: "rare", desc: "ST+20・遠隔を得る（侵略・侵攻で相手の反撃を受けない）" },
+  { id: "souleater",   name: "ソウルイーター",   type: "item", set: 2, cost: 100, st: 30, hp: 0, grant: ["absorb"], rarity: "rare", desc: "ST+30・吸収を得る（与えたダメージの半分だけHP回復）" },
+  { id: "flamberge",   name: "フランベルジュ",   type: "item", set: 2, cost: 115, st: 60, hp: 0, rarity: "rare", desc: "バトル時 ST+60" },
+  { id: "gungnir",     name: "グングニル",       type: "item", set: 2, cost: 140, st: 50, hp: 0, grant: ["pierce", "first"], rarity: "legendary", desc: "ST+50・貫通と先制を得る（神槍は外れず、誰よりも速い）" },
+  // --- 防具（第二弾） ---
+  { id: "buckler",      name: "バックラー",       type: "item", set: 2, cost: 30,  st: 0,  hp: 15, desc: "バトル時 HP+15" },
+  { id: "chainmail",    name: "チェインメイル",   type: "item", set: 2, cost: 55,  st: 0,  hp: 30, desc: "バトル時 HP+30" },
+  { id: "stonering",    name: "硬殻の指輪ストーンリング", type: "item", set: 2, cost: 65, st: 0, hp: 20, grant: ["armor"], rarity: "uncommon", desc: "HP+20・硬殻を得る（受けるダメージを常に10軽減）" },
+  { id: "spikemail",    name: "スパイクメイル",   type: "item", set: 2, cost: 75,  st: 15, hp: 25, rarity: "uncommon", desc: "バトル時 ST+15 / HP+25（棘の鎧）" },
+  { id: "crystalarmor", name: "クリスタルアーマー", type: "item", set: 2, cost: 85, st: 0, hp: 45, rarity: "uncommon", desc: "バトル時 HP+45" },
+  { id: "dragonscale",  name: "ドラゴンスケイル", type: "item", set: 2, cost: 115, st: 0,  hp: 60, rarity: "rare", desc: "バトル時 HP+60" },
+  { id: "aegisshield",  name: "イージスの盾",     type: "item", set: 2, cost: 135, st: 0,  hp: 30, grant: ["physnull"], rarity: "legendary", desc: "HP+30・このバトル中、物理無効を得る（魔法攻撃だけが通る）" },
+  // --- 📜巻物（使うと攻撃が「記載ST固定の魔法攻撃」になる。本体STや強襲・属性補正は乗らない） ---
+  { id: "scrollice",     name: "アイスニードルの巻物", type: "item", set: 2, cost: 30, st: 0, hp: 0, scroll: 30, rarity: "common", desc: "📜攻撃がST30固定の魔法攻撃になる（本体ST無視・物理無効/反射を貫く）" },
+  { id: "scrollfire",    name: "ファイアボルトの巻物", type: "item", set: 2, cost: 50, st: 0, hp: 0, scroll: 45, rarity: "uncommon", desc: "📜攻撃がST45固定の魔法攻撃になる（本体ST無視・物理無効/反射を貫く）" },
+  { id: "scrollacid",    name: "溶解の巻物",           type: "item", set: 2, cost: 65, st: 0, hp: 0, scroll: 40, grant: ["pierce"], rarity: "uncommon", desc: "📜攻撃がST40固定の魔法攻撃になり、貫通を得る（土地の加護を溶かす）" },
+  { id: "scrollwind",    name: "ウィンドカッターの巻物", type: "item", set: 2, cost: 70, st: 0, hp: 0, scroll: 40, grant: ["first"], rarity: "uncommon", desc: "📜攻撃がST40固定の魔法攻撃になり、先制を得る（風の刃は誰よりも速い）" },
+  { id: "scrolldrain",   name: "ドレインソウルの巻物", type: "item", set: 2, cost: 75, st: 0, hp: 0, scroll: 35, grant: ["absorb"], rarity: "rare", desc: "📜攻撃がST35固定の魔法攻撃になり、吸収を得る（与えたダメージの半分だけHP回復）" },
+  { id: "scrollthunder", name: "サンダーボルトの巻物", type: "item", set: 2, cost: 80, st: 0, hp: 0, scroll: 60, rarity: "rare", desc: "📜攻撃がST60固定の魔法攻撃になる（本体ST無視・物理無効/反射を貫く）" },
+  { id: "scrollmirror",  name: "写し身の巻物",         type: "item", set: 2, cost: 60, st: 0, hp: 0, scroll: 1, scrollMirror: true, rarity: "rare", desc: "📜攻撃が「相手の基本STと同じ値」の固定魔法攻撃になる（強敵ほど強い一撃を写し返す）" },
+  { id: "scrollmeteor",  name: "メテオストームの巻物", type: "item", set: 2, cost: 110, st: 0, hp: 0, scroll: 75, rarity: "legendary", desc: "📜攻撃がST75固定の魔法攻撃になる（本体ST無視・物理無効/反射を貫く）" },
+  // --- 特殊アイテム（第二弾） ---
+  { id: "calmcharm",     name: "平静のお守り",     type: "item", set: 2, cost: 45,  st: 0,  hp: 15, noCrit: true, rarity: "uncommon", desc: "HP+15・相手の会心の一撃を封じる（豪運持ちにも有効）" },
+  { id: "smokebomb",     name: "煙玉",             type: "item", set: 2, cost: 50,  st: 0,  hp: 0,  escape: true, rarity: "uncommon", desc: "【防衛側専用】バトルを行わず土地を明け渡し、クリーチャーは手札に戻る（土地レベルは残る＝命あっての物種）" },
+  { id: "chainnet",      name: "拘束鎖チェインネット", type: "item", set: 2, cost: 55, st: 10, hp: 0, grant: ["capture"], rarity: "uncommon", desc: "ST+10・捕縛を得る（防衛で撃退した侵略者を1ターン拘束）" },
+  { id: "berserkpotion", name: "バーサクポーション", type: "item", set: 2, cost: 60, st: 35, hp: -15, rarity: "uncommon", desc: "バトル時 ST+35 / HP-15（力を絞り出す自傷の劇薬）" },
+  { id: "giantbelt",     name: "ジャイアントベルト", type: "item", set: 2, cost: 70, st: 25, hp: 25, rarity: "uncommon", desc: "バトル時 ST+25 / HP+25" },
+  { id: "rebirthamulet", name: "転生の護符",       type: "item", set: 2, cost: 70,  st: 0,  hp: 10, grant: ["rebirth"], rarity: "rare", desc: "HP+10・このバトルで倒されても手札に戻る（転生を得る）" },
+  { id: "hazecloak",     name: "幻惑のマント",     type: "item", set: 2, cost: 90,  st: 0,  hp: 20, stDebuff: 20, rarity: "rare", desc: "HP+20・相手のST-20（最低10。霞んで狙いが定まらない）" },
+  { id: "duelglove",     name: "決闘のグローブ",   type: "item", set: 2, cost: 110, st: 20, hp: 0, grant: ["double"], rarity: "rare", desc: "ST+20・連撃を得る（バトルで続けて2回攻撃）" },
+  // ============================================================
+  // 第二弾スペル（v20・55種）。noCpu:true はCPUの自動デッキに入れない
+  // （AIの発動条件を用意していない／人間の判断が要るカード）
+  // ============================================================
+  // --- 経済（9種） ---
+  { id: "blessfire",  name: "火脈の恵み",   type: "spell", set: 2, cost: 50, spell: "elembless", elem: "fire",  icon: "🔥", desc: "自分の火属性の土地1つにつき +70G" },
+  { id: "blesswood",  name: "収穫の恵み",   type: "spell", set: 2, cost: 50, spell: "elembless", elem: "wood",  icon: "🌾", desc: "自分の木属性の土地1つにつき +70G" },
+  { id: "blessearth", name: "鉱脈の恵み",   type: "spell", set: 2, cost: 50, spell: "elembless", elem: "earth", icon: "⛏️", desc: "自分の地属性の土地1つにつき +70G" },
+  { id: "blesswater", name: "潮流の恵み",   type: "spell", set: 2, cost: 50, spell: "elembless", elem: "water", icon: "🌊", desc: "自分の水属性の土地1つにつき +70G" },
+  { id: "goldrush",   name: "ゴールドラッシュ", type: "spell", set: 2, cost: 60, spell: "goldrush", rarity: "uncommon", icon: "💰", desc: "現在の所持魔力の20%を得る（最大250G。富める者はさらに富む）" },
+  { id: "tollpass",   name: "通行手形",     type: "spell", set: 2, cost: 60, spell: "tollpass", rarity: "uncommon", noCpu: true, icon: "📜", desc: "次に敵地で払う通行料1回が無料になる（高額地帯を切り抜ける切符）" },
+  { id: "taxcollect", name: "タックスコレクト", type: "spell", set: 2, cost: 70, spell: "taxcollect", rarity: "uncommon", icon: "🧾", desc: "相手の所有土地1つにつき30Gを、その持ち主から徴収する" },
+  { id: "cauldron",   name: "錬金大釜",     type: "spell", set: 2, cost: 70, spell: "cauldron", rarity: "uncommon", noCpu: true, icon: "⚗️", desc: "手札を2枚まで選んで捨て、1枚につき+130G（アルケミーの上位）" },
+  { id: "pawnshop",   name: "質入れ",       type: "spell", set: 2, cost: 60, spell: "pawnshop", rarity: "uncommon", noCpu: true, icon: "🏦", desc: "自分の土地1つをLv-1し、下がった価値の120%を得る（グロースの逆＝土地を現金化）" },
+  // --- ドロー・手札（4種） ---
+  { id: "foresight",   name: "予知",         type: "spell", set: 2, cost: 30, spell: "foresight", noCpu: true, icon: "🔮", desc: "山札の上3枚を見て、好きな順に並べ替える" },
+  { id: "revelation",  name: "天啓",         type: "spell", set: 2, cost: 45, spell: "revelation", icon: "💡", desc: "カードを1枚引き、さらに+50G" },
+  { id: "inspiration", name: "インスピレーション", type: "spell", set: 2, cost: 60, spell: "inspiration", rarity: "uncommon", icon: "✨", desc: "カードを3枚引き、そのあと手札から1枚捨てる" },
+  { id: "gravecall",   name: "墓所の呼び声", type: "spell", set: 2, cost: 90, spell: "gravecall", rarity: "rare", icon: "🪦", desc: "自分の捨て札から2枚まで選んで手札に戻す（サルベージの上位）" },
+  // --- 移動（6種） ---
+  { id: "tailwind",   name: "追い風",       type: "spell", set: 2, cost: 35, spell: "tailwind", noCpu: true, icon: "🍃", desc: "次のダイスの出目に+2する（ダイスブーストの倍化とは加算の順で併用可）" },
+  { id: "backstep",   name: "バックステップ", type: "spell", set: 2, cost: 40, spell: "backstep", rarity: "uncommon", noCpu: true, icon: "↩️", desc: "自分のコマを1〜3マス後ろへ戻す（移動のみ＝マスの効果・関門は発動しない。そのあと通常どおりダイスで移動）" },
+  { id: "marchorder", name: "進軍号令",     type: "spell", set: 2, cost: 70, spell: "marchorder", rarity: "uncommon", noCpu: true, icon: "🎺", desc: "このターン、行軍費なしで②クリーチャー侵攻を行える（①で行動していても②の権利が残る）" },
+  { id: "regroup",    name: "集結",         type: "spell", set: 2, cost: 90, spell: "regroup", rarity: "rare", noCpu: true, icon: "🔀", desc: "自分のクリーチャー2体の位置を入れ替える（HP・土地レベルはそのまま）" },
+  { id: "posswap",    name: "ポジションスワップ", type: "spell", set: 2, cost: 100, spell: "posswap", rarity: "rare", noCpu: true, icon: "♟️", desc: "相手のコマと自分のコマの位置を入れ替える（マスの効果は発動しない）" },
+  { id: "deport",     name: "強制送還",     type: "spell", set: 2, cost: 120, spell: "deport", rarity: "rare", icon: "🏰", desc: "相手のコマを城へ送り返す（周回はつかない。凱旋間際の相手を押し戻せ）" },
+  // --- バトル支援（5種） ---
+  { id: "bravery",   name: "決死の覚悟",   type: "spell", set: 2, cost: 40, spell: "bravery", noCpu: true, icon: "🎯", desc: "次の自分のバトルで会心率50%（会心＝ダメージ1.5倍）" },
+  { id: "warcry",    name: "ウォークライ", type: "spell", set: 2, cost: 50, spell: "warcry", noCpu: true, icon: "📣", desc: "次の自分のバトルで ST+20（侵略でも防衛でも）" },
+  { id: "guardwind", name: "護りの風",     type: "spell", set: 2, cost: 50, spell: "guardwind", noCpu: true, icon: "🌬️", desc: "次に防衛する自軍クリーチャーの HP+20" },
+  { id: "blessing",  name: "ブレッシング", type: "spell", set: 2, cost: 70, spell: "blessing", rarity: "rare", icon: "🕊️", desc: "自軍クリーチャー1体を永続強化: ST/最大HP+10（成長と同じ枠を使い、合計+25まで）" },
+  { id: "siege",     name: "攻城の号令",   type: "spell", set: 2, cost: 100, spell: "siege", rarity: "rare", noCpu: true, icon: "⚔️", desc: "このターンの自分の侵略・侵攻バトルで ST+25" },
+  // --- 土地（7種） ---
+  { id: "highsell",   name: "高値売却",     type: "spell", set: 2, cost: 60, spell: "highsell", rarity: "uncommon", noCpu: true, icon: "💱", desc: "自分の土地1つを価値の100%で売却する（通常の強制売却は70%。駐留クリーチャーは手札に戻る）" },
+  { id: "veinfind",   name: "鉱脈発見",     type: "spell", set: 2, cost: 80, spell: "veinfind", rarity: "rare", icon: "💎", desc: "自分の土地1つに魔力鉱脈を付与: 以後、自分のターン開始時+20G（永続。その土地を失うと消える）" },
+  { id: "assimilate", name: "属性同化",     type: "spell", set: 2, cost: 100, spell: "assimilate", rarity: "rare", noCpu: true, icon: "🌀", desc: "自分の土地1つの属性に、隣接する自領すべての属性を合わせる（連鎖の一括組み替え）" },
+  { id: "curseland",  name: "カースランド", type: "spell", set: 2, cost: 110, spell: "curseland", rarity: "rare", icon: "🕯️", desc: "敵の土地1つの通行料を半減する（2ラウンド）" },
+  { id: "fortify",    name: "城塞化",       type: "spell", set: 2, cost: 120, spell: "fortify", rarity: "rare", icon: "🏯", desc: "自分の土地1つの「土地の加護」を永続的に2倍にする（属性一致の守り手が鉄壁に）" },
+  { id: "grandquake", name: "グランドクエイク", type: "spell", set: 2, cost: 170, spell: "grandquake", rarity: "legendary", icon: "🌋", desc: "敵の土地を2つまで選び、それぞれレベルを1下げる（クエイクの広域版）" },
+  { id: "levelshift", name: "レベル移植",   type: "spell", set: 2, cost: 90, spell: "levelshift", rarity: "rare", noCpu: true, icon: "⚖️", desc: "自分の土地1つをLv-1し、別の自分の土地1つをLv+1する（投資の組み替え）" },
+  // --- 妨害（10種） ---
+  { id: "spy",        name: "スパイ",       type: "spell", set: 2, cost: 45, spell: "spy", noCpu: true, icon: "🕵️", desc: "相手1人の手札をすべて見る" },
+  { id: "cursedice",  name: "呪いのダイス", type: "spell", set: 2, cost: 60, spell: "cursedice", rarity: "uncommon", icon: "🎲", desc: "相手の次の出目は1〜3になる（ホーリーワードで4以上を指定していても3に抑え込む）" },
+  { id: "mudswamp",   name: "泥沼",         type: "spell", set: 2, cost: 80, spell: "mudswamp", rarity: "uncommon", icon: "🟤", desc: "相手の次の移動は出目が半分になる（切り上げ）" },
+  { id: "whisper",    name: "悪夢の囁き",   type: "spell", set: 2, cost: 85, spell: "whisper", rarity: "rare", icon: "😈", desc: "相手の手札からランダムに1枚捨てさせる" },
+  { id: "manaburn",   name: "マナバーン",   type: "spell", set: 2, cost: 90, spell: "manaburn", rarity: "rare", icon: "🔥", desc: "相手の魔力の20%を消滅させる（奪えない・上限300G。富豪への嫌がらせ）" },
+  { id: "nullfog",    name: "無力化の霧",   type: "spell", set: 2, cost: 95, spell: "nullfog", rarity: "rare", icon: "🌫️", desc: "敵クリーチャー1体の能力をすべて消す（2ラウンド。アイテムで得る能力は消えない）" },
+  { id: "silencefog", name: "沈黙の霧",     type: "spell", set: 2, cost: 100, spell: "silencefog", rarity: "rare", icon: "🤫", desc: "相手は次の自分のターン、スペルを使えない" },
+  { id: "truce",      name: "停戦協定",     type: "spell", set: 2, cost: 110, spell: "truce", rarity: "rare", icon: "🏳️", desc: "2ラウンドの間、全プレイヤーが侵略・侵攻できない（自分も含む＝逃げ切りの時間稼ぎ）" },
+  { id: "freezerain", name: "フリーズレイン", type: "spell", set: 2, cost: 130, spell: "freezerain", rarity: "legendary", icon: "🧊", desc: "相手全員を次のターン1回休みにする（フリーズの全体版。三つ巴で輝く）" },
+  { id: "miragefield", name: "蜃気楼",      type: "spell", set: 2, cost: 75, spell: "miragefield", rarity: "uncommon", icon: "🏜️", desc: "2ラウンドの間、自分の土地が敵の土地対象スペル（クエイク/カースランド等）の対象にならない（クリーチャーは対象になる）" },
+  // --- 🕯️儀式（8種）: 追加コストとして手札1枚を捧げる ---
+  { id: "r_harvest",  name: "豊穣の儀",     type: "spell", set: 2, cost: 80, spell: "r_harvest", ritual: true, rarity: "uncommon", icon: "🕯️", desc: "【儀式: 手札1枚を捧げる】+350G" },
+  { id: "r_contract", name: "契約の儀",     type: "spell", set: 2, cost: 90, spell: "r_contract", ritual: true, rarity: "rare", noCpu: true, icon: "🕯️", desc: "【儀式: 手札1枚を捧げる】山札から好きなカード1枚を手札に加える（山札は切り直す）" },
+  { id: "r_blaze",    name: "猛火の儀",     type: "spell", set: 2, cost: 100, spell: "r_blaze", ritual: true, rarity: "rare", icon: "🕯️", desc: "【儀式: 手札1枚を捧げる】敵クリーチャー1体に70ダメージ（護法・結界は対象外）" },
+  { id: "r_revive",   name: "蘇生の儀",     type: "spell", set: 2, cost: 110, spell: "r_revive", ritual: true, rarity: "rare", icon: "🕯️", desc: "【儀式: 手札1枚を捧げる】自分の捨て札のクリーチャー1体を、好きな空き地へコスト不要で召喚する" },
+  { id: "r_ages",     name: "星霜の儀",     type: "spell", set: 2, cost: 120, spell: "r_ages", ritual: true, rarity: "rare", icon: "🕯️", desc: "【儀式: 手札1枚を捧げる】自分の土地1つをLv+2する（Lv4まで）" },
+  { id: "r_storm",    name: "嵐の儀",       type: "spell", set: 2, cost: 120, spell: "r_storm", ritual: true, rarity: "legendary", icon: "🕯️", desc: "【儀式: 手札1枚を捧げる】敵クリーチャー全体に25ダメージ（護法・結界は対象外。倒れたら土地は空き地に）" },
+  { id: "r_time",     name: "時の儀",       type: "spell", set: 2, cost: 130, spell: "r_time", ritual: true, rarity: "legendary", icon: "🕯️", desc: "【儀式: 手札1枚を捧げる】このターン、①のあとにもう一度ダイスを振って移動し、①を行う" },
+  { id: "r_purify",   name: "浄化の儀",     type: "spell", set: 2, cost: 80, spell: "r_purify", ritual: true, rarity: "uncommon", icon: "🕯️", desc: "【儀式: 手札1枚を捧げる】盤面の時限効果（結界・罠・霧・呪いなど）をすべて解除し、自軍クリーチャーを全回復する" },
+  // --- 盤面エフェクト（6種・2ラウンドの時限効果） ---
+  { id: "fx_market",    name: "市場開放",     type: "spell", set: 2, cost: 90, spell: "fx_market", fx: true, rarity: "uncommon", icon: "🏪", desc: "【盤面】2Rの間、カードマスで2枚ドロー（全員）" },
+  { id: "fx_bud",       name: "春の芽吹き",   type: "spell", set: 2, cost: 90, spell: "fx_bud", fx: true, rarity: "rare", icon: "🌸", desc: "【盤面】2Rの間、自軍クリーチャーは自分のターン開始時HP+15回復する" },
+  { id: "fx_war",       name: "戦火の世",     type: "spell", set: 2, cost: 110, spell: "fx_war", fx: true, rarity: "rare", icon: "🔥", desc: "【盤面】2Rの間、侵略・侵攻バトルの攻め側ST+20（全員＝攻めが強い世界に）" },
+  { id: "fx_manastorm", name: "魔力嵐",       type: "spell", set: 2, cost: 120, spell: "fx_manastorm", fx: true, rarity: "rare", icon: "⚡", desc: "【盤面】2Rの間、すべての通行料1.5倍（全員＝土地持ちが得をする嵐）" },
+  { id: "fx_silence",   name: "静寂のとばり", type: "spell", set: 2, cost: 100, spell: "fx_silence", fx: true, rarity: "rare", icon: "🌙", desc: "【盤面】2Rの間、対象を指定するスペル（メテオ/バニッシュ/ドレイン等）を全員使えない" },
+  { id: "fx_goddess",   name: "女神の加護",   type: "spell", set: 2, cost: 130, spell: "fx_goddess", fx: true, rarity: "legendary", icon: "👼", desc: "【盤面】2Rの間、自分の土地の加護が2倍＋防衛の援護ST+10" },
 ];
 
 const CARD_BY_ID = Object.fromEntries(CARD_DB.map(c => [c.id, c]));
@@ -265,9 +524,11 @@ function buildDeck(biasElement = null, maxCost = Infinity) {
     if (pool.length === 0) pool = [all.slice().sort((a, b) => a.cost - b.cost)[0]];
     for (let i = 0; i < n; i++) deck.push(pool[Math.floor(Math.random() * pool.length)].id);
   };
-  main.forEach(e => pickType(c => c.type === "creature" && c.element === e, 6));
-  sub.forEach(e => pickType(c => c.type === "creature" && c.element === e, 3));
-  pickType(c => c.type === "spell", 6);
+  // 建造物（ST0・反撃しない施設）と noCpu スペル（AIの発動条件が無い）は
+  // CPU/おまかせデッキには入れない（構築デッキでは使える）
+  main.forEach(e => pickType(c => c.type === "creature" && !c.structure && c.element === e, 6));
+  sub.forEach(e => pickType(c => c.type === "creature" && !c.structure && c.element === e, 3));
+  pickType(c => c.type === "spell" && !c.noCpu, 6);
   pickType(c => c.type === "item", 6);
   return shuffle(deck);
 }

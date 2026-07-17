@@ -16,6 +16,8 @@ async function startGame(stageIdx, opts = {}) {
   G.training = !!opts.training; // トレーニング（練習対戦・進行度を更新せず勝利でカード3枚）
   G.hotseat = !!opts.versus;    // 2人対戦（ホットシート・報酬/進行度なし）
   G.royale = !!opts.royale;     // 三つ巴（人間1+CPU2・勝利でカード獲得・進行度は変化しない）
+  G.sealed = !!opts.sealed;     // シールド戦（その場開封のプールで構築・勝利でカード獲得・進行度は変化しない）
+  G.sealedDeck = opts.sealedDeck || null; // 「同じデッキでもう一度」用にシールドデッキを保持
   G.versusSetup = opts.versus || null; // 「もう一度」用に対戦設定を保持
   GAME_SPEED = G.training ? 0.28 : 1; // トレーニングは演出を高速化（時短）。通常は等倍
   // トレーニングは目標資産・ラウンド上限を下げて短時間で決着（時短・簡易）
@@ -120,8 +122,35 @@ async function showGameOver() {
     (winnerQuote ? `<br><br>「${esc(winnerQuote)}」 — ${esc(G.winner.name)}` : "") +
     loserQuotes.map(q => `<br><br>「${esc(q.line)}」 — ${esc(q.p.name)}`).join("");
 
+  // シールド戦: 勝てばカードを獲得（進行度は変化しない）。開封プールは使い捨てなので
+  // 「同じデッキでもう一度」でデッキだけ引き継いで再戦できる
+  if (G.sealed) {
+    setMessage(youWin ? "🎁 シールド戦を制覇！" : `💀 ${G.winner.name}の勝利…`);
+    if (youWin) await playVictoryFx("VICTORY!", "🎁 シールド戦を制覇！");
+    let gained = 0;
+    if (youWin && typeof grantWinCards === "function") {
+      const set = await chooseRewardSet();
+      const pack = grantWinCards(REWARD_WIN, set);
+      if (pack) { gained = pack.length; await showPackReveal(pack, "🏆 シールド戦 勝利報酬！", `カードを${pack.length}枚手に入れた！（こちらはコレクションに入ります）`); }
+    }
+    const res = await showDialog({
+      title: youWin ? "🏆 シールド戦を制覇！" : "💀 敗北…",
+      body: `${esc(G.winner.name)}の勝ち！ あなた ${assetsOf(G, G.players[0])}G ／ ${esc(G.players[1].name)} ${assetsOf(G, G.players[1])}G` +
+        (gained ? `<br><br>💚 カードを${gained}枚獲得しました` : "") + quoteHtml +
+        `<br><br>（シールド戦の開封プールは使い捨て・進行度は変化しません）`,
+      buttons: [
+        { label: "🔁 同じデッキでもう一度", value: "retry", primary: true },
+        { label: "🗺 メニューへ", value: "menu" },
+      ],
+    });
+    if (res.action === "retry") startGame(G.stageIdx, { sealed: true, sealedDeck: G.sealedDeck, skipIntro: true });
+    else titleScreen();
+    return;
+  }
+
   // 三つ巴: 勝てばカードを獲得（進行度は変化しない）。順位表を表示
   if (G.royale) {
+    if (youWin) G.rewardSet = await chooseRewardSet();
     const ranked = G.players.slice().sort((a, b) => assetsOf(G, b) - assetsOf(G, a));
     const standings = ranked.map((p, i) =>
       `${["🥇", "🥈", "🥉"][i]} ${P_ICONS[p.id]} ${esc(p.name)}: 総資産 ${assetsOf(G, p)}G`).join("<br>");
@@ -129,7 +158,7 @@ async function showGameOver() {
     if (youWin) await playVictoryFx("VICTORY!", "⚔ 三つ巴を制覇！");
     let gained = 0;
     if (youWin && typeof grantWinCards === "function") {
-      const pack = grantWinCards(REWARD_WIN);
+      const pack = grantWinCards(REWARD_WIN, G.rewardSet || 1);
       if (pack) { gained = pack.length; await showPackReveal(pack, "🏆 三つ巴 勝利報酬！", `カードを${pack.length}枚手に入れた！`); }
     }
     const res = await showDialog({
@@ -185,17 +214,18 @@ async function showGameOver() {
   const firstClear = youWin && !loadProgress().cleared[G.stage.id];
   if (youWin) await playVictoryFx("VICTORY!", firstClear ? `✦ STAGE ${G.stageIdx + 1} 初制覇の祝福 ✦` : "🏆 あなたの勝利！", { grand: firstClear });
   if (youWin) saveStageClear(G.stage.id);
-  // 報酬: 新規クリア=10枚 / クリア済みステージの再勝利=5枚
+  // 報酬: 新規クリア=10枚 / クリア済みステージの再勝利=5枚。パックの弾は勝者が選ぶ（v19）
+  const rewardSet = youWin ? await chooseRewardSet() : 1;
   if (firstClear && typeof grantStageClearPack === "function") {
-    const pack = grantStageClearPack(G.stage.id, REWARD_FIRST_CLEAR);
+    const pack = grantStageClearPack(G.stage.id, REWARD_FIRST_CLEAR, rewardSet);
     if (pack) await showPackReveal(pack, "🎁 STAGE 初クリア報酬！", `大型カードパック（${pack.length}枚）を手に入れた！`);
   } else if (youWin && typeof grantWinCards === "function") {
-    const pack = grantWinCards(REWARD_WIN);
+    const pack = grantWinCards(REWARD_WIN, rewardSet);
     if (pack) await showPackReveal(pack, "🏆 勝利報酬！", `カードを${pack.length}枚手に入れた！`);
   }
   // ウィークリールール適用中の正規勝利にはボーナスカードを追加（クリア済みステージ再訪の動機に）
   if (youWin && G.weekly && typeof drawPack === "function") {
-    const bonus = drawPack(WEEKLY_BONUS_CARDS, "uncommon");
+    const bonus = drawPack(WEEKLY_BONUS_CARDS, "uncommon", 1, rewardSet);
     addCards(bonus);
     await showPackReveal(bonus, "🎪 ウィークリーボーナス！",
       `今週のルール「${G.weekly.name}」適用中の勝利ボーナス（+${bonus.length}枚）！`);
@@ -217,6 +247,23 @@ async function showGameOver() {
   if (res.action === "next") startGame(nextIdx);
   else if (res.action === "retry") startGame(G.stageIdx, { skipIntro: true });
   else titleScreen();
+}
+
+// 勝利報酬パックの弾（第一弾/第二弾）を選ぶ（v19・原さん指定＝報酬はパックを選択できる）
+async function chooseRewardSet() {
+  const col = loadCollection();
+  const row = s => {
+    const inSet = CARD_DB.filter(c => cardSet(c) === s.set);
+    const have = inSet.filter(c => (col.owned[c.id] || 0) > 0).length;
+    return { label: `${s.icon} ${s.name}パック（収集 ${have}/${inSet.length}種）`, value: String(s.set) };
+  };
+  const res = await showDialog({
+    title: "🎁 報酬パックの弾を選択",
+    body: "どちらの弾のカードパックを受け取りますか？",
+    buttons: CARD_SETS.map(row),
+  });
+  const n = Number(res.action);
+  return n === 2 ? 2 : 1;
 }
 
 // ---------- 途中棄権（投了） ----------
@@ -268,7 +315,7 @@ async function requestSurrender() {
     ],
   });
   _surrendering = false;
-  if (r2.action === "retry") startGame(G.stageIdx, { training: G.training, versus: G.versusSetup, royale: G.royale, skipIntro: !G.royale });
+  if (r2.action === "retry") startGame(G.stageIdx, { training: G.training, versus: G.versusSetup, royale: G.royale, sealed: G.sealed, sealedDeck: G.sealedDeck, skipIntro: !G.royale });
   else titleScreen();
 }
 
@@ -292,6 +339,7 @@ async function playTurn(p) {
   // 2人対戦（ホットシート）: 手札を伏せた交代画面を挟んでから手番を始める
   if (G.hotseat && !p.isCPU) await hotseatHandoff(p);
   setMessage(`${p.name}のターン（ラウンド${G.round}）`);
+  turnStartTick(p); // 第二弾（v19）: 🌱成長・⛏採掘・🌿癒しの庭のターン開始処理
   renderAll(G);
   if (p.isCPU) {
     // ときどきキャラがつぶやく（存在感の演出・非ブロッキング）
@@ -325,6 +373,18 @@ async function playTurn(p) {
     log(`🎲 ${p.name}のダイスブースト発動！ 出目が2倍の${dice}に！`, "warn");
     p.diceMult = null;
   }
+  // 🍃追い風（v20）: 次の出目+2（倍化のあとに加算）
+  if (p.diceBonus) {
+    dice += p.diceBonus;
+    log(`🍃 追い風！ ${p.name}の出目+${p.diceBonus}＝${dice}`);
+    p.diceBonus = null;
+  }
+  // 🟤泥沼（v20）: 次の移動は出目半分（切り上げ）
+  if (p.mudded) {
+    dice = Math.ceil(dice / 2);
+    log(`🟤 泥沼にはまった！ ${p.name}の移動は${dice}マスに半減`, "warn");
+    p.mudded = false;
+  }
   await animateDice(dice);
   log(`${p.name}のダイス: ${dice}`);
 
@@ -342,9 +402,71 @@ async function playTurn(p) {
   //    到達アクションが何もない（受け身マス・手札不足など）か、あえてパス（通行料払いを含む）した場合のみ、
   //    このターン通過した自領について侵攻/交代/レベルアップを1つ行える。
   //    例外: 周回達成ターン（城ぴったり到達・リコール＝passAllLands）は①で行動していても付与し、全自領を対象にする。
-  if (!acted || p.passAllLands) await passActionPhase(p);
+  //    🎺進軍号令（v20・freeMarch）も①の行動に関係なく②の権利を与える
+  if (!acted || p.passAllLands || p.freeMarch) await passActionPhase(p);
+  // 🕯️時の儀（v20）: このターン、もう一度ダイスを振って移動し①を行う（②は最初の1回のみ）
+  if (p.timeRitual && !G.over) {
+    p.timeRitual = false;
+    const dice2 = rollDice(p);
+    p.forcedDice = null;
+    await animateDice(dice2);
+    log(`🕯️ 時の儀！ ${p.name}はもう一度動く——ダイス: ${dice2}`, "warn");
+    p.lastPath = [];
+    await movePlayer(p, dice2);
+    if (!G.over) await tileAction(p, G.tiles[p.pos]);
+  }
+  // ターン限定フラグの掃除（v20: 攻城の号令・進軍号令・沈黙の霧）
+  p.siegeSt = 0;
+  p.freeMarch = false;
+  p.spellSealed = false;
   notifyReach();
   renderAll(G);
+}
+
+// ---------- ターン開始時の第二弾能力（v19） ----------
+// 🌱成長: ST/HP+5（上限+25）＝grownカウンタを進めてHPも増加分だけ回復
+// ⛏採掘: +15G（採掘櫓は+30G） ／ 🌿癒しの庭: 隣接自軍クリーチャーをHP+10回復
+function turnStartTick(p) {
+  let mined = 0;
+  const grownNames = [], healedNames = [];
+  ownedLands(G, p.id).forEach(t => {
+    if (!t.creature) return;
+    const c = CARD_BY_ID[t.creature.cardId];
+    if (c.ab.includes("grow") && (t.creature.grown || 0) < 5) {
+      t.creature.grown = (t.creature.grown || 0) + 1;
+      t.creature.hp = Math.min(maxHpOf(t.creature), currentHp(t.creature) + 5);
+      grownNames.push(`${c.name}(+${t.creature.grown * 5})`);
+    }
+    if (c.ab.includes("mine")) mined += c.mineGain || 15;
+    if (c.ab.includes("garden")) {
+      neighborsOf(G, t).forEach(n => {
+        if (n.type !== "LAND" || n.owner !== p.id || !n.creature || !isWounded(n.creature)) return;
+        n.creature.hp = Math.min(maxHpOf(n.creature), currentHp(n.creature) + 10);
+        healedNames.push(CARD_BY_ID[n.creature.cardId].name);
+      });
+    }
+  });
+  if (grownNames.length) log(`🌱 ${p.name}のクリーチャーが成長！ ${grownNames.join("・")}`);
+  if (mined > 0) { p.magic += mined; SFX.coin(); log(`⛏ ${p.name}の採掘収入 +${mined}G`); }
+  if (healedNames.length) log(`🌿 癒しの庭が${healedNames.join("・")}のHPを回復した（+10）`);
+  // 💎魔力鉱脈（v20）: 付与された自分の土地から+20G（土地を失うと消える＝所有者が変わっていたら剥がす）
+  let veinGain = 0;
+  G.tiles.forEach(t => {
+    if (t.veinOwner === undefined || t.veinOwner === null) return;
+    if (t.type !== "LAND" || t.owner !== t.veinOwner) { delete t.veinOwner; return; }
+    if (t.owner === p.id) veinGain += 20;
+  });
+  if (veinGain > 0) { p.magic += veinGain; SFX.coin(); log(`💎 魔力鉱脈から${p.name}に+${veinGain}G`); }
+  // 🌸春の芽吹き（v20）: 2Rの間、自軍クリーチャーをターン開始時に+15回復
+  if (activeFx(G, "bud", p.id)) {
+    const budHealed = [];
+    ownedLands(G, p.id).forEach(t => {
+      if (!t.creature || !isWounded(t.creature)) return;
+      t.creature.hp = Math.min(maxHpOf(t.creature), currentHp(t.creature) + 15);
+      budHealed.push(CARD_BY_ID[t.creature.cardId].name);
+    });
+    if (budHealed.length) log(`🌸 春の芽吹き！ ${budHealed.join("・")}のHPが回復した（+15）`);
+  }
 }
 
 // 目標資産に到達／転落したときの通知（⚑凱旋リーチ）。ターンの終わりに全員ぶんチェックする。
@@ -509,12 +631,22 @@ async function castSpell(p, cardId) {
   const c = CARD_BY_ID[cardId];
   const opp = opponentOf(G, p); // 筆頭の相手（総資産トップ）。リベンジ・劣勢判定の基準
   if (c.cost > p.magic) return false;
+  // 🤫沈黙の霧（v20）: このターンはスペルを使えない
+  if (p.spellSealed) {
+    if (!p.isCPU) log(`🤫 沈黙の霧に閉ざされている——このターンはスペルを使えない`, "warn");
+    return false;
+  }
+  // 🌙静寂のとばり（v20）: 対象指定スペルは全員使用不可
+  if (TARGETED_SPELLS.has(c.spell) && activeFx(G, "silence")) {
+    if (!p.isCPU) log(`🌙 静寂のとばり——対象を指定するスペルは今は使えない`, "warn");
+    return false;
+  }
   const pay = () => { p.magic -= c.cost; discardFromHand(p, cardId); };
 
   if (c.spell === "quake") {
     const target = p.isCPU ? aiPickQuakeTarget(G, p)
-      : await humanPickLand(enemyLandsOf(G, p).filter(t => t.level > 1 && !isSanctuaryProtected(G, t)),
-        "✨ クエイク — 対象を選択", "レベルを1下げる敵の土地を選んでください",
+      : await humanPickLand(enemyLandsOf(G, p).filter(t => t.level > 1 && !landSpellShielded(G, t)),
+        "✨ クエイク — 対象を選択", "レベルを1下げる敵の土地を選んでください（🏜️蜃気楼中の相手の土地は対象外）",
         "クエイクの対象となる土地（敵のLv2以上）がありません");
     if (!target) return false;
     pay();
@@ -756,8 +888,8 @@ async function castSpell(p, cardId) {
     pay();
     const healed = CARD_BY_ID[target.creature.cardId];
     const before = currentHp(target.creature);
-    target.creature.hp = healed.hp;
-    log(`💚 ${p.name}のリジェネ！ ${tileName(target)}の${healed.name}のHPが${before}→${healed.hp}に全回復した`);
+    target.creature.hp = maxHpOf(target.creature); // 成長分（v19）も含めた実最大HPまで回復
+    log(`💚 ${p.name}のリジェネ！ ${tileName(target)}の${healed.name}のHPが${before}→${target.creature.hp}に全回復した`);
 
   } else if (c.spell === "renew") {
     pay(); // 先に引き直しカード自身を捨て札へ
@@ -893,11 +1025,662 @@ async function castSpell(p, cardId) {
     pay();
     setOverlay(G, target, "snare", p.id);
     log(`🕸️ ${p.name}のスネアトラップ！ ${tileName(target)}に罠が仕掛けられた（${OVERLAY_DURATION}ラウンド）`, "warn");
+
+  // ============================================================
+  // 第二弾スペル（v20）
+  // ============================================================
+  // --- 経済 ---
+  } else if (c.spell === "elembless") {
+    const n = ownedLands(G, p.id).filter(t => t.element === c.elem).length;
+    if (n === 0) { if (!p.isCPU) log(`${ELEMENTS[c.elem].name}属性の土地を持っていません`, "warn"); return false; }
+    pay();
+    const gain = n * 70;
+    p.magic += gain;
+    SFX.coin();
+    log(`${c.icon} ${p.name}の${c.name}！ ${ELEMENTS[c.elem].name}属性の土地${n}マスから+${gain}G`);
+
+  } else if (c.spell === "goldrush") {
+    pay();
+    const gain = Math.min(250, Math.floor(p.magic * 0.2));
+    p.magic += gain;
+    SFX.coin();
+    log(`💰 ${p.name}のゴールドラッシュ！ 所持魔力の20%＝+${gain}G`);
+
+  } else if (c.spell === "tollpass") {
+    pay();
+    p.tollFree = true;
+    log(`📜 ${p.name}は通行手形を手に入れた——次に払う通行料1回が無料になる`);
+
+  } else if (c.spell === "taxcollect") {
+    const targets = opponentsOf(G, p).map(q => ({ q, n: ownedLands(G, q.id).length })).filter(x => x.n > 0 && x.q.magic > 0);
+    if (targets.length === 0) { if (!p.isCPU) log("徴収できる相手がいません", "warn"); return false; }
+    pay();
+    let total = 0;
+    targets.forEach(({ q, n }) => {
+      const amt = Math.min(n * 30, q.magic);
+      q.magic -= amt;
+      total += amt;
+      log(`🧾 ${q.name}から土地${n}マス分の税 ${amt}G を徴収`);
+    });
+    p.magic += total;
+    SFX.coin();
+    log(`🧾 ${p.name}のタックスコレクト！ 合計+${total}G`);
+
+  } else if (c.spell === "cauldron") {
+    // 手札を2枚まで捨てて1枚につき+130G（人間専用・noCpu）
+    const CAULDRON_GAIN = 130;
+    const picks = [];
+    for (let i = 0; i < 2; i++) {
+      const idx = p.hand.indexOf(cardId);
+      const pool = p.hand.filter((id, j) => j !== idx && !picks.includes(j));
+      const poolIdx = p.hand.map((id, j) => j).filter(j => j !== idx && !picks.includes(j));
+      if (pool.length === 0) break;
+      const res = await showDialog({
+        title: `⚗️ 錬金大釜 — ${i + 1}枚目を選択`,
+        body: `手札を<b>2枚まで</b>捨て、1枚につき<b>+${CAULDRON_GAIN}G</b>${i === 1 ? "（やめる＝1枚で実行）" : ""}`,
+        cards: poolIdx.map(j => ({ card: CARD_BY_ID[p.hand[j]] })),
+        peek: true,
+        buttons: [{ label: i === 0 ? "やめる" : "1枚で実行", value: "cancel" }],
+      });
+      if (res.action !== "card") { if (i === 0) return false; break; }
+      // 選んだカードのインデックスを記録（同名複数に対応するため位置で管理）
+      const j = poolIdx.find(k => p.hand[k] === res.cardId && !picks.includes(k));
+      picks.push(j);
+    }
+    if (picks.length === 0) return false;
+    // 先に選んだカードを捨ててから支払う（payのdiscardFromHandで手札indexがずれるのを防ぐ）
+    const names = picks.map(j => CARD_BY_ID[p.hand[j]].name);
+    picks.sort((a, b) => b - a).forEach(j => { p.discard.push(p.hand[j]); p.hand.splice(j, 1); });
+    pay();
+    p.magic += picks.length * CAULDRON_GAIN;
+    SFX.coin();
+    log(`⚗️ ${p.name}の錬金大釜！ ${names.join("・")}を${picks.length * CAULDRON_GAIN}Gに変えた`);
+
+  } else if (c.spell === "pawnshop") {
+    const target = await humanPickLand(ownedLands(G, p.id).filter(t => t.level >= 2),
+      "🏦 質入れ — 対象を選択", "自分の土地1つを<b>Lv-1</b>し、下がった価値の<b>120%</b>を得ます",
+      "質入れできる土地（自分のLv2以上）がありません");
+    if (!target) return false;
+    pay();
+    const diff = LAND_VALUE[target.level - 1] - LAND_VALUE[target.level - 2];
+    target.level--;
+    const gain = Math.floor(diff * 1.2);
+    p.magic += gain;
+    SFX.coin();
+    log(`🏦 ${p.name}の質入れ！ ${tileName(target)}をLv${target.level}に下げ、+${gain}Gを得た`);
+
+  // --- ドロー・手札 ---
+  } else if (c.spell === "foresight") {
+    if (p.deck.length === 0) { if (!p.isCPU) log("山札がありません", "warn"); return false; }
+    pay();
+    const n = Math.min(3, p.deck.length);
+    let remaining = p.deck.slice(-n); // 山札の上n枚（末尾＝一番上）
+    p.deck = p.deck.slice(0, -n);
+    const order = [];
+    while (remaining.length > 1) {
+      const res = await showDialog({
+        title: `🔮 予知 — 次に引く順に選択（${order.length + 1}枚目）`,
+        body: `山札の上${n}枚です。<b>次に引きたい順</b>にクリックしてください`,
+        cards: remaining.map(id => ({ card: CARD_BY_ID[id] })),
+        peek: true,
+        buttons: [],
+      });
+      const i = remaining.indexOf(res.cardId);
+      order.push(remaining.splice(i, 1)[0]);
+    }
+    order.push(remaining[0]);
+    // order[0]を次に引く＝山札の一番上（末尾）になるよう逆順で積む
+    p.deck.push(...order.slice().reverse());
+    log(`🔮 ${p.name}の予知！ 山札の上${n}枚を並べ替えた`);
+
+  } else if (c.spell === "revelation") {
+    pay();
+    const d = drawCard(G, p);
+    if (d && !p.isCPU) await animateDraw(CARD_BY_ID[d]);
+    p.magic += 50;
+    SFX.coin();
+    log(`💡 ${p.name}の天啓！ カードを${d ? 1 : 0}枚引き、+50G`);
+    await enforceHandLimit(p);
+
+  } else if (c.spell === "inspiration") {
+    pay();
+    let got = 0;
+    for (let i = 0; i < 3; i++) { if (drawCard(G, p)) got++; }
+    log(`✨ ${p.name}のインスピレーション！ カードを${got}枚引いた——1枚捨てる`);
+    // 1枚捨てる（手札上限とは別の強制ディスカード）
+    if (p.hand.length > 0) {
+      let discardId;
+      if (p.isCPU) discardId = aiChooseDiscard(G, p);
+      else {
+        renderHand(G);
+        const res = await showDialog({
+          title: "✨ インスピレーション — 捨てるカードを選択",
+          body: "手札から1枚を捨ててください",
+          cards: p.hand.map(id => ({ card: CARD_BY_ID[id] })),
+          peek: true, buttons: [],
+        });
+        discardId = res.cardId;
+      }
+      discardFromHand(p, discardId);
+      log(`${p.name}は${CARD_BY_ID[discardId].name}を捨てた`);
+    }
+    await enforceHandLimit(p);
+
+  } else if (c.spell === "gravecall") {
+    if (p.discard.length === 0) { if (!p.isCPU) log("捨て札がありません", "warn"); return false; }
+    const picks = [];
+    if (p.isCPU) {
+      const cands = [...new Set(p.discard)].map(id => CARD_BY_ID[id])
+        .sort((a, b) => (b.st || 0) + (b.hp || 0) + b.cost - ((a.st || 0) + (a.hp || 0) + a.cost));
+      picks.push(...cands.slice(0, 2).map(x => x.id));
+    } else {
+      for (let i = 0; i < 2; i++) {
+        const uniq = [...new Set(p.discard)].filter(id => !picks.includes(id) || p.discard.filter(x => x === id).length > picks.filter(x => x === id).length);
+        if (uniq.length === 0) break;
+        const res = await showDialog({
+          title: `🪦 墓所の呼び声 — ${i + 1}枚目を選択`,
+          body: `自分の捨て札から<b>2枚まで</b>手札に戻せます${i === 1 ? "（やめる＝1枚で実行）" : ""}`,
+          cards: uniq.map(id => ({ card: CARD_BY_ID[id] })),
+          peek: true,
+          buttons: [{ label: i === 0 ? "やめる" : "1枚で実行", value: "cancel" }],
+        });
+        if (res.action !== "card") { if (i === 0) return false; break; }
+        picks.push(res.cardId);
+      }
+      if (picks.length === 0) return false;
+    }
+    pay();
+    picks.forEach(id => {
+      const di = p.discard.indexOf(id);
+      if (di >= 0) { p.discard.splice(di, 1); p.hand.push(id); }
+    });
+    log(`🪦 ${p.name}の墓所の呼び声！ ${picks.map(id => CARD_BY_ID[id].name).join("・")}を手札に戻した`);
+    await enforceHandLimit(p);
+
+  // --- 移動 ---
+  } else if (c.spell === "tailwind") {
+    pay();
+    p.diceBonus = 2;
+    log(`🍃 ${p.name}の追い風！ 次のダイスの出目に+2`);
+
+  } else if (c.spell === "backstep") {
+    const dests = backstepDests(G, p.pos, 3);
+    if (dests.length === 0) { if (!p.isCPU) log("戻れるマスがありません", "warn"); return false; }
+    const target = await humanPickTileOnMap(dests, {
+      title: "↩️ バックステップ — 戻るマスを選択",
+      body: "自分のコマを<b>1〜3マス後ろ</b>へ戻します（移動のみ＝マスの効果・関門は発動しません）。そのあと通常どおりダイスで移動します。",
+      cancelable: true,
+      labelFn: t => t.type === "LAND"
+        ? `${ELEMENTS[t.element].icon} ${tileName(t)}${t.owner !== null ? `（${t.owner === p.id ? "自領" : "敵領"} Lv${t.level}）` : "（空き地）"}`
+        : `#${t.id} ${tileName(t)}`,
+    });
+    if (!target) return false;
+    pay();
+    p.pos = target.id;
+    log(`↩️ ${p.name}のバックステップ！ ${tileName(target)}へ戻った`);
+    renderBoard(G);
+
+  } else if (c.spell === "marchorder") {
+    pay();
+    p.freeMarch = true;
+    log(`🎺 ${p.name}の進軍号令！ このターンの②侵攻は行軍費なし（①で行動していても②の権利が残る）`);
+
+  } else if (c.spell === "regroup") {
+    const mine = ownedLands(G, p.id).filter(t => t.creature);
+    if (mine.length < 2) { if (!p.isCPU) log("入れ替えるクリーチャーが2体いません", "warn"); return false; }
+    const a = await humanPickLand(mine, "🔀 集結 — 1体目を選択", "位置を入れ替える自分のクリーチャーを2体選びます（1体目）", "");
+    if (!a) return false;
+    const b = await humanPickLand(mine.filter(t => t.id !== a.id), "🔀 集結 — 2体目を選択",
+      `1体目: ${CARD_BY_ID[a.creature.cardId].name}。入れ替える相手を選んでください`, "");
+    if (!b) return false;
+    pay();
+    const tmp = a.creature;
+    a.creature = b.creature;
+    b.creature = tmp;
+    log(`🔀 ${p.name}の集結！ ${CARD_BY_ID[b.creature.cardId].name}と${CARD_BY_ID[a.creature.cardId].name}が配置を入れ替えた`);
+
+  } else if (c.spell === "posswap") {
+    const target = await humanPickOpponent(p, "♟️ ポジションスワップ — 相手を選択", "コマの位置を入れ替える相手を選んでください");
+    if (!target) return false;
+    pay();
+    const tmp = p.pos;
+    p.pos = target.pos;
+    target.pos = tmp;
+    p.lastPath = [];
+    log(`♟️ ${p.name}のポジションスワップ！ ${target.name}とコマの位置が入れ替わった`, "warn");
+    renderBoard(G);
+
+  } else if (c.spell === "deport") {
+    const target = p.isCPU ? aiPickDeportTarget(G, p)
+      : await humanPickOpponent(p, "🏰 強制送還 — 相手を選択", "城へ送り返す相手を選んでください（周回はつきません）", q => q.pos !== 0);
+    if (!target) { if (!p.isCPU) log("送還できる相手がいません（すでに城）", "warn"); return false; }
+    pay();
+    target.pos = 0;
+    target.lastPath = [];
+    log(`🏰 ${p.name}の強制送還！ ${target.name}は城へ送り返された（周回はつかない）`, "warn");
+    renderBoard(G);
+
+  // --- バトル支援 ---
+  } else if (c.spell === "bravery") {
+    pay();
+    p.nextBattleCrit = 0.5;
+    log(`🎯 ${p.name}の決死の覚悟！ 次のバトルで会心率50%`);
+
+  } else if (c.spell === "warcry") {
+    pay();
+    p.nextBattleSt = 20;
+    log(`📣 ${p.name}のウォークライ！ 次のバトルでST+20`);
+
+  } else if (c.spell === "guardwind") {
+    pay();
+    p.nextDefHp = 20;
+    log(`🌬️ ${p.name}の護りの風！ 次に防衛する自軍クリーチャーのHP+20`);
+
+  } else if (c.spell === "blessing") {
+    const cands = ownedLands(G, p.id).filter(t => t.creature && (t.creature.grown || 0) < 5);
+    const target = p.isCPU ? aiPickBlessingTarget(G, p)
+      : await humanPickLand(cands, "🕊️ ブレッシング — 対象を選択",
+        "自軍クリーチャー1体を<b>永続強化</b>: ST/最大HP+10（🌱成長と同じ枠＝合計+25まで）",
+        "強化できるクリーチャーがいません（すでに最大強化）");
+    if (!target) return false;
+    pay();
+    const bc = CARD_BY_ID[target.creature.cardId];
+    target.creature.grown = Math.min(5, (target.creature.grown || 0) + 2);
+    target.creature.hp = Math.min(maxHpOf(target.creature), currentHp(target.creature) + 10);
+    log(`🕊️ ${p.name}のブレッシング！ ${bc.name}が祝福された（ST/最大HP+${Math.min(5, target.creature.grown) * 5}の強化状態）`);
+
+  } else if (c.spell === "siege") {
+    pay();
+    p.siegeSt = 25;
+    log(`⚔️ ${p.name}の攻城の号令！ このターンの侵略・侵攻バトルでST+25`);
+
+  // --- 土地 ---
+  } else if (c.spell === "highsell") {
+    const target = await humanPickLand(ownedLands(G, p.id),
+      "💱 高値売却 — 対象を選択", `自分の土地1つを<b>価値の100%</b>で売却します（通常の強制売却は${Math.round(SELL_RATE * 100)}%。駐留クリーチャーは手札に戻ります）`,
+      "売却できる土地がありません");
+    if (!target) return false;
+    pay();
+    const gain = landValue(target);
+    if (target.creature) { p.hand.push(target.creature.cardId); }
+    target.owner = null; target.creature = null; target.level = 1;
+    p.magic += gain;
+    SFX.coin();
+    log(`💱 ${p.name}の高値売却！ ${tileName(target)}を${gain}Gで売り払った`);
+    await enforceHandLimit(p);
+
+  } else if (c.spell === "veinfind") {
+    const target = p.isCPU ? aiPickVeinTarget(G, p)
+      : await humanPickLand(ownedLands(G, p.id).filter(t => t.veinOwner === undefined || t.veinOwner === null),
+        "💎 鉱脈発見 — 対象を選択", "自分の土地1つに<b>魔力鉱脈</b>を付与: 以後、自分のターン開始時<b>+20G</b>（永続・土地を失うと消える）",
+        "鉱脈を掘れる土地がありません");
+    if (!target) return false;
+    pay();
+    target.veinOwner = p.id;
+    log(`💎 ${p.name}は${tileName(target)}に魔力鉱脈を発見！ 以後ターン開始時+20G`);
+
+  } else if (c.spell === "assimilate") {
+    const cands = ownedLands(G, p.id).filter(t =>
+      neighborsOf(G, t).some(n => n.type === "LAND" && n.owner === p.id && n.element !== t.element));
+    const target = await humanPickLand(cands,
+      "🌀 属性同化 — 基準の土地を選択", "選んだ土地の属性に、<b>隣接する自領すべて</b>の属性を合わせます（連鎖の一括組み替え）",
+      "同化できる土地がありません（隣接する属性違いの自領が必要）");
+    if (!target) return false;
+    pay();
+    const changed = [];
+    neighborsOf(G, target).forEach(n => {
+      if (n.type === "LAND" && n.owner === p.id && n.element !== target.element) {
+        changed.push(`${tileName(n)}(${ELEMENTS[n.element].name}→${ELEMENTS[target.element].name})`);
+        n.element = target.element;
+      }
+    });
+    log(`🌀 ${p.name}の属性同化！ ${changed.join("・")}`);
+
+  } else if (c.spell === "curseland") {
+    const target = p.isCPU ? aiPickCurselandTarget(G, p)
+      : await humanPickLand(enemyLandsOf(G, p).filter(t => !landSpellShielded(G, t) && !landCursed(G, t)),
+        "🕯️ カースランド — 対象を選択", `敵の土地1つの<b>通行料を半減</b>します（${OVERLAY_DURATION}ラウンド）`,
+        "呪える敵の土地がありません");
+    if (!target) return false;
+    pay();
+    target.curseUntil = G.round + OVERLAY_DURATION - 1;
+    log(`🕯️ ${p.name}のカースランド！ ${tileName(target)}の通行料が半減（${OVERLAY_DURATION}ラウンド）`, "warn");
+
+  } else if (c.spell === "fortify") {
+    const target = p.isCPU ? aiPickFortifyTarget(G, p)
+      : await humanPickLand(ownedLands(G, p.id).filter(t => !t.fortified),
+        "🏯 城塞化 — 対象を選択", "自分の土地1つの<b>土地の加護（属性一致HP+）を永続的に2倍</b>にします",
+        "城塞化できる土地がありません");
+    if (!target) return false;
+    pay();
+    target.fortified = true;
+    log(`🏯 ${p.name}の城塞化！ ${tileName(target)}の加護が2倍になった（永続）`);
+
+  } else if (c.spell === "grandquake") {
+    let targets;
+    if (p.isCPU) {
+      targets = aiPickGrandquakeTargets(G, p);
+      if (!targets) return false;
+    } else {
+      const pool = enemyLandsOf(G, p).filter(t => t.level > 1 && !landSpellShielded(G, t));
+      const t1 = await humanPickLand(pool, "🌋 グランドクエイク — 1つ目を選択", "敵の土地を<b>2つまで</b>選び、それぞれLv-1します", "対象となる敵の土地（Lv2以上）がありません");
+      if (!t1) return false;
+      const rest = pool.filter(t => t.id !== t1.id);
+      let t2 = null;
+      if (rest.length > 0) {
+        t2 = await humanPickTileOnMap(rest, {
+          title: "🌋 グランドクエイク — 2つ目を選択",
+          body: "2つ目の対象を選んでください（キャンセル＝1つだけで実行）",
+          cancelable: true, cancelLabel: "1つだけで実行",
+          labelFn: t => `${ELEMENTS[t.element].icon} ${tileName(t)}（Lv${t.level}）`,
+        });
+      }
+      targets = t2 ? [t1, t2] : [t1];
+    }
+    pay();
+    targets.forEach(t => { t.level = Math.max(1, t.level - 1); });
+    log(`🌋 ${p.name}のグランドクエイク！ ${targets.map(t => `${tileName(t)}→Lv${t.level}`).join("・")}`, "warn");
+
+  } else if (c.spell === "levelshift") {
+    const src = await humanPickLand(ownedLands(G, p.id).filter(t => t.level >= 2),
+      "⚖️ レベル移植 — 移す元を選択", "自分の土地1つを<b>Lv-1</b>し、別の自分の土地を<b>Lv+1</b>します（移す元＝Lv2以上）",
+      "移植元の土地（自分のLv2以上）がありません");
+    if (!src) return false;
+    const dst = await humanPickLand(ownedLands(G, p.id).filter(t => t.id !== src.id && t.level < 5),
+      "⚖️ レベル移植 — 移す先を選択", `${tileName(src)}のレベルを移す先を選んでください（Lv4以下）`,
+      "移植先の土地がありません");
+    if (!dst) return false;
+    pay();
+    src.level--;
+    dst.level++;
+    log(`⚖️ ${p.name}のレベル移植！ ${tileName(src)}→Lv${src.level} ／ ${tileName(dst)}→Lv${dst.level}`);
+
+  // --- 妨害 ---
+  } else if (c.spell === "spy") {
+    const target = await humanPickOpponent(p, "🕵️ スパイ — 相手を選択", "手札をすべて見る相手を選んでください", q => q.hand.length > 0);
+    if (!target) { if (!p.isCPU) log("手札を持っている相手がいません", "warn"); return false; }
+    pay();
+    log(`🕵️ ${p.name}のスパイ！ ${target.name}の手札を覗き見た`);
+    await showDialog({
+      title: `🕵️ ${target.name}の手札（${target.hand.length}枚）`,
+      body: "相手の手札は以下のとおり——",
+      cards: target.hand.map(id => ({ card: CARD_BY_ID[id] })),
+      peek: true,
+      buttons: [{ label: "閉じる", value: "close", primary: true }],
+    });
+
+  } else if (c.spell === "cursedice") {
+    const target = p.isCPU ? aiPickSlowTarget(G, p)
+      : await humanPickOpponent(p, "🎲 呪いのダイス — 相手を選択", "次の出目を1〜3にする相手を選んでください");
+    if (!target) return false;
+    pay();
+    target.diceCurse = true;
+    log(`🎲 ${p.name}の呪いのダイス！ ${target.name}の次の出目は1〜3になる`, "warn");
+
+  } else if (c.spell === "mudswamp") {
+    const target = p.isCPU ? aiPickSlowTarget(G, p)
+      : await humanPickOpponent(p, "🟤 泥沼 — 相手を選択", "次の移動を出目半分（切り上げ）にする相手を選んでください");
+    if (!target) return false;
+    pay();
+    target.mudded = true;
+    log(`🟤 ${p.name}の泥沼！ ${target.name}の次の移動は半減する`, "warn");
+
+  } else if (c.spell === "whisper") {
+    const target = p.isCPU ? aiPickStealTarget(G, p)
+      : await humanPickOpponent(p, "😈 悪夢の囁き — 相手を選択", "手札からランダムに1枚捨てさせる相手を選んでください", q => q.hand.length > 0);
+    if (!target) { if (!p.isCPU) log("手札を持っている相手がいません", "warn"); return false; }
+    pay();
+    const idx = Math.floor(Math.random() * target.hand.length);
+    const dumped = target.hand.splice(idx, 1)[0];
+    target.discard.push(dumped);
+    log(`😈 ${p.name}の悪夢の囁き！ ${target.name}は${CARD_BY_ID[dumped].name}を捨てた`, "warn");
+
+  } else if (c.spell === "manaburn") {
+    const target = p.isCPU ? richestOpponent(G, p)
+      : await humanPickOpponent(p, "🔥 マナバーン — 相手を選択", "魔力の20%を消滅させる相手を選んでください（上限300G）");
+    if (!target) return false;
+    const amt = Math.min(300, Math.floor(target.magic * 0.2));
+    if (amt <= 0) { if (!p.isCPU) log("相手に燃やせる魔力がありません", "warn"); return false; }
+    pay();
+    target.magic -= amt;
+    log(`🔥 ${p.name}のマナバーン！ ${target.name}の魔力${amt}Gが燃え尽きた（誰の物にもならない）`, "warn");
+
+  } else if (c.spell === "nullfog") {
+    const target = p.isCPU ? aiPickNullfogTarget(G, p)
+      : await humanPickLand(
+        enemyLandsOf(G, p).filter(t => t.creature && !isSanctuaryProtected(G, t) && !isSpellProof(t) && !creatureNulled(G, t.creature)),
+        "🌫️ 無力化の霧 — 対象を選択", `敵クリーチャー1体の<b>能力をすべて消します</b>（${OVERLAY_DURATION}ラウンド。アイテムで得る能力は消えない）※<b>護法</b>持ちは対象外`,
+        "対象にできる敵クリーチャーがいません");
+    if (!target) return false;
+    pay();
+    target.creature.nulledUntil = G.round + OVERLAY_DURATION - 1;
+    log(`🌫️ ${p.name}の無力化の霧！ ${CARD_BY_ID[target.creature.cardId].name}の能力が消えた（${OVERLAY_DURATION}ラウンド）`, "warn");
+
+  } else if (c.spell === "silencefog") {
+    const target = p.isCPU ? aiPickSilenceTarget(G, p)
+      : await humanPickOpponent(p, "🤫 沈黙の霧 — 相手を選択", "次のターン、スペルを使えなくする相手を選んでください");
+    if (!target) return false;
+    pay();
+    target.spellSealed = true;
+    log(`🤫 ${p.name}の沈黙の霧！ ${target.name}は次のターンスペルを使えない`, "warn");
+
+  } else if (c.spell === "truce") {
+    pay();
+    addFx(G, "truce", p.id, OVERLAY_DURATION);
+    log(`🏳️ ${p.name}の停戦協定！ ${OVERLAY_DURATION}ラウンドの間、全員が侵略・侵攻できない`, "warn");
+
+  } else if (c.spell === "freezerain") {
+    const targets = opponentsOf(G, p).filter(q => !q.skipTurn);
+    if (targets.length === 0) { if (!p.isCPU) log("凍らせる相手がいません（すでに足止め中）", "warn"); return false; }
+    pay();
+    targets.forEach(q => { q.skipTurn = true; q.skipReason = "freeze"; });
+    log(`🧊 ${p.name}のフリーズレイン！ ${targets.map(q => q.name).join("・")}は次のターン動けない`, "warn");
+
+  } else if (c.spell === "miragefield") {
+    pay();
+    addFx(G, "mirage", p.id, OVERLAY_DURATION);
+    log(`🏜️ ${p.name}の蜃気楼！ ${OVERLAY_DURATION}ラウンドの間、自分の土地は敵の土地対象スペルの対象にならない`);
+
+  // --- 🕯️儀式（手札1枚を捧げる） ---
+  } else if (c.spell === "r_harvest") {
+    const sac = await ritualSacrifice(p, cardId, c.name);
+    if (!sac) return false;
+    pay();
+    discardFromHand(p, sac);
+    p.magic += 350;
+    SFX.coin();
+    log(`🕯️ ${p.name}の豊穣の儀！ ${CARD_BY_ID[sac].name}を捧げ、+350G`);
+
+  } else if (c.spell === "r_contract") {
+    if (p.deck.length === 0) { if (!p.isCPU) log("山札がありません", "warn"); return false; }
+    const uniq = [...new Set(p.deck)].sort((a, b) => typeOrder(a) - typeOrder(b) || CARD_BY_ID[a].cost - CARD_BY_ID[b].cost);
+    const res = await showDialog({
+      title: "🕯️ 契約の儀 — 山札から選択",
+      body: "山札から好きなカード1枚を手札に加えます（そのあと山札は切り直す）",
+      cards: uniq.map(id => ({ card: CARD_BY_ID[id] })),
+      peek: true,
+      buttons: [{ label: "やめる", value: "cancel" }],
+    });
+    if (res.action !== "card") return false;
+    const sac = await ritualSacrifice(p, cardId, c.name);
+    if (!sac) return false;
+    pay();
+    discardFromHand(p, sac);
+    const di = p.deck.indexOf(res.cardId);
+    p.deck.splice(di, 1);
+    p.hand.push(res.cardId);
+    p.deck = shuffle(p.deck);
+    log(`🕯️ ${p.name}の契約の儀！ ${CARD_BY_ID[sac].name}を捧げ、山札から${CARD_BY_ID[res.cardId].name}を引き当てた`);
+    await enforceHandLimit(p);
+
+  } else if (c.spell === "r_blaze") {
+    const target = p.isCPU ? aiPickBlazeTarget(G, p)
+      : await humanPickLand(
+        enemyLandsOf(G, p).filter(t => t.creature && !isSanctuaryProtected(G, t) && !isSpellProof(t)),
+        "🕯️ 猛火の儀 — 対象を選択", "敵クリーチャー1体に<b>70ダメージ</b>（護法・結界は対象外）",
+        "対象にできる敵クリーチャーがいません");
+    if (!target) return false;
+    const sac = await ritualSacrifice(p, cardId, c.name);
+    if (!sac) return false;
+    pay();
+    discardFromHand(p, sac);
+    const victim = CARD_BY_ID[target.creature.cardId];
+    const newHp = currentHp(target.creature) - 70;
+    if (newHp <= 0) {
+      G.players[target.owner].discard.push(target.creature.cardId);
+      const nm = tileName(target);
+      target.creature = null; target.owner = null;
+      log(`🕯️ ${p.name}の猛火の儀！ ${CARD_BY_ID[sac].name}を捧げた業火が${victim.name}を焼き尽くした——${nm}は空き地に`, "warn");
+    } else {
+      target.creature.hp = newHp;
+      log(`🕯️ ${p.name}の猛火の儀！ ${victim.name}に70ダメージ（残りHP${newHp}）`, "warn");
+    }
+
+  } else if (c.spell === "r_revive") {
+    const creatures = [...new Set(p.discard)].filter(id => CARD_BY_ID[id].type === "creature");
+    const empties = G.tiles.filter(t => t.type === "LAND" && t.owner === null);
+    if (creatures.length === 0 || empties.length === 0) {
+      if (!p.isCPU) log("蘇生できるクリーチャー（捨て札）か空き地がありません", "warn");
+      return false;
+    }
+    let reviveId, dst;
+    if (p.isCPU) {
+      const pick = aiPickReviveTarget(G, p);
+      if (!pick) return false;
+      reviveId = pick.cardId; dst = pick.tile;
+    } else {
+      const res = await showDialog({
+        title: "🕯️ 蘇生の儀 — 蘇らせるクリーチャーを選択",
+        body: "自分の捨て札のクリーチャー1体を、好きな<b>空き地</b>へ<b>コスト不要</b>で召喚します",
+        cards: creatures.map(id => ({ card: CARD_BY_ID[id] })),
+        peek: true,
+        buttons: [{ label: "やめる", value: "cancel" }],
+      });
+      if (res.action !== "card") return false;
+      reviveId = res.cardId;
+      dst = await humanPickLand(empties, `🕯️ ${CARD_BY_ID[reviveId].name}の召喚先を選択`, "蘇生先の空き地を選んでください", "空き地がありません");
+      if (!dst) return false;
+    }
+    const sac = await ritualSacrifice(p, cardId, c.name);
+    if (!sac) return false;
+    pay();
+    discardFromHand(p, sac);
+    const di = p.discard.indexOf(reviveId);
+    if (di >= 0) p.discard.splice(di, 1);
+    dst.owner = p.id;
+    dst.creature = { cardId: reviveId, hp: CARD_BY_ID[reviveId].hp };
+    SFX.summon();
+    log(`🕯️ ${p.name}の蘇生の儀！ ${CARD_BY_ID[sac].name}を捧げ、${CARD_BY_ID[reviveId].name}が${tileName(dst)}に蘇った`);
+
+  } else if (c.spell === "r_ages") {
+    const target = p.isCPU ? aiPickAgesTarget(G, p)
+      : await humanPickLand(ownedLands(G, p.id).filter(t => t.level <= 3),
+        "🕯️ 星霜の儀 — 対象を選択", "自分の土地1つを<b>Lv+2</b>します（Lv4まで）",
+        "対象となる土地（自分のLv3以下）がありません");
+    if (!target) return false;
+    const sac = await ritualSacrifice(p, cardId, c.name);
+    if (!sac) return false;
+    pay();
+    discardFromHand(p, sac);
+    target.level = Math.min(4, target.level + 2);
+    log(`🕯️ ${p.name}の星霜の儀！ ${CARD_BY_ID[sac].name}を捧げ、${tileName(target)}が一気にLv${target.level}へ成長した`);
+
+  } else if (c.spell === "r_storm") {
+    const victims = enemyLandsOf(G, p).filter(t => t.creature && !isSanctuaryProtected(G, t) && !isSpellProof(t));
+    if (victims.length === 0) { if (!p.isCPU) log("対象にできる敵クリーチャーがいません", "warn"); return false; }
+    const sac = await ritualSacrifice(p, cardId, c.name);
+    if (!sac) return false;
+    pay();
+    discardFromHand(p, sac);
+    log(`🕯️ ${p.name}の嵐の儀！ ${CARD_BY_ID[sac].name}を捧げた嵐が敵軍を襲う——全体に25ダメージ`, "warn");
+    victims.forEach(t => {
+      const victim = CARD_BY_ID[t.creature.cardId];
+      const newHp = currentHp(t.creature) - 25;
+      if (newHp <= 0) {
+        G.players[t.owner].discard.push(t.creature.cardId);
+        t.creature = null; t.owner = null;
+        log(`⚡ ${victim.name}は嵐に倒れ、${tileName(t)}は空き地に戻った`, "warn");
+      } else {
+        t.creature.hp = newHp;
+        log(`⚡ ${victim.name}に25ダメージ（残りHP${newHp}）`);
+      }
+    });
+
+  } else if (c.spell === "r_time") {
+    const sac = await ritualSacrifice(p, cardId, c.name);
+    if (!sac) return false;
+    pay();
+    discardFromHand(p, sac);
+    p.timeRitual = true;
+    log(`🕯️ ${p.name}の時の儀！ ${CARD_BY_ID[sac].name}を捧げ、このターンもう一度動けるようになった`, "warn");
+
+  } else if (c.spell === "r_purify") {
+    const sac = await ritualSacrifice(p, cardId, c.name);
+    if (!sac) return false;
+    pay();
+    discardFromHand(p, sac);
+    let cleared = 0;
+    G.tiles.forEach(t => {
+      if (t.overlay) { t.overlay = null; cleared++; }
+      if (t.curseUntil) { delete t.curseUntil; cleared++; }
+      if (t.creature && t.creature.nulledUntil) { delete t.creature.nulledUntil; cleared++; }
+    });
+    if (G.fxList && G.fxList.length) { cleared += G.fxList.length; G.fxList = []; }
+    healAllCreatures(G, p);
+    log(`🕯️ ${p.name}の浄化の儀！ ${CARD_BY_ID[sac].name}を捧げ、盤面の時限効果${cleared}件を洗い流し、自軍は全回復した`);
+
+  // --- 盤面エフェクト（全体・2R） ---
+  } else if (c.spell === "fx_market") {
+    pay();
+    addFx(G, "market", p.id, OVERLAY_DURATION);
+    log(`🏪 ${p.name}の市場開放！ ${OVERLAY_DURATION}Rの間、カードマスで2枚ドロー（全員）`);
+
+  } else if (c.spell === "fx_bud") {
+    pay();
+    addFx(G, "bud", p.id, OVERLAY_DURATION);
+    log(`🌸 ${p.name}の春の芽吹き！ ${OVERLAY_DURATION}Rの間、自軍はターン開始時HP+15回復`);
+
+  } else if (c.spell === "fx_war") {
+    pay();
+    addFx(G, "war", p.id, OVERLAY_DURATION);
+    log(`🔥 ${p.name}の戦火の世！ ${OVERLAY_DURATION}Rの間、攻め側ST+20（全員）`, "warn");
+
+  } else if (c.spell === "fx_manastorm") {
+    pay();
+    addFx(G, "manastorm", p.id, OVERLAY_DURATION);
+    log(`⚡ ${p.name}の魔力嵐！ ${OVERLAY_DURATION}Rの間、すべての通行料1.5倍`, "warn");
+
+  } else if (c.spell === "fx_silence") {
+    pay();
+    addFx(G, "silence", p.id, OVERLAY_DURATION);
+    log(`🌙 ${p.name}の静寂のとばり！ ${OVERLAY_DURATION}Rの間、対象指定スペルは全員使えない`, "warn");
+
+  } else if (c.spell === "fx_goddess") {
+    pay();
+    addFx(G, "goddess", p.id, OVERLAY_DURATION);
+    log(`👼 ${p.name}の女神の加護！ ${OVERLAY_DURATION}Rの間、自分の土地の加護2倍＋援護ST+10`);
   }
 
   SFX.spell();
   renderAll(G);
   return true;
+}
+
+// 🕯️儀式の追加コスト: 手札1枚（このカード自身を除く）を捧げる。
+// 選べなければ null（キャンセル＝不発・コスト未消費）。呼び出し側が discardFromHand する
+async function ritualSacrifice(p, selfId, spellName) {
+  const idx = p.hand.indexOf(selfId);
+  const pool = p.hand.slice(0, idx).concat(p.hand.slice(idx + 1));
+  if (pool.length === 0) { if (!p.isCPU) log("儀式に捧げる手札がありません", "warn"); return null; }
+  if (p.isCPU) return aiPickSacrifice(G, p, selfId);
+  const res = await showDialog({
+    title: `🕯️ ${spellName} — 捧げる手札を選択`,
+    body: "儀式の追加コストとして、手札から1枚を選んで捧げます（捨て札へ）",
+    cards: pool.map(id => ({ card: CARD_BY_ID[id] })),
+    peek: true,
+    buttons: [{ label: "やめる", value: "cancel" }],
+  });
+  return res.action === "card" ? res.cardId : null;
 }
 
 // スペル対象の土地を選ぶ（人間用）。盤面から直接クリックでも選べる。候補なし/キャンセルなら null
@@ -934,6 +1717,14 @@ async function movePlayer(p, steps) {
     if (tile.type === "CASTLE") {
       // 最後の1歩でぴったり城に停止したか（それ以外は「通過」）
       if (arriveCastle(G, p, i === steps - 1) === "win") return;
+    }
+    // ⚓港湾（v19）: 自分の灯台マスを通過・停止するたび+40G
+    if (tile.type === "LAND" && tile.owner === p.id && tile.creature &&
+        CARD_BY_ID[tile.creature.cardId].ab.includes("harbor")) {
+      p.magic += 40;
+      SFX.coin();
+      log(`⚓ ${p.name}は灯台の港に立ち寄った +40G`);
+      renderPanels(G);
     }
     // 足止めの罠: 術者以外が通過・停止するとその場で止まり、残りの移動を打ち切る
     if (snareOn(G, tile, p.id)) {
@@ -983,11 +1774,11 @@ function arriveCastle(g, p, exact = true) {
   return result;
 }
 
-// 指定プレイヤーの全クリーチャーのHPを最大に戻す（周回ボーナス）
+// 指定プレイヤーの全クリーチャーのHPを最大に戻す（周回ボーナス）。成長分（v19）も含めた実最大HPまで
 function healAllCreatures(g, p) {
   g.tiles.forEach(t => {
     if (t.type === "LAND" && t.owner === p.id && t.creature) {
-      t.creature.hp = CARD_BY_ID[t.creature.cardId].hp;
+      t.creature.hp = maxHpOf(t.creature);
     }
   });
 }
@@ -999,9 +1790,16 @@ function healAllCreatures(g, p) {
 async function tileAction(p, tile) {
   switch (tile.type) {
     case "CARD": {
-      const d = drawCard(G, p);
-      log(`🎴 ${p.name}はカードマスで${d ? "1枚ドロー" : "…山札切れ"}`);
-      if (d && !p.isCPU) await animateDraw(CARD_BY_ID[d]);
+      // 🏪市場開放（v20）: 2Rの間、カードマスで2枚ドロー（全員）
+      const n = activeFx(G, "market") ? 2 : 1;
+      let got = 0;
+      for (let i = 0; i < n; i++) {
+        const d = drawCard(G, p);
+        if (!d) break;
+        got++;
+        if (!p.isCPU) await animateDraw(CARD_BY_ID[d]);
+      }
+      log(`🎴 ${p.name}はカードマスで${got ? `${got}枚ドロー${n === 2 ? "（🏪市場開放）" : ""}` : "…山札切れ"}`);
       await enforceHandLimit(p);
       return false;
     }
@@ -1277,9 +2075,9 @@ async function ownLandFlow(p, tile) {
   const cost = levelUpCost(tile);
   const cur = CARD_BY_ID[tile.creature.cardId];
   const curHp = tile.creature.hp ?? cur.hp;
-  // 到達マスの駐留クリーチャーをそのまま隣へ侵攻に出せるか（不動・費用不足・行き先なしは不可）
-  const canMarchHere = !cur.ab.includes("immobile") &&
-    p.magic >= marchCost(cur) && marchTargets(G, p, tile).length > 0;
+  // 到達マスの駐留クリーチャーをそのまま隣へ侵攻に出せるか（不動・費用不足・行き先なし・停戦協定中は不可）
+  const canMarchHere = !cur.ab.includes("immobile") && !truceActive(G) &&
+    (p.magic >= marchCost(cur) || p.freeMarch) && marchTargets(G, p, tile).length > 0;
   let decision = null; // { action: "up" } / { action: "swap", cardId } / { action: "march", dst? }
 
   if (p.isCPU) {
@@ -1359,9 +2157,11 @@ async function enemyLandFlow(p, tile) {
   const owner = G.players[tile.owner];
   const toll = tollOf(G, tile);
   const defCard = CARD_BY_ID[tile.creature.cardId];
-  const curHp = tile.creature.hp ?? defCard.hp;
+  const defMaxHp = maxHpOf(tile.creature); // 🌱成長分を含めた実最大HP（v19）
+  const curHp = tile.creature.hp ?? defMaxHp;
   const support = landSupportSt(G, tile);
-  const protectedTile = isSanctuaryProtected(G, tile); // 結界中は侵略不可（通行料は発生）
+  // 結界中・🏳️停戦協定（v20）中は侵略不可（通行料は発生）
+  const protectedTile = isSanctuaryProtected(G, tile) || truceActive(G);
   let invade = null; // { cardId, itemId }
 
   if (p.isCPU) {
@@ -1375,10 +2175,13 @@ async function enemyLandFlow(p, tile) {
     });
     const res = await showDialog({
       title: `⚔ 敵の土地（${ELEMENTS[tile.element].name}属性 Lv${tile.level}）`,
-      body: (protectedTile ? `<b>🛡️ 結界に守られていて侵略できません</b><br>` : "") +
+      body: (protectedTile ? `<b>${truceActive(G) ? "🏳️ 停戦協定により侵略できません" : "🛡️ 結界に守られていて侵略できません"}</b><br>` : "") +
         `通行料 <b>${toll}G</b> を支払うか、クリーチャーで侵略します<br>` +
-        `防衛: ${ELEMENTS[defCard.element].icon}${esc(defCard.name)}（${ELEMENTS[defCard.element].name}属性・ST${defCard.st}${support ? `+${support}(援護)` : ""}/HP${curHp < defCard.hp ? `${curHp}/${defCard.hp}` : defCard.hp}${landHpBonus(tile, defCard) ? `+${landHpBonus(tile, defCard)}(土地の加護)` : ""}）` +
+        `防衛: ${ELEMENTS[defCard.element].icon}${esc(defCard.name)}（${ELEMENTS[defCard.element].name}属性・ST${defCard.st}${support ? `+${support}(援護)` : ""}/HP${curHp < defMaxHp ? `${curHp}/${defMaxHp}` : defMaxHp}${landHpBonus(tile, defCard) ? `+${landHpBonus(tile, defCard)}(土地の加護)` : ""}）` +
         (defCard.ab.length ? `<br>🔖 防衛能力: ${defCard.ab.map(a => ABILITY_INFO[a].name).join("・")}` : "") +
+        (defCard.ab.includes("armor") ? `<br><b>⚠ 硬殻持ち</b>：受けるダメージが常に<b>-10</b>されます` : "") +
+        (defCard.ab.includes("lastward") ? `<br><b>⚠ 背水持ち</b>：HPが半分以下になるとST+25で反撃してきます` : "") +
+        (defCard.ab.includes("absorb") ? `<br><b>⚠ 吸収持ち</b>：与えたダメージの半分だけHPを回復します` : "") +
         (defCard.ab.includes("first") ? `<br><b>⚠ 先制持ち</b>：防衛側が<b>先に</b>攻撃します（HPの低い侵略側は返り討ちに注意）` : "") +
         (defCard.ab.includes("capture") ? `<br><b>⚠ 捕縛持ち</b>：侵略に失敗すると次のターン拘束されます` : "") +
         (defCard.ab.includes("physnull") ? `<br><b>⚠ 物理無効持ち</b>：<b>✨魔法攻撃</b>（魔法攻撃持ちクリーチャー／マジックワンド等の装備）以外ではダメージを与えられません` : "") +
@@ -1401,6 +2204,13 @@ async function enemyLandFlow(p, tile) {
     if (done !== false) return true;
     // 魔力不足などで侵略が成立しなかった → 通行料の支払いへフォールバック
   }
+  // 📜通行手形（v20）: 次に払う通行料1回が無料
+  if (p.tollFree) {
+    p.tollFree = false;
+    log(`📜 ${p.name}は通行手形を差し出した——通行料${toll}Gは無料！`);
+    renderAll(G);
+    return false;
+  }
   log(`${p.name}は通行料${toll}Gを${owner.name}に支払う`);
   await forcePay(G, p, toll, owner, log, landSellChooser(p)); // 払いきれなければ城で再起（敗北はしない）
   // 高額の通行料をせしめた相手キャラはほくそ笑む（存在感の演出）
@@ -1409,15 +2219,17 @@ async function enemyLandFlow(p, tile) {
   return false;
 }
 
-// 手札からバトル用アイテムを選ぶ（人間用）。ないなら聞かずに null
-async function humanPickBattleItem(p, committedCost, title) {
+// 手札からバトル用アイテムを選ぶ（人間用）。ないなら聞かずに null。
+// isDefense: 防衛側の応酬か（💨煙玉など防衛側専用アイテムは侵略側では選べない・v19）
+async function humanPickBattleItem(p, committedCost, title, isDefense = false) {
   const budget = p.magic - committedCost;
   const items = p.hand.filter(id => CARD_BY_ID[id].type === "item");
   if (items.length === 0) return null;
   const res = await showDialog({
     title,
-    body: `アイテムは使い切りです（残り魔力 ${budget}G）`,
-    cards: items.map(id => ({ card: CARD_BY_ID[id], disabled: CARD_BY_ID[id].cost > budget })),
+    body: `アイテムは使い切りです（残り魔力 ${budget}G）` +
+      (isDefense && items.some(id => CARD_BY_ID[id].escape) ? "<br>💨 煙玉＝バトルせず土地を明け渡し、クリーチャーは手札へ退避" : ""),
+    cards: items.map(id => ({ card: CARD_BY_ID[id], disabled: CARD_BY_ID[id].cost > budget || (!isDefense && !!CARD_BY_ID[id].escape) })),
     peek: true,
     buttons: [{ label: "装備しない", value: "no", primary: true }],
   });
@@ -1425,8 +2237,9 @@ async function humanPickBattleItem(p, committedCost, title) {
 }
 
 // 防衛側のアイテム応酬 → バトル演出まで（結果の適用は呼び出し側）
-// 通常の侵略もクリーチャー侵攻も同じ応酬を通る
-async function fightFor(p, tile, attCard, attItem) {
+// 通常の侵略もクリーチャー侵攻も同じ応酬を通る。
+// battleOpts: { attGrown, attSrcId }＝march（盤上からの侵攻）時の成長段階・出撃元（v19）
+async function fightFor(p, tile, attCard, attItem, battleOpts = {}) {
   const defender = G.players[tile.owner];
   let defItem = null;
   if (defender.isCPU) {
@@ -1440,7 +2253,7 @@ async function fightFor(p, tile, attCard, attItem) {
     const defCard = CARD_BY_ID[tile.creature.cardId];
     const itemId2 = await humanPickBattleItem(defender, 0,
       `🛡 防衛！ ${defCard.name}にアイテムを装備しますか？` +
-      `（敵: ${attCard.name} ST${attCard.st + (attItem ? attItem.st : 0)}/HP${attCard.hp + (attItem ? attItem.hp : 0)}）`);
+      `（敵: ${attCard.name} ST${attCard.st + (attItem ? attItem.st : 0)}/HP${attCard.hp + (attItem ? attItem.hp : 0)}）`, true);
     if (itemId2) {
       defItem = CARD_BY_ID[itemId2];
       defender.magic -= defItem.cost;
@@ -1448,9 +2261,35 @@ async function fightFor(p, tile, attCard, attItem) {
     }
   }
 
-  // バトル演出（結果は先に計算し、カットインで表示だけ流す。実戦は会心あり・土地の援護あり）
+  // 💨煙玉（escape・v19）: 防衛側専用。バトルを行わず土地を明け渡し、クリーチャーは手札へ退避する
+  if (defItem && defItem.escape) {
+    const defCard = CARD_BY_ID[tile.creature.cardId];
+    SFX.spell();
+    log(`💨 ${defender.name}は煙玉を投げた！ ${defCard.name}は${tileName(tile)}を明け渡して手札へ退避（バトル不成立）`, "warn");
+    return {
+      escaped: true, attackerWins: true, log: [],
+      attHp: attCard.hp + (battleOpts.attGrown || 0) * 5 + (attItem ? attItem.hp : 0),
+      attExtra: attItem ? attItem.hp : 0, defHp: 0, defExtra: 0,
+      attDrain: 0, defDrain: 0, attRebirth: false, defRebirth: false, defCapture: false,
+    };
+  }
+
+  // バトル支援スペル（v20）: ウォークライ/決死の覚悟（攻守どちらでも）・攻城の号令（攻）・護りの風（守）。
+  // このバトルで消費する（resolveBattleへoptsで渡す＝resolveBattle自体は状態非破壊のまま）
+  const spellBuffs = {
+    attStBonus: (p.nextBattleSt || 0) + (p.siegeSt || 0),
+    defStBonus: defender.nextBattleSt || 0,
+    defHpBonus: defender.nextDefHp || 0,
+    attCritRate: p.nextBattleCrit || 0,
+    defCritRate: defender.nextBattleCrit || 0,
+  };
+  p.nextBattleSt = 0; p.nextBattleCrit = 0;
+  defender.nextBattleSt = 0; defender.nextDefHp = 0; defender.nextBattleCrit = 0;
+
+  // バトル演出（結果は先に計算し、カットインで表示だけ流す。実戦は会心あり・土地の援護・群れあり）
   // ⏩スキップが押されたら残りのログを一括表示して即座に決着へ（UI.battleSkip）
-  const result = resolveBattle(attCard, tile, attItem, defItem, { rng: true, g: G });
+  const result = resolveBattle(attCard, tile, attItem, defItem,
+    { rng: true, g: G, attackerId: p.id, ...spellBuffs, ...battleOpts });
   openBattleView(G, p.name, attCard, attItem, tile, defItem);
   await sleep(600);
   await playBattleLines(result.log);
@@ -1500,14 +2339,29 @@ async function doInvade(p, tile, cardId, itemId = null) {
   }
 
   if (result.attackerWins) {
-    defender.discard.push(tile.creature.cardId); // 倒された防衛クリーチャー
+    // 倒された防衛クリーチャー: 💨煙玉で退避／🔁転生なら手札へ、通常は捨札へ（v19）
+    if (result.escaped || result.defRebirth) {
+      defender.hand.push(tile.creature.cardId);
+      if (result.defRebirth) log(`🔁 ${CARD_BY_ID[tile.creature.cardId].name}の転生！ 倒れても${defender.name}の手札に戻った`);
+      await enforceHandLimit(defender);
+    } else {
+      defender.discard.push(tile.creature.cardId);
+    }
     tile.owner = p.id;
     tile.creature = { cardId, hp: woundedHp(result.attHp, result.attExtra, c.hp) }; // 戦闘後HP残量で駐留
+    grantWarfire(p); // 🔥狼煙台（戦意）: 侵略勝利ボーナス（v19）
   } else {
-    p.discard.push(cardId); // 侵略失敗したクリーチャー
+    // 侵略失敗したクリーチャー: 🔁転生なら手札に戻る（v19）
+    if (result.attRebirth) {
+      p.hand.push(cardId);
+      log(`🔁 ${c.name}の転生！ 倒れても${p.name}の手札に戻った`);
+      await enforceHandLimit(p);
+    } else {
+      p.discard.push(cardId);
+    }
     const dc = CARD_BY_ID[tile.creature.cardId]; // 撃退した防衛側
-    tile.creature.hp = woundedHp(result.defHp, result.defExtra, dc.hp);
-    if (dc.ab.includes("capture")) {
+    tile.creature.hp = woundedHp(result.defHp, result.defExtra, maxHpOf(tile.creature));
+    if (result.defCapture) { // チェインネット等アイテム由来の捕縛も含む実効判定（v19）
       p.skipTurn = true;
       p.skipReason = "capture";
       log(`🕸️ ${dc.name}の捕縛！ ${p.name}は次のターン動けない`, "warn");
@@ -1522,6 +2376,17 @@ async function doInvade(p, tile, cardId, itemId = null) {
     }
   }
   renderAll(G);
+}
+
+// 🔥狼煙台（戦意・v19）: 自軍が侵略・侵攻のバトルに勝つたび、所有する狼煙台1つにつき+40G
+function grantWarfire(p) {
+  const towers = ownedLands(G, p.id).filter(t =>
+    t.creature && CARD_BY_ID[t.creature.cardId].ab.includes("warfire")).length;
+  if (towers === 0) return;
+  const gain = towers * 40;
+  p.magic += gain;
+  SFX.coin();
+  log(`🔥 狼煙が上がる！ 戦勝の報せで${p.name}は+${gain}G`);
 }
 
 // ---------- クリーチャー侵攻（march） ----------
@@ -1577,7 +2442,9 @@ async function humanMarchFlow(p) {
 
 async function doMarch(p, src, dst, itemId = null) {
   const card = CARD_BY_ID[src.creature.cardId];
-  const cost = marchCost(card);
+  // 🎺進軍号令（v20・freeMarch）: このターンの侵攻は行軍費なし
+  const cost = p.freeMarch ? 0 : marchCost(card);
+  if (p.freeMarch) p.freeMarch = false;
   // 魔力の最終チェック（行軍費＋アイテム費が払えなければ侵攻不可）
   const item = itemId ? CARD_BY_ID[itemId] : null;
   if (cost + (item ? item.cost : 0) > p.magic) {
@@ -1586,7 +2453,7 @@ async function doMarch(p, src, dst, itemId = null) {
   }
   p.magic -= cost;
   SFX.dice();
-  log(`🏇 ${p.name}の${card.name}が${tileName(src)}から${tileName(dst)}へ侵攻！（行軍費 -${cost}G）`, "battle");
+  log(`🏇 ${p.name}の${card.name}が${tileName(src)}から${tileName(dst)}へ侵攻！（${cost > 0 ? `行軍費 -${cost}G` : "🎺進軍号令＝行軍費なし"}）`, "battle");
   renderAll(G);
 
   if (dst.owner === null) {
@@ -1605,40 +2472,58 @@ async function doMarch(p, src, dst, itemId = null) {
       discardFromHand(p, itemId);
     }
     const defender = G.players[dst.owner];
-    const result = await fightFor(p, dst, card, attItem);
+    // march は盤上のクリーチャーの出撃＝🌱成長段階・無力化・出撃元（群れの自己除外）をバトルへ引き継ぐ（v19/v20）
+    const result = await fightFor(p, dst, card, attItem, {
+      attGrown: Math.min(5, src.creature.grown || 0),
+      attSrcId: src.id,
+      attNulled: creatureNulled(G, src.creature),
+    });
     if (result.attackerWins) {
       // 勝ち: 占領。侵攻側は傷を持ち越して移動。元の土地は空き地に戻る
-      defender.discard.push(dst.creature.cardId);
-      src.creature.hp = woundedHp(result.attHp, result.attExtra, card.hp);
+      if (result.escaped || result.defRebirth) { // 💨煙玉・🔁転生（v19）: 防衛側は手札へ
+        defender.hand.push(dst.creature.cardId);
+        if (result.defRebirth) log(`🔁 ${CARD_BY_ID[dst.creature.cardId].name}の転生！ 倒れても${defender.name}の手札に戻った`);
+        await enforceHandLimit(defender);
+      } else {
+        defender.discard.push(dst.creature.cardId);
+      }
+      src.creature.hp = woundedHp(result.attHp, result.attExtra, maxHpOf(src.creature));
       dst.owner = p.id;
-      dst.creature = src.creature;
+      dst.creature = src.creature; // 成長段階（grown）ごと移動
       src.owner = null;
       src.creature = null;
       log(`🏇 ${card.name}は${tileName(dst)}を制圧した！`, "battle");
+      grantWarfire(p); // 🔥狼煙台（戦意）: 侵攻勝利ボーナス（v19）
     } else if (result.attHp > 0) {
       // 引き分け・両者生存: 侵攻側は傷を負って元の領地へ撤退。領地の変動なし
-      src.creature.hp = woundedHp(result.attHp, result.attExtra, card.hp);
+      src.creature.hp = woundedHp(result.attHp, result.attExtra, maxHpOf(src.creature));
       const dc = CARD_BY_ID[dst.creature.cardId];
-      dst.creature.hp = woundedHp(result.defHp, result.defExtra, dc.hp);
-      if (dc.ab.includes("capture")) {
+      dst.creature.hp = woundedHp(result.defHp, result.defExtra, maxHpOf(dst.creature));
+      if (result.defCapture) {
         p.skipTurn = true;
         p.skipReason = "capture"; // v13: skipReason 未設定だとメッセージの出し分けが崩れるため必ずセット
         log(`🕸️ ${dc.name}の捕縛！ ${p.name}は次のターン動けない`, "warn");
       }
       log(`🏇 ${card.name}は攻めきれず${tileName(src)}へ撤退した（傷を負って帰還）`, "warn");
     } else {
-      // 負け（討ち死に）: 侵攻側は消滅し、元の土地も失う
+      // 負け（討ち死に）: 侵攻側は消滅し、元の土地も失う（🔁転生なら手札に戻る・v19）
       const dc = CARD_BY_ID[dst.creature.cardId];
-      dst.creature.hp = woundedHp(result.defHp, result.defExtra, dc.hp);
-      if (dc.ab.includes("capture")) {
+      dst.creature.hp = woundedHp(result.defHp, result.defExtra, maxHpOf(dst.creature));
+      if (result.defCapture) {
         p.skipTurn = true;
         p.skipReason = "capture"; // v13: skipReason 未設定だとメッセージの出し分けが崩れるため必ずセット
         log(`🕸️ ${dc.name}の捕縛！ ${p.name}は次のターン動けない`, "warn");
       }
-      p.discard.push(src.creature.cardId);
+      if (result.attRebirth) {
+        p.hand.push(src.creature.cardId);
+        log(`🔁 ${card.name}の転生！ 倒れても${p.name}の手札に戻った（元の土地は失う）`);
+        await enforceHandLimit(p);
+      } else {
+        p.discard.push(src.creature.cardId);
+      }
       src.owner = null;
       src.creature = null;
-      log(`🏇 ${card.name}は敗れて消滅… 元の土地も失った`, "warn");
+      log(`🏇 ${card.name}は敗れて${result.attRebirth ? "手札へ退いた" : "消滅"}… 元の土地も失った`, "warn");
     }
   }
   renderAll(G);
@@ -1661,10 +2546,12 @@ function showTileInfo(tile) {
     if (tile.creature) {
       const c = CARD_BY_ID[tile.creature.cardId];
       const cur = currentHp(tile.creature);
+      const mx = maxHpOf(tile.creature); // 🌱成長分を含めた実最大HP（v19）
       const sup = landSupportSt(G, tile);
       const bonus = landHpBonus(tile, c);
-      parts.push(`駐留: ${ELEMENTS[c.element].icon}${esc(c.name)}${elemNote(c, tile)}<br>` +
-        `実効防衛値: ST ${c.st}${sup ? `+${sup}(援護)` : ""} ／ HP ${cur < c.hp ? `${cur}/${c.hp}` : c.hp}` +
+      const grown = c.ab.includes("grow") ? Math.min(5, tile.creature.grown || 0) : 0;
+      parts.push(`駐留: ${ELEMENTS[c.element].icon}${esc(c.name)}${elemNote(c, tile)}${grown ? `　🌱成長+${grown * 5}` : ""}<br>` +
+        `実効防衛値: ST ${c.st + grown * 5}${sup ? `+${sup}(援護)` : ""} ／ HP ${cur < mx ? `${cur}/${mx}` : mx}` +
         `${bonus ? `+${bonus}(土地の加護)` : ""}${c.ab.includes("guard") ? "+20(守護)" : ""}`);
       if (c.ab.length) {
         parts.push(c.ab.map(a => `🔖 <b>${ABILITY_INFO[a].name}</b>：${ABILITY_INFO[a].desc}`).join("<br>"));
@@ -1699,6 +2586,34 @@ function showTileInfo(tile) {
   });
 }
 
+// ---------- 🎁 シールド戦の開始フロー（v21） ----------
+// ステージ決定後: 確認 → 第一弾5＋第二弾5パックをその場で開封 → プールから30枚を構築 → 開戦。
+// 開封プールはコレクションに加算しない（使い捨て）。構築を「やめる」とプールごと破棄して false を返す
+async function startSealed(stageIdx) {
+  const stage = STAGES[stageIdx];
+  const ok = await showDialog({
+    title: `🎁 シールド戦 — ${stage.icon} ${esc(stage.name)}`,
+    body: `その場で<b>第一弾${SEALED_PACKS_PER_SET}パック＋第二弾${SEALED_PACKS_PER_SET}パック（計${SEALED_PACKS_PER_SET * SEALED_PACK_SIZE * 2}枚）</b>を開封し、
+      出たカードだけで<b>${DECK_SIZE}枚デッキ</b>を組んで <b>${esc(stage.cpuName)}</b> に挑みます。<br><br>
+      ⚠ 開封したカードは<b>この1戦だけの使い捨て</b>です（コレクションには入りません）。<br>
+      🏆 勝てば通常どおり<b>勝利報酬パック（${REWARD_WIN}枚）</b>を獲得できます（こちらはコレクションに入ります）。`,
+    buttons: [
+      { label: "🎁 パックを開封する", value: "open", primary: true },
+      { label: "やめる", value: "cancel" },
+    ],
+  });
+  if (ok.action !== "open") return false;
+  const pool = drawSealedPool();
+  await showPackReveal(pool.set1, `🎁 シールド戦 — ✦第一弾パック×${SEALED_PACKS_PER_SET}`,
+    `第一弾のカード${pool.set1.length}枚を開封！（プールは使い捨て・コレクションには入りません）`, { noNew: true });
+  await showPackReveal(pool.set2, `🎁 シールド戦 — ⏳第二弾パック×${SEALED_PACKS_PER_SET}`,
+    `第二弾のカード${pool.set2.length}枚を開封！ ここから${DECK_SIZE}枚のデッキを組もう`, { noNew: true });
+  const deck = await showSealedBuilder(pool.pool);
+  if (!deck) return false;
+  startGame(stageIdx, { sealed: true, sealedDeck: deck });
+  return true;
+}
+
 // ---------- タイトル（ステージ選択）画面 ----------
 async function titleScreen() {
   document.body.classList.remove("in-game"); // タイトルでは固定ウィンドウを隠す
@@ -1719,6 +2634,16 @@ async function titleScreen() {
       while (true) {
         const t = await showStageSelect({ royale: true });
         if (typeof t === "number") { startGame(t, { royale: true }); return; }
+        if (t === "difficulty") { await showDifficultyPicker(); continue; }
+        break; // "back"
+      }
+      continue;
+    }
+    if (res === "sealed") {
+      // 🎁 シールド戦: 全ステージから盤面を選ぶ → その場でパック開封 → プールから構築 → 1戦
+      while (true) {
+        const t = await showStageSelect({ sealed: true });
+        if (typeof t === "number") { if (await startSealed(t)) return; continue; }
         if (t === "difficulty") { await showDifficultyPicker(); continue; }
         break; // "back"
       }
@@ -1756,7 +2681,9 @@ function showHelp() {
       目標に達すると<b>⚑凱旋リーチ</b>が表示される。ラウンド上限で決着しない場合は総資産の多い方が勝ち。<br>
       <b>💸 魔力が尽きても敗北にはならない</b>: 支払いきれないときは土地を売却し、それでも足りなければ
       持てる魔力を全て渡して<b>🏰城へ帰還し、初期魔力で再スタート</b>する（相手を身ぐるみ剥いでも決着はつかない——勝つには自分が凱旋するしかない）。<br>
-      <b>⏱ 決着モード</b>: タイトルの「⏱ 決着」で<b>短期戦／標準／長期戦／大戦</b>を選べる。目標資産とラウンド上限が変わり、対戦の長さを好みに調整できる。<br><br>
+      <b>⏱ 決着モード</b>: タイトルの「⏱ 決着」で<b>短期戦／標準／長期戦／大戦</b>を選べる。目標資産とラウンド上限が変わり、対戦の長さを好みに調整できる。<br>
+      <b>🎁 シールド戦</b>: その場で開封した<b>第一弾5＋第二弾5パック（計50枚）</b>だけで30枚デッキを組んで1戦する特別モード。
+      開封プールは<b>使い捨て</b>（コレクションには入らない）なので、コレクションの厚さに関係なく誰でも対等に遊べる。勝てば通常の勝利報酬あり（進行度は変化しない）。<br><br>
       <b>ターンの流れ</b>: カードを1枚引く → （任意で手札のスペルをクリックして使用・1回まで）→ 🎲ダイスで移動<br><br>
       <b>マスに止まったとき — このターンの「能動的な行動」は合計1回だけ（その発動場所が①到達マスか②通過マスに変わる）</b><br>
       <b>① 到着マスのイベント</b>: 空き地は召喚、自分の土地はレベルアップ／交代、
@@ -1835,8 +2762,25 @@ function showHelp() {
       対象を選ぶスペル（ドレイン・フリーズ等）は<b>相手を選択</b>して撃つ。3人だと相手を金欠にしても止まらないので、<b>自分の凱旋</b>を最短で狙うのが鍵。<br>
       <b>🎮 2人対戦（ホットシート）</b>: 同じ端末を交互に操作する<b>人間同士の対戦</b>。プレイヤーを2人選び、<b>全ステージ</b>から盤面を選べる。
       各自の<b>使用中デッキ</b>（未構築ならおまかせ）で戦い、手番の交代時は手札が伏せられる（報酬・進行度は変化しない）。<br>
-      <b>♻️ カード工房</b>: 同名<b>4枚目以降の余剰カード</b>を<b>🔮マナの欠片</b>に分解し、欠片で<b>好きなカードを生成</b>できる
-      （分解 ★+1〜★★★★+8 ／ 生成 ★4〜★★★★32）。未所持カードも作れるのでアルバムのコンプリートの出口になる。<br>
+      <b>♻️ ポイント交換所</b>: 同名<b>4枚目以降の余剰カード</b>を<b>🎟パックポイント</b>にスクラップ（★+1〜★★★★+8）し、
+      貯めて<b>カードパック（5枚入り・25🎟）</b>を購入できる。第一弾／第二弾のどちらのパックも買える。
+      パック購入<b>10回ごとに🌟救いの回</b>＝1枚が<b>未所持カード確定</b>（アルバムのコンプリートの出口）。<br>
+      <b>⏳ 第二弾「時流の回路」</b>: パック・交換所・報酬（弾を選択）で集める拡張カード群。新能力——
+      <span class="ab">成長</span>ターン開始ごとにST/HP+5（上限+25） ／ <span class="ab">群れ</span>自軍の同属性1体につきST+5 ／
+      <span class="ab">遠隔</span>侵略・侵攻で反撃を受けない ／ <span class="ab">吸収</span>与えたダメージの半分HP回復 ／
+      <span class="ab">硬殻</span>受けるダメージ-10 ／ <span class="ab">背水</span>HP半分以下でST+25 ／
+      <span class="ab">採掘</span>ターン開始時+15G ／ <span class="ab">転生</span>倒されても手札に戻る ／
+      <span class="ab">飛翔</span>侵攻で2マス先まで ／ <span class="ab">看破</span>相手のアイテムを打ち消す。<br>
+      🏛<b>建造物</b>（ST0・不動・反撃しない施設）は通行料アップ・採掘・回復などの恒常効果で領地を支える。
+      📜<b>巻物</b>は攻撃を「記載ST固定の魔法攻撃」に変える（低STの壁が魔導砲台に）。
+      👑<b>精霊王</b>（300G）は各属性の頂点に立つ別格のレジェンド。<br>
+      ✨<b>第二弾スペル（55種）</b>: 🕯️<b>儀式</b>は追加コストに<b>手札1枚を捧げる</b>大型スペル（豊穣・猛火・蘇生・星霜・時の儀など）。
+      <b>盤面エフェクト</b>（市場開放・魔力嵐・戦火の世・静寂のとばり・女神の加護・停戦協定・蜃気楼）は2Rの間、盤面全体のルールを変える。
+      ほかに永続強化（🕊️ブレッシング・💎鉱脈発見・🏯城塞化）、移動妨害（🎲呪いのダイス・🟤泥沼・🏰強制送還）、
+      🌫️無力化の霧（敵の能力を消す）・🤫沈黙の霧（スペル封じ）など。<br>
+      ⏳<b>第二弾ステージ（S13〜S16）</b>: 大型の「隊商の大草原」「時計仕掛けの大環」を越えた先に、
+      👑精霊王を従えるボス——「五王の間」の巫女セレスティアと、最終決戦「時流の玉座」の時空王アイオーンが待つ
+      （ボスは精霊王を<b>確定でデッキに投入</b>してくる）。<br>
       <b>🎪 ウィークリールール</b>: 毎週月曜に切り替わる特殊ルール（通行料2倍・初期手札レジェンド保証など）。タイトルの「🎪 週替り」でON/OFF。
       ONで正規対戦に勝つと<b>ボーナスカード+${typeof WEEKLY_BONUS_CARDS !== "undefined" ? WEEKLY_BONUS_CARDS : 2}枚</b>（トレーニングには適用されない）。<br>
       <b>🎵 BGM</b>: ヘッダーの🎵でBGMのON/OFF（効果音と同じくオフラインで自動生成。🔊は効果音の切替）。`,

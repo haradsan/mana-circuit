@@ -166,6 +166,7 @@ const ARCH = {
     if (o.trident) parts.push(`<rect x="76" y="16" width="2.6" height="34" rx="1.3"/><path d="M72 16 L72 8 M77.3 14 L77.3 6 M83 16 L83 8" fill="none" stroke="${p.sil}" stroke-width="2.4"/>`);
     if (o.staff) parts.push(`<rect x="76" y="18" width="2.6" height="32" rx="1.3"/><circle cx="77.3" cy="14" r="4" fill="${p.glow}" stroke="none" opacity="0.9"/>`);
     if (o.sword) parts.push(`<path d="M77 44 L74 16 L80 16 L81 44 Z"/><rect x="72" y="42" width="12" height="3" rx="1.5"/>`);
+    if (o.bow) parts.push(`<path d="M78 14 C90 24 90 40 78 50" fill="none" stroke="${p.sil}" stroke-width="3"/><path d="M78 14 L78 50" fill="none" stroke="${p.glow}" stroke-width="1.2" opacity="0.8"/><path d="M70 32 L84 32" fill="none" stroke="${p.sil}" stroke-width="2.4"/><path d="M84 32 L80 29 M84 32 L80 35" fill="none" stroke="${p.sil}" stroke-width="2"/>`);
     if (o.shield) parts.push(`<path d="M40 36 C48 38 48 52 40 58 C32 52 32 38 40 36 Z"/><circle cx="40" cy="46" r="2.5" fill="${p.glow}" stroke="none" opacity="0.8"/>`);
     if (o.ribbon) parts.push(`<path d="M46 36 C34 30 30 40 24 36 M74 40 C86 46 92 38 98 44" fill="none" stroke="${p.glow}" stroke-width="2" opacity="0.75"/>`);
     if (o.genie) parts.push(`<path d="M53 56 C44 62 56 66 48 70 C64 68 70 62 67 54 Z"/><path d="M58 12 C58 6 62 6 62 1 C66 6 64 10 62 13 Z" fill="${p.glow}" stroke="none" opacity="0.85"/>`);
@@ -365,6 +366,38 @@ const ARCH = {
       ${o.spark ? `<path d="M42 38 C38 32 40 28 36 24" fill="none" stroke="${p.glow}" stroke-width="1.6" opacity="0.9"/>${_spark(p, 36, 22, 2)}` : ""}
       ${_eye(p, 80, 43, 1.4)}`;
   },
+  // 🏛️建造物（v19）: 塔・施設のシルエット。flame=狼煙 / light=灯台 / crane=櫓 /
+  // dome=温室 / stall=市場 / watch=見張り / cross=聖堂
+  tower(p, o = {}) {
+    const parts = [];
+    if (o.stall) {
+      // 市場: 屋台とひさし
+      parts.push(`<rect x="38" y="34" width="44" height="26" rx="2"/>
+        <path d="M32 34 L60 20 L88 34 Z"/>
+        <path d="M38 34 L38 42 M49 34 L49 42 M60 34 L60 42 M71 34 L71 42 M82 34 L82 42" fill="none" stroke="${p.glow}" stroke-width="1.6" opacity="0.7"/>
+        <rect x="54" y="44" width="12" height="16" rx="2" fill="#000" opacity="0.5" stroke="none"/>`);
+      parts.push(_spark(p, 60, 26, 1.8));
+    } else if (o.dome) {
+      // 温室: ガラスドーム
+      parts.push(`<path d="M36 58 A24 24 0 0 1 84 58 Z"/>
+        <path d="M60 34 L60 58 M44 42 L76 42 M40 50 L80 50" fill="none" stroke="${p.glow}" stroke-width="1.1" opacity="0.65"/>
+        <rect x="34" y="58" width="52" height="5" rx="2"/>`);
+      parts.push(_spark(p, 52, 46, 1.5) + _spark(p, 68, 48, 1.3));
+    } else {
+      // 塔（既定）: 石積みの塔身
+      parts.push(`<rect x="50" y="22" width="20" height="40" rx="2"/>
+        <rect x="46" y="16" width="28" height="7" rx="1.5"/>
+        <rect x="48" y="12" width="5" height="5"/><rect x="57.5" y="12" width="5" height="5"/><rect x="67" y="12" width="5" height="5"/>
+        <rect x="56" y="46" width="8" height="16" rx="3" fill="#000" opacity="0.5" stroke="none"/>
+        <path d="M50 34 H70 M50 44 H70" fill="none" stroke="#000" stroke-opacity="0.4" stroke-width="1.1"/>`);
+      if (o.flame) parts.push(`<path d="M60 10 C56 4 60 0 60 -4 C64 1 63 6 60 10 Z" fill="${p.glow}" stroke="none" opacity="0.9"/>${_spark(p, 54, 2, 1.4)}${_spark(p, 66, 4, 1.2)}`);
+      if (o.light) parts.push(`<circle cx="60" cy="8" r="4" fill="${p.glow}" stroke="none" opacity="0.95"/><path d="M64 8 L84 2 M64 8 L84 14" fill="none" stroke="${p.glow}" stroke-width="1.6" opacity="0.55"/>`);
+      if (o.watch) parts.push(_eye(p, 57, 27, 1.5) + _eye(p, 63, 27, 1.5));
+      if (o.crane) parts.push(`<path d="M70 20 L92 30 M92 30 L92 42" fill="none" stroke="${p.sil}" stroke-width="3"/><path d="M88 42 L96 42 L92 50 Z"/>`);
+      if (o.cross) parts.push(`<path d="M60 10 L60 -2 M54 3 L66 3" fill="none" stroke="${p.glow}" stroke-width="2.4" opacity="0.95"/><circle cx="60" cy="34" r="4" fill="${p.glow}" stroke="none" opacity="0.75"/>`);
+    }
+    return parts.join("");
+  },
   // キメラ（獅子＋山羊＋蛇尾＋翼）
   chimera(p) {
     return `
@@ -469,6 +502,129 @@ const CREATURE_ART = {
   druid:        { arch: "humanoid", o: { leafhair: 1, staff: 1 } },
   runedwarf:    { arch: "humanoid", o: { small: 1, beard: 1, staff: 1 } },
   frostwizard:  { arch: "humanoid", o: { hat: 1, staff: 1, beard: 1 } },
+  // ============================================================
+  // 第二弾「時流の回路」（v19・113種）
+  // ============================================================
+  // 火
+  firebaby:      { arch: "lizard",   o: { flame: 1 } },
+  sparkimp:      { arch: "humanoid", o: { small: 1, horns: 1, wings: 1 } },
+  cinderrat:     { arch: "beast",    o: { cat: 1 } },
+  heathawk:      { arch: "bird",     o: { flame: 1 } },
+  hellbat:       { arch: "bird" },
+  blazesoldier:  { arch: "humanoid", o: { sword: 1, shield: 1 } },
+  flameboar:     { arch: "beast",    o: { tusks: 1 } },
+  firearcher:    { arch: "humanoid", o: { bow: 1 } },
+  lavalizard:    { arch: "lizard",   o: { crest: 1, flame: 1 } },
+  flarewitch:    { arch: "humanoid", o: { hat: 1, staff: 1, ribbon: 1 } },
+  bombturtle:    { arch: "turtle" },
+  flameogre:     { arch: "humanoid", o: { big: 1, club: 1, horns: 1 } },
+  burstgriffon:  { arch: "bird" },
+  ignislancer:   { arch: "humanoid", o: { trident: 1 } },
+  calderagolem:  { arch: "golem",    o: { veins: 1, big: 1 } },
+  amphisbaena:   { arch: "serpent",  o: { hood: 1, fins: 1 } },
+  crimsonknight: { arch: "humanoid", o: { sword: 1, shield: 1 } },
+  cannondrake:   { arch: "dragon",   o: { flame: 1 } },
+  suzaku:        { arch: "bird",     o: { flame: 1 } },
+  hellflamedemon:{ arch: "humanoid", o: { big: 1, horns: 1, wings: 1 } },
+  glendragon:    { arch: "dragon",   o: { big: 1, flame: 1 } },
+  // 木
+  leafrabbit:    { arch: "beast",    o: { cat: 1 } },
+  spriggan:      { arch: "fairy",    o: { wings: false, bighead: 1 } },
+  honeybee:      { arch: "insect",   o: { spark: 1 } },
+  mycolon:       { arch: "fairy",    o: { wings: false, bighead: 1 } },
+  matango:       { arch: "rootman" },
+  ivysnake:      { arch: "serpent" },
+  youngent:      { arch: "tree",     o: { face: 1 } },
+  forestarcher:  { arch: "humanoid", o: { leafhair: 1, bow: 1 } },
+  packwolf:      { arch: "beast" },
+  sylph:         { arch: "fairy" },
+  barkbeetle:    { arch: "insect" },
+  mossshaman:    { arch: "humanoid", o: { leafhair: 1, staff: 1 } },
+  vinestrangler: { arch: "vines" },
+  elvenhunter:   { arch: "humanoid", o: { bow: 1 } },
+  treeguardian:  { arch: "tree",     o: { big: 1, face: 1 } },
+  greenhydra:    { arch: "serpent",  o: { hood: 1, fins: 1 } },
+  fairyqueen:    { arch: "fairy",    o: { bighead: 1 } },
+  kingmantis:    { arch: "insect" },
+  sequoiagiant:  { arch: "tree",     o: { big: 1 } },
+  leafdragon:    { arch: "dragon" },
+  spiritelder:   { arch: "tree",     o: { grand: 1, face: 1 } },
+  // 地
+  pebbling:      { arch: "golem",    o: { blob: 1 } },
+  molminer:      { arch: "beast" },
+  sandlizard:    { arch: "lizard" },
+  goblinsapper:  { arch: "humanoid", o: { small: 1, axe: 1 } },
+  quartzbeetle:  { arch: "insect" },
+  catapultdwarf: { arch: "humanoid", o: { small: 1, beard: 1, bow: 1 } },
+  spikearmadillo:{ arch: "beast",    o: { spikes: 1 } },
+  gemeater:      { arch: "beast",    o: { tusks: 1 } },
+  duneworm:      { arch: "serpent" },
+  dwarfforeman:  { arch: "humanoid", o: { small: 1, beard: 1, shield: 1 } },
+  gaiashaman:    { arch: "humanoid", o: { beard: 1, staff: 1 } },
+  terracotta:    { arch: "humanoid", o: { sword: 1, shield: 1 } },
+  hillgiant:     { arch: "humanoid", o: { big: 1, club: 1 } },
+  stonesentinel: { arch: "golem" },
+  mountainogre:  { arch: "humanoid", o: { big: 1, club: 1, horns: 1 } },
+  crystalgolem:  { arch: "golem",    o: { shine: 1 } },
+  landturtle:    { arch: "turtle",   o: { plated: 1 } },
+  earthwyvern:   { arch: "dragon" },
+  obsidianknight:{ arch: "humanoid", o: { sword: 1, shield: 1, horns: 1 } },
+  terradragon:   { arch: "dragon",   o: { big: 1 } },
+  atlas:         { arch: "golem",    o: { big: 1, crown: 1 } },
+  // 水
+  bubblefish:    { arch: "jelly" },
+  coralcrab:     { arch: "crab" },
+  streamotter:   { arch: "beast",    o: { cat: 1 } },
+  snowfairy:     { arch: "fairy" },
+  leechslime:    { arch: "golem",    o: { blob: 1 } },
+  shellknight:   { arch: "humanoid", o: { sword: 1, shield: 1 } },
+  mistwisp:      { arch: "fairy",    o: { wings: false } },
+  frostwolf:     { arch: "beast" },
+  harpoonmerman: { arch: "humanoid", o: { trident: 1 } },
+  snowharpy:     { arch: "bird" },
+  nereid:        { arch: "mermaid" },
+  tidemaiden:    { arch: "mermaid",  o: { song: 1 } },
+  abyssangler:   { arch: "jelly",    o: { big: 1 } },
+  frostlancer:   { arch: "humanoid", o: { trident: 1 } },
+  tideserpent:   { arch: "serpent",  o: { fins: 1 } },
+  kelpie:        { arch: "horse" },
+  glaciergolem:  { arch: "golem",    o: { shine: 1 } },
+  oceanpriestess:{ arch: "mermaid",  o: { song: 1 } },
+  umibozu:       { arch: "golem",    o: { blob: 1, big: 1 } },
+  frostdragon:   { arch: "dragon" },
+  maelstrom:     { arch: "jelly",    o: { big: 1 } },
+  // 無
+  tinsoldier:    { arch: "humanoid", o: { small: 1, sword: 1, shield: 1 } },
+  clockbeetle:   { arch: "insect" },
+  willowisp:     { arch: "fairy",    o: { wings: false } },
+  shadow:        { arch: "humanoid", o: { genie: 1 } },
+  chronorabbit:  { arch: "beast",    o: { cat: 1 } },
+  littlemimic:   { arch: "golem",    o: { blob: 1 } },
+  fortunecat:    { arch: "beast",    o: { cat: 1 } },
+  joker:         { arch: "humanoid", o: { hat: 1, ribbon: 1 } },
+  gremlin:       { arch: "humanoid", o: { small: 1, horns: 1, wings: 1 } },
+  livingarmor:   { arch: "humanoid", o: { sword: 1, shield: 1 } },
+  pegasus:       { arch: "horse" },
+  nightmare:     { arch: "horse" },
+  etherdrake:    { arch: "dragon" },
+  mirrorknight:  { arch: "humanoid", o: { sword: 1, shield: 1 } },
+  orichalcum:    { arch: "golem",    o: { shine: 1, big: 1 } },
+  chaoschimera:  { arch: "chimera" },
+  // 🏛️建造物
+  signaltower:   { arch: "tower",    o: { flame: 1 } },
+  greenhouse:    { arch: "tower",    o: { dome: 1 } },
+  miningtower:   { arch: "tower",    o: { crane: 1 } },
+  lighthouse:    { arch: "tower",    o: { light: 1 } },
+  trademarket:   { arch: "tower",    o: { stall: 1 } },
+  watchtower:    { arch: "tower",    o: { watch: 1 } },
+  fortress:      { arch: "wall",     o: { wide: 1 } },
+  cathedral:     { arch: "tower",    o: { cross: 1 } },
+  // 👑精霊王
+  ignisking:     { arch: "dragon",   o: { big: 1, flame: 1 } },
+  sylvanking:    { arch: "tree",     o: { grand: 1, face: 1 } },
+  terraking:     { arch: "golem",    o: { big: 1, crown: 1, moss: 1 } },
+  nereusking:    { arch: "humanoid", o: { big: 1, trident: 1, horns: 1 } },
+  aeonking:      { arch: "humanoid", o: { big: 1, staff: 1, wings: 1 } },
 };
 
 // ---------- アイテムの造形 ----------
@@ -533,6 +689,15 @@ const ITEM_ARCH = {
       <circle cx="46" cy="52" r="6" fill="none" stroke="${p.sil}" stroke-width="4"/>
       <path d="M80 22 C82 26 80 28 82 32" fill="none" stroke="${p.glow}" stroke-width="1.4" opacity="0.8"/>`;
   },
+  // 弓（ハンターボウ・v19）
+  bow(p) {
+    return `
+      <path d="M48 8 C72 20 72 48 48 60" fill="none" stroke="${p.sil}" stroke-width="4" stroke-linecap="round"/>
+      <path d="M48 8 L48 60" fill="none" stroke="${p.glow}" stroke-width="1.3" opacity="0.8"/>
+      <path d="M36 34 L74 34" fill="none" stroke="${p.sil}" stroke-width="2.6"/>
+      <path d="M74 34 L66 29 M74 34 L66 39" fill="none" stroke="${p.sil}" stroke-width="2.2"/>
+      ${_spark(p, 76, 34, 1.8)}${_spark(p, 42, 14, 1.2)}`;
+  },
   banner(p) {
     return `
       <rect x="42" y="8" width="3.5" height="56" rx="1.5"/>
@@ -577,6 +742,20 @@ const ITEM_ART = {
   warbanner: { arch: "banner" }, dispelward: { arch: "scroll" }, mirrorshield: { arch: "mirror" },
   magicwand: { arch: "wand" }, arcanarod: { arch: "wand", o: { big: 1 } },
   greedfang: { arch: "dagger", o: { dual: 1 } }, // v17: 吸奪の双牙
+  // 第二弾（v19）
+  shortspear: { arch: "lance" }, flail: { arch: "axe" }, warhorn: { arch: "banner" },
+  braveblade: { arch: "sword" }, warhammer: { arch: "axe", o: { double: 1 } },
+  hunterbow: { arch: "bow" }, souleater: { arch: "sword", o: { ornate: 1 } },
+  flamberge: { arch: "sword", o: { big: 1, ornate: 1 } }, gungnir: { arch: "lance" },
+  buckler: { arch: "shield" }, chainmail: { arch: "armor" }, stonering: { arch: "charm" },
+  spikemail: { arch: "armor" }, crystalarmor: { arch: "armor" }, dragonscale: { arch: "armor" },
+  aegisshield: { arch: "shield", o: { shine: 1 } },
+  scrollice: { arch: "scroll" }, scrollfire: { arch: "scroll" }, scrollacid: { arch: "scroll" },
+  scrollwind: { arch: "scroll" }, scrolldrain: { arch: "scroll" }, scrollthunder: { arch: "scroll" },
+  scrollmirror: { arch: "mirror" }, scrollmeteor: { arch: "scroll" },
+  calmcharm: { arch: "charm" }, smokebomb: { arch: "orb" }, chainnet: { arch: "lance" },
+  berserkpotion: { arch: "orb" }, giantbelt: { arch: "armor" }, rebirthamulet: { arch: "charm" },
+  hazecloak: { arch: "armor", o: { halo: 1 } }, duelglove: { arch: "dagger", o: { dual: 1 } },
 };
 
 // ---------- 背景シーン（属性の魔力が満ちる空間＋魔法陣＋地面の影） ----------

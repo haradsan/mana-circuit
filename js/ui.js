@@ -567,17 +567,19 @@ function humanPickTileOnMap(candidates, opts) {
 // opts.training: トレーニング（練習対戦）モードのステージ選択
 // opts.versus:   2人対戦のステージ選択 {names:[1P名, 2P名]}（全ステージ選択可）
 // opts.royale:   三つ巴（人間1 + CPU2）のステージ選択（全ステージ選択可）
-// 解決値: ステージ index（数値）／ "help" / "album" / "deck" / "training" / "versus" / "royale" / "workshop" / "weekly" / "matchlen" / "back"
+// opts.sealed:   シールド戦（その場開封の使い捨てプールで構築して1戦）のステージ選択（全ステージ選択可）
+// 解決値: ステージ index（数値）／ "help" / "album" / "deck" / "training" / "versus" / "royale" / "sealed" / "workshop" / "weekly" / "matchlen" / "back"
 function showStageSelect(opts = {}) {
   const training = !!opts.training;
   const versus = opts.versus || null;
   const royale = !!opts.royale;
+  const sealed = !!opts.sealed;
   return new Promise(resolve => {
     const overlay = document.getElementById("overlay");
     const box = document.getElementById("dialog");
     const prog = loadProgress();
     const rows = STAGES.map((s, i) => {
-      const unlocked = versus || royale || isStageUnlocked(i); // 2人対戦・三つ巴は全ステージから選べる
+      const unlocked = versus || royale || sealed || isStageUnlocked(i); // 2人対戦・三つ巴・シールド戦は全ステージから選べる
       const cleared = !!prog.cleared[s.id];
       const desc = unlocked
         ? `${versus ? "" : royale ? `VS ${esc(s.cpuName)} ＋ 乱入者1名｜` : `VS ${esc(s.cpuName)}｜`}${buildBoard(s).length}マス｜目標 ${((s.rules && s.rules.target) || 4000)}G<br>${esc(s.desc)}`
@@ -611,6 +613,12 @@ function showStageSelect(opts = {}) {
       ? hero("🎮 決闘の間",
         `同じ卓を囲み、端末を手渡して覇を競う——友との真剣勝負。<b>全ステージから選択可</b>（報酬・進行度は変化しません）。`,
         [`🔵 <b>${esc(versus.names[0])}</b> vs 🔴 <b>${esc(versus.names[1])}</b>`, weeklyChip, mlChip])
+      : sealed
+      ? hero("🎁 シールド戦の間",
+        `その場で開封した<b>第一弾5＋第二弾5パック（計${SEALED_PACKS_PER_SET * SEALED_PACK_SIZE * 2}枚）</b>だけで
+         ${DECK_SIZE}枚デッキを組み、ステージの主に挑む——<b>コレクションの厚さに関係なく誰でも対等</b>の腕くらべ。
+         開封プールはコレクションに入りません（勝てば通常どおりカード${REWARD_WIN}枚獲得・進行度は変化しません）。<b>全ステージから選択可</b>。`,
+        [`👤 <b>${esc(currentProfileName())}</b>`, `⚙ 難易度: <b>${diff.icon} ${diff.label}</b>`, weeklyChip, mlChip])
       : royale
       ? hero("⚔ 三つ巴の戦場",
         `🔵あなた・🔴ステージの主・🟢乱入者——<b>3人の魔導師</b>が同じ盤上で覇を競う。乱入者は毎回ランダム！
@@ -625,17 +633,18 @@ function showStageSelect(opts = {}) {
         `大地に張り巡らされた魔力の回路。クリーチャーを従えて土地を繋ぎ、連鎖で通行料を吊り上げ、
          目標資産を成して🏰城へ帰還せよ。初クリアの<b>カードパック</b>と勝利の<b>カード</b>で、自分だけのデッキを組み上げろ。`,
         [`👤 <b>${esc(currentProfileName())}</b>`, `⚙ 難易度: <b>${diff.icon} ${diff.label}</b>`, weeklyChip, mlChip]);
-    const buttons = (versus || training || royale)
-      ? (training || royale ? `<button class="btn" data-value="difficulty">⚙ 難易度: ${diff.icon}${diff.label}</button>` : "") +
+    const buttons = (versus || training || royale || sealed)
+      ? (training || royale || sealed ? `<button class="btn" data-value="difficulty">⚙ 難易度: ${diff.icon}${diff.label}</button>` : "") +
         `<button class="btn" data-value="back">← 戻る</button>`
       : `<button class="btn" data-value="profile">👤 ${esc(currentProfileName())}</button>
          <button class="btn" data-value="difficulty">⚙ 難易度: ${diff.icon}${diff.label}</button>
          <button class="btn" data-value="matchlen">⏱ 決着: ${ml.icon}${ml.label}</button>
          <button class="btn" data-value="album">📚 アルバム（${distinctOwned()}/${CARD_DB.length}）</button>
          <button class="btn" data-value="deck">🛠 デッキ構築</button>
-         <button class="btn" data-value="workshop">♻️ 工房（🔮${shardCount()}）</button>
+         <button class="btn" data-value="workshop">♻️ 交換所（🎟${shardCount()}）</button>
          <button class="btn" data-value="training">🎯 トレーニング</button>
          <button class="btn" data-value="royale">⚔ 三つ巴</button>
+         <button class="btn" data-value="sealed">🎁 シールド戦</button>
          <button class="btn" data-value="versus">🎮 2人対戦</button>
          <button class="btn" data-value="weekly">🎪 週替り: ${wr.icon}${esc(wr.name)}${wOn ? "" : "（OFF）"}</button>
          <button class="btn" data-value="help">❓ 遊び方</button>`;

@@ -73,20 +73,78 @@ function snareOn(g, tile, moverId) {
   return !!ov && ov.kind === "snare" && ov.owner !== moverId;
 }
 
+// ---------- 全体エフェクト（第二弾スペル v20: g.fxList = [{kind, owner, until}]） ----------
+// kind: market(市場開放) / bud(春の芽吹き) / war(戦火の世) / manastorm(魔力嵐) /
+//       silence(静寂のとばり) / goddess(女神の加護) / truce(停戦協定) / mirage(蜃気楼)
+function addFx(g, kind, ownerId, rounds = 2) {
+  g.fxList = g.fxList || [];
+  g.fxList.push({ kind, owner: ownerId, until: g.round + rounds - 1 });
+}
+// 有効な全体エフェクトを返す（ownerId指定時は「その人のもの」だけ）。期限切れは掃除する
+function activeFx(g, kind, ownerId = null) {
+  if (!g || !g.fxList) return null;
+  g.fxList = g.fxList.filter(f => f.until >= g.round);
+  return g.fxList.find(f => f.kind === kind && (ownerId === null || f.owner === ownerId)) || null;
+}
+// 静寂のとばり: 使用不可になる「対象指定スペル」の一覧
+const TARGETED_SPELLS = new Set([
+  "quake", "drain", "plunder", "revenge", "vanish", "gust", "meteor", "freeze", "steal",
+  "curseland", "grandquake", "nullfog", "silencefog", "cursedice", "mudswamp", "whisper",
+  "manaburn", "deport", "posswap", "freezerain", "r_blaze", "r_storm",
+]);
+// 停戦協定: 侵略・侵攻が禁止されているか
+function truceActive(g) { return !!activeFx(g, "truce"); }
+// 蜃気楼: この土地は敵の土地対象スペル（クエイク/カースランド等）の対象にならないか
+function landSpellShielded(g, tile) {
+  if (isSanctuaryProtected(g, tile)) return true;
+  return tile.owner !== null && !!activeFx(g, "mirage", tile.owner);
+}
+// カースランド: tile.curseUntil（通行料半減の期限ラウンド）
+function landCursed(g, tile) { return !!tile.curseUntil && tile.curseUntil >= g.round; }
+// 無力化の霧: creature.nulledUntil（能力消失の期限ラウンド）
+function creatureNulled(g, creature) { return !!(creature && creature.nulledUntil && creature.nulledUntil >= g.round); }
+
+// バックステップ: 現在地から逆走1〜3マスで到達できるマス（グラフの逆向き辺をたどる）
+function backstepDests(g, pos, depth = 3) {
+  const preds = id => g.tiles.filter(t => t.next.includes(id));
+  const out = new Map();
+  let frontier = [g.tiles[pos]];
+  for (let d = 0; d < depth; d++) {
+    const nf = [];
+    frontier.forEach(t => preds(t.id).forEach(pt => {
+      if (pt.id === pos || out.has(pt.id)) return;
+      out.set(pt.id, pt);
+      nf.push(pt);
+    }));
+    frontier = nf;
+  }
+  return [...out.values()];
+}
+
 // ---------- 土地の援護（隣接する自軍領地1つにつき防衛ST+10、最大+40） ----------
+// v19: 隣接する自軍の🗼見張り塔（烽火）1つにつき、さらにST+10（上限の外で加算）
 function landSupportSt(g, tile) {
   if (tile.owner === null) return 0;
-  const n = neighborsOf(g, tile).filter(t => t.type === "LAND" && t.owner === tile.owner).length;
-  return Math.min(40, n * 10);
+  const neigh = neighborsOf(g, tile).filter(t => t.type === "LAND" && t.owner === tile.owner);
+  const beacons = neigh.filter(t => t.creature && CARD_BY_ID[t.creature.cardId].ab.includes("beacon")).length;
+  // 女神の加護（v20）: 所有者の全体FXで援護ST+10
+  const goddess = activeFx(g, "goddess", tile.owner) ? 10 : 0;
+  return Math.min(40, neigh.length * 10) + beacons * 10 + goddess;
 }
 
 // クリーチャーの現在HP（傷を負っていれば減少。旧セーブ互換で hp 未設定なら基本値）
 function currentHp(creature) {
   return creature.hp ?? CARD_BY_ID[creature.cardId].hp;
 }
-// クリーチャーが負傷している（現在HP < 基本HP）か
+// クリーチャーの実最大HP（基本HP＋🌱成長分。成長段階は creature.grown＝0〜5・v19）。
+// v20: 🕊️ブレッシング（永続強化）も同じ grown 枠を使うため、成長能力の有無に関わらず加算する
+function maxHpOf(creature) {
+  const grown = Math.min(5, creature.grown || 0);
+  return CARD_BY_ID[creature.cardId].hp + grown * 5;
+}
+// クリーチャーが負傷している（現在HP < 実最大HP）か
 function isWounded(creature) {
-  return currentHp(creature) < CARD_BY_ID[creature.cardId].hp;
+  return currentHp(creature) < maxHpOf(creature);
 }
 
 // ---------- クリーチャー侵攻（march） ----------
@@ -102,11 +160,22 @@ function neighborsOf(g, tile) {
   return [...ids].map(id => g.tiles[id]);
 }
 
-// srcTile のクリーチャーが侵攻できる隣接マス（空き地 or 敵の土地。結界は不可）
+// srcTile のクリーチャーが侵攻できる隣接マス（空き地 or 敵の土地。結界は不可）。
+// v19: 🕊飛翔（fly）持ちは2マス先まで侵攻できる（1マス先＋2マス先の両方が候補）
 function marchTargets(g, p, srcTile) {
-  return neighborsOf(g, srcTile).filter(t =>
-    t.type === "LAND" && t.owner !== p.id &&
-    !(t.owner !== null && isSanctuaryProtected(g, t)));
+  const ok = t => t.type === "LAND" && t.owner !== p.id &&
+    !(t.owner !== null && isSanctuaryProtected(g, t));
+  const d1 = neighborsOf(g, srcTile);
+  const out = new Map();
+  d1.filter(ok).forEach(t => out.set(t.id, t));
+  if (srcTile.creature && CARD_BY_ID[srcTile.creature.cardId].ab.includes("fly")) {
+    const d1Ids = new Set(d1.map(t => t.id));
+    d1.forEach(n => neighborsOf(g, n).forEach(t => {
+      if (t.id === srcTile.id || d1Ids.has(t.id) || out.has(t.id)) return;
+      if (ok(t)) out.set(t.id, t);
+    }));
+  }
+  return [...out.values()];
 }
 
 // ガスト（強制移動スペル）で敵クリーチャーを押し出せる先＝隣接する空き地（未所有のLAND）
@@ -145,6 +214,7 @@ function isSpellProof(tile) {
 // 通過アクションの出撃元/対象になる自分のクリーチャー土地のうち、侵攻を出せるもの
 // （lastPath の最後の要素＝停止マスは除外。周回達成ターンは全自領が対象）
 function marchSources(g, p) {
+  if (truceActive(g)) return []; // 🏳️停戦協定（v20）: 侵攻不可
   const passed = passActionTileIds(g, p);
   const seen = new Set();
   const out = [];
@@ -154,7 +224,7 @@ function marchSources(g, p) {
     const t = g.tiles[id];
     if (t.type !== "LAND" || t.owner !== p.id || !t.creature) continue;
     if (CARD_BY_ID[t.creature.cardId].ab.includes("immobile")) continue; // 不動は侵攻に出せない
-    if (p.magic < marchCost(CARD_BY_ID[t.creature.cardId])) continue;
+    if (!p.freeMarch && p.magic < marchCost(CARD_BY_ID[t.creature.cardId])) continue; // 🎺進軍号令中は無料
     if (marchTargets(g, p, t).length === 0) continue;
     out.push(t);
   }
@@ -205,8 +275,15 @@ function walkAhead(g, startId, steps) {
   return g.tiles[cur];
 }
 
-// ダイスを振る（ホーリーワードの指定目を優先。minDice はウィークリールール「疾走の週」用）
+// ダイスを振る（ホーリーワードの指定目を優先。minDice はウィークリールール「疾走の週」用）。
+// v20: 🎲呪いのダイス（p.diceCurse）＝出目1〜3。ホーリーワード指定も3に抑え込まれる
 function rollDice(p) {
+  if (p.diceCurse) {
+    p.diceCurse = false;
+    const n = p.forcedDice ? Math.min(3, p.forcedDice) : 1 + Math.floor(Math.random() * 3);
+    if (typeof log === "function") log(`🎲 呪いのダイス！ ${p.name}の出目は${n}に抑え込まれた`, "warn");
+    return n;
+  }
   if (p.forcedDice) return p.forcedDice;
   const lo = RULES.minDice || 1;
   return lo + Math.floor(Math.random() * (7 - lo));
@@ -215,6 +292,8 @@ function rollDice(p) {
 // opts.training: トレーニング（ウィークリールールを適用しない）
 // opts.versus:   2人対戦（ホットシート）。{p0, p1}＝両プレイヤーのプロファイルindex
 // opts.royale:   三つ巴（人間1 + CPU2）。ステージ本来の相手＋他ステージの乱入キャラで3人戦
+// opts.sealedDeck: シールド戦（v21）。その場開封のプールから組んだ30枚を人間のデッキに使う
+//   （構築デッキ・自動デッキより優先。CPUは通常どおり自動デッキ）
 function newGame(stageIdx = 0, opts = {}) {
   const stage = STAGES[stageIdx];
   RULES = { ...DEFAULT_RULES, ...(stage.rules || {}) };
@@ -266,6 +345,14 @@ function newGame(stageIdx = 0, opts = {}) {
   const mkCpu = (id, def) => {
     const p = mkPlayer(id, def.cpuName || "CPU", true, def.cpuBias, undefined, profileFor(def.ai));
     p.charKey = def.id;
+    // 固定エース（v20・ボス面）: 精霊王などをデッキに確定投入する（同数のランダムカードと差し替え＝30枚を維持）。
+    // 先に全て抜いてから足す（1体ずつpop→pushすると、直前に足したエース自身をpopしてしまう）
+    const aces = (def.cpuAces || []).filter(aceId => CARD_BY_ID[aceId]);
+    if (aces.length) {
+      p.deck.splice(0, aces.length); // デッキはシャッフル済み＝ランダムなN枚が抜ける
+      p.deck.push(...aces);
+      p.deck = shuffle(p.deck);
+    }
     return p;
   };
   const humanName = (typeof currentProfileName === "function" && currentProfileName()) || "あなた";
@@ -288,7 +375,8 @@ function newGame(stageIdx = 0, opts = {}) {
       ]
       : [
         // 人間側の名前は選択中のプレイヤープロファイル名（👤プレイヤー選択で切替・変更できる）
-        mkPlayer(0, humanName, false, null),
+        // シールド戦なら開封プールから組んだデッキを使う（undefined なら通常＝構築デッキ or 自動デッキ）
+        mkPlayer(0, humanName, false, null, opts.sealedDeck || undefined),
         mkCpu(1, stage),
       ],
     current: 0,
@@ -296,6 +384,7 @@ function newGame(stageIdx = 0, opts = {}) {
     over: false,
     winner: null,
     weekly, // 適用中のウィークリールール（OFF/トレーニングなら null）
+    fxList: [], // 全体エフェクト（第二弾スペル v20: 市場開放/魔力嵐/停戦協定など）
   };
   // 初期手札5枚
   g.players.forEach(p => { for (let i = 0; i < 5; i++) drawCard(g, p); });
@@ -356,7 +445,14 @@ function chainMult(n) {
 function tollOf(g, tile) {
   if (tile.type !== "LAND" || tile.owner === null) return 0;
   const chain = chainCount(g, tile.owner, tile.element);
-  return Math.floor(LAND_VALUE[tile.level - 1] * RULES.tollRate * chainMult(chain));
+  let toll = LAND_VALUE[tile.level - 1] * RULES.tollRate * chainMult(chain);
+  // 商魂（merchant・v19）: 駐留クリーチャー（交易市場など）がいる土地は通行料1.3倍
+  if (tile.creature && CARD_BY_ID[tile.creature.cardId].ab.includes("merchant")) toll *= 1.3;
+  // カースランド（v20）: 呪われた土地は通行料半減（2R）
+  if (landCursed(g, tile)) toll *= 0.5;
+  // 魔力嵐（v20）: 2Rの間すべての通行料1.5倍
+  if (activeFx(g, "manastorm")) toll *= 1.5;
+  return Math.floor(toll);
 }
 
 function landValue(tile) { return LAND_VALUE[tile.level - 1]; }
@@ -377,17 +473,26 @@ function ownedLands(g, playerId) {
   return g.tiles.filter(t => t.type === "LAND" && t.owner === playerId);
 }
 
-// 周回ボーナス（所有土地が多いほど増える）。大きく劣勢なら1.5倍の「逆転の風」
+// 周回ボーナス（所有土地が多いほど増える）。大きく劣勢なら1.5倍の「逆転の風」。
+// v19: ⛪大聖堂（祝祭）を所有していればさらに1.5倍
 function lapBonus(g, p) {
   const base = RULES.lapBase + ownedLands(g, p.id).length * 25;
   const comeback = assetsOf(g, p) < assetsOf(g, opponentOf(g, p)) * COMEBACK_RATIO;
-  return { gold: comeback ? Math.floor(base * 1.5) : base, comeback };
+  const festival = ownedLands(g, p.id).some(t =>
+    t.creature && CARD_BY_ID[t.creature.cardId].ab.includes("festival"));
+  let gold = comeback ? Math.floor(base * 1.5) : base;
+  if (festival) gold = Math.floor(gold * 1.5);
+  return { gold, comeback, festival };
 }
 
-// 土地の防衛HPボーナス（属性一致時のみ）
+// 土地の防衛HPボーナス（属性一致時のみ）。
+// v20: 🏯城塞化（tile.fortified）と👼女神の加護（所有者の全体FX）でそれぞれ2倍
 function landHpBonus(tile, creatureCard) {
   if (!creatureCard || creatureCard.element !== tile.element) return 0;
-  return tile.level * 10 * RULES.landHpMult;
+  let bonus = tile.level * 10 * RULES.landHpMult;
+  if (tile.fortified) bonus *= 2;
+  if (typeof G !== "undefined" && G && activeFx(G, "goddess", tile.owner)) bonus *= 2;
+  return bonus;
 }
 
 // 支払い。足りなければ土地を売却。全て売っても足りなければ「再起」——
