@@ -237,7 +237,8 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
     if (targetReflect <= 0 || dmg <= 0) return attackerHp;
     const rf = Math.floor(dmg * targetReflect);
     if (rf <= 0) return attackerHp;
-    log.push(`🪞 ${reflectorName}のミラーシールド！ ${attackerName}に${rf}ダメージ反射`);
+    // v23: 反射持ちアイテムはミラーシールドの他にスパイクメイルもあるため、装備名を出さない汎用文言にする
+    log.push(`🪞 ${reflectorName}の装備が攻撃を弾く！ ${attackerName}に${rf}ダメージ反射`);
     return attackerHp - rf;
   };
   // 物理反射の跳ね返りダメージを攻撃側へ適用（strikeのbounced）

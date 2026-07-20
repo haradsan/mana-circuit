@@ -114,21 +114,21 @@ const CARD_DB = [
   { id: "flamewolf",   name: "フレイムウルフ",   type: "creature", element: "fire",  cost: 60,  st: 40, hp: 30, ab: ["assault"] },
   { id: "hellhound",   name: "ヘルハウンド",     type: "creature", element: "fire",  cost: 70,  st: 40, hp: 40, ab: ["pierce"] },
   { id: "salamander",  name: "サラマンダー",     type: "creature", element: "fire",  cost: 80,  st: 50, hp: 40, ab: [] },
-  { id: "flamedancer", name: "フレイムダンサー", type: "creature", element: "fire",  cost: 85,  st: 40, hp: 40, ab: ["first"] },
+  { id: "flamedancer", name: "フレイムダンサー", type: "creature", element: "fire",  cost: 80,  st: 45, hp: 40, ab: ["first"] }, // v23: 85G 40/40→80G 45/40（同帯の先制持ちに見劣りしていた）
   { id: "lavagolem",   name: "ラーヴァゴーレム", type: "creature", element: "fire",  cost: 100, st: 50, hp: 60, ab: [] },
   { id: "minotaur",    name: "ミノタウロス",     type: "creature", element: "fire",  cost: 105, st: 60, hp: 40, ab: ["assault"] },
   { id: "phoenix",     name: "フェニックス",     type: "creature", element: "fire",  cost: 120, st: 60, hp: 50, ab: ["first"] },
-  { id: "efreet",      name: "イフリート",       type: "creature", element: "fire",  cost: 130, st: 70, hp: 40, ab: ["pierce"] },
+  { id: "efreet",      name: "イフリート",       type: "creature", element: "fire",  cost: 130, st: 75, hp: 50, ab: ["pierce"] }, // v23: 70/40→75/50（130Gの働きに引き上げ）
   { id: "reddragon",   name: "レッドドラゴン",   type: "creature", element: "fire",  cost: 140, st: 70, hp: 60, ab: ["lucky"] },
   // --- 水（バランス・守り） ---
   { id: "aquasprite",  name: "アクアスピリット", type: "creature", element: "water", cost: 40,  st: 20, hp: 40, ab: [] },
   { id: "merman",      name: "マーマン",         type: "creature", element: "water", cost: 50,  st: 30, hp: 40, ab: [] },
   { id: "frostnaga",   name: "フロストナーガ",   type: "creature", element: "water", cost: 60,  st: 40, hp: 30, ab: ["first"] },
-  { id: "shellcrab",   name: "シェルクラブ",     type: "creature", element: "water", cost: 65,  st: 20, hp: 60, ab: ["guard"] },
+  { id: "shellcrab",   name: "シェルクラブ",     type: "creature", element: "water", cost: 65,  st: 20, hp: 55, ab: ["armor"] }, // v23: guard→硬殻（ウンディーネとの重複解消。「硬い殻」の名前どおりに）
   { id: "undine",      name: "ウンディーネ",     type: "creature", element: "water", cost: 65,  st: 30, hp: 50, ab: ["guard"] }, // v13: 70→65（同コスト帯のドリアードに見劣りしていたため値下げ）
   { id: "mermaid",     name: "マーメイドナイト", type: "creature", element: "water", cost: 80,  st: 30, hp: 65, ab: [] }, // v13: HP60→65（同コストのロックゴーレムに完全に劣っていたため）
   { id: "seaserpent",  name: "シーサーペント",   type: "creature", element: "water", cost: 90,  st: 50, hp: 60, ab: [] }, // v13: HP50→60（同コストのバジリスク(貫通付き)に完全に劣っていたため）
-  { id: "sirene",      name: "セイレーン",       type: "creature", element: "water", cost: 95,  st: 40, hp: 50, ab: ["first"] },
+  { id: "sirene",      name: "セイレーン",       type: "creature", element: "water", cost: 95,  st: 40, hp: 50, ab: ["capture"] }, // v23: first→捕縛（シーウィッチの完全劣化を解消。歌声の魅了＝捕縛）
   { id: "frostgiant",  name: "フロストジャイアント", type: "creature", element: "water", cost: 110, st: 55, hp: 65, ab: [] }, // v13: 50/60→55/65（同コストのフォレストロード(捕縛付き)に完全に劣っていたため）
   { id: "kraken",      name: "クラーケン",       type: "creature", element: "water", cost: 120, st: 60, hp: 60, ab: ["capture"] }, // v13: 捕縛を付与（同コストのグリーンドラゴン(貫通)に完全に劣っていた。触腕で搦め捕るイメージ）
   { id: "tidallord",   name: "タイダルロード",   type: "creature", element: "water", cost: 135, st: 65, hp: 75, ab: ["first"] },
@@ -145,10 +145,10 @@ const CARD_DB = [
   { id: "ogre",        name: "オーガ",           type: "creature", element: "earth", cost: 95,  st: 60, hp: 40, ab: ["assault"] },
   { id: "ironturtle",  name: "アイアンタートル", type: "creature", element: "earth", cost: 105, st: 30, hp: 90, ab: ["guard"] },
   { id: "earthdragon", name: "アースドラゴン",   type: "creature", element: "earth", cost: 120, st: 50, hp: 70, ab: [] },
-  { id: "behemoth",    name: "ベヒーモス",       type: "creature", element: "earth", cost: 135, st: 70, hp: 50, ab: ["assault"] },
+  { id: "behemoth",    name: "ベヒーモス",       type: "creature", element: "earth", cost: 135, st: 75, hp: 60, ab: ["assault"] }, // v23: 70/50→75/60（135Gの最重量級らしい風格に）
   { id: "gaiatitan",   name: "ガイアタイタン",   type: "creature", element: "earth", cost: 140, st: 65, hp: 85, ab: ["guard"] },
   { id: "greatwall",   name: "グレートウォール", type: "creature", element: "earth", cost: 90,  st: 10, hp: 100, ab: ["immobile"] },
-  { id: "maneater",    name: "マンイーター",     type: "creature", element: "earth", cost: 75,  st: 40, hp: 55, ab: ["capture"] },
+  { id: "maneater",    name: "マンイーター",     type: "creature", element: "earth", cost: 80,  st: 40, hp: 55, ab: ["capture"] }, // v23: 75→80G（捕縛+良スタッツで強すぎた）
   // --- v4追加クリーチャー（各属性に追加） ---
   { id: "hellcat",     name: "ヘルキャット",     type: "creature", element: "fire",  cost: 45,  st: 30, hp: 20, ab: ["first"] },
   { id: "cerberus",    name: "ケルベロス",       type: "creature", element: "fire",  cost: 110, st: 60, hp: 50, ab: ["assault"] },
@@ -186,10 +186,10 @@ const CARD_DB = [
   { id: "flamemage",   name: "フレイムメイジ",   type: "creature", element: "fire",  cost: 75,  st: 45, hp: 25, ab: ["magicatk"], rarity: "uncommon" },
   { id: "druid",       name: "ドルイド",         type: "creature", element: "wood",  cost: 70,  st: 35, hp: 35, ab: ["magicatk"], rarity: "uncommon" },
   { id: "runedwarf",   name: "ルーンドワーフ",   type: "creature", element: "earth", cost: 70,  st: 35, hp: 40, ab: ["magicatk"], rarity: "uncommon" },
-  { id: "frostwizard", name: "フロストウィザード", type: "creature", element: "water", cost: 75, st: 40, hp: 30, ab: ["magicatk"], rarity: "uncommon" },
+  { id: "frostwizard", name: "フロストウィザード", type: "creature", element: "water", cost: 65, st: 40, hp: 30, ab: ["magicatk"], rarity: "uncommon" }, // v23: 75→65G（タイドメイデン(75G 40/40)の完全劣化だった＝安さで差別化）
   // --- 無属性（v13追加）: 土地の加護を一切受けず属性相性の輪の外＝どの土地でも同じ強さ。
   //     そのぶんコスト効率がやや高く、全員レア以上でユニークな能力（護法/連撃/二重能力）を持つ ---
-  { id: "gargoyle",     name: "ガーゴイル",       type: "creature", element: "neutral", cost: 60,  st: 35, hp: 55, ab: ["guard", "spellproof"], rarity: "rare" },
+  { id: "gargoyle",     name: "ガーゴイル",       type: "creature", element: "neutral", cost: 85,  st: 35, hp: 55, ab: ["guard", "spellproof"], rarity: "rare" }, // v23: 60→85G（守護+護法＝スペル除去不能の壁が60Gは安すぎた）
   { id: "unicorn",      name: "ユニコーン",       type: "creature", element: "neutral", cost: 75,  st: 45, hp: 45, ab: ["first", "lucky"],      rarity: "rare" },
   { id: "mithrilgolem", name: "ミスリルゴーレム", type: "creature", element: "neutral", cost: 95,  st: 50, hp: 70, ab: ["spellproof"],           rarity: "rare" },
   { id: "chimera",      name: "キメラ",           type: "creature", element: "neutral", cost: 115, st: 45, hp: 60, ab: ["double"],               rarity: "legendary" },
@@ -229,9 +229,9 @@ const CARD_DB = [
   //     drainMagic=与えたダメージに掛ける倍率。実際の魔力移動は fightFor（main.js）が行う ---
   { id: "greedfang",     name: "グリードファング", type: "item", cost: 85,  st: 25, hp: 0,  drainMagic: 2, rarity: "rare", desc: "バトル時 ST+25・与えたダメージ×2倍の魔力を相手から強奪する（攻撃が通らなければ強奪もなし）" },
   // --- スペル ---
-  { id: "manadrain", name: "マナドレイン",   type: "spell", cost: 50,  spell: "drain",    desc: "相手から200Gを奪う（低コスト高効率）" },
+  { id: "manadrain", name: "マナドレイン",   type: "spell", cost: 70,  spell: "drain",    desc: "相手から200Gを奪う" }, // v23: 50→70G（±400Gの振れ幅が50Gは安すぎた）
   { id: "holyword",  name: "ホーリーワード", type: "spell", cost: 60,  spell: "holyword", desc: "次のダイスの目を自由に選ぶ" },
-  { id: "drawmist",  name: "ドローミスト",   type: "spell", cost: 70,  spell: "draw",     desc: "カードを2枚引く" },
+  { id: "drawmist",  name: "ドローミスト",   type: "spell", cost: 50,  spell: "draw",     desc: "カードを2枚引く" }, // v23: 70→50G（インスピレーションに支配されていた）
   { id: "quake",     name: "クエイク",       type: "spell", cost: 120, spell: "quake",    desc: "敵の土地1つのレベルを1下げる" },
   { id: "growth",    name: "グロース",       type: "spell", cost: 150, spell: "growth",   rarity: "rare", desc: "自分のLv3以下の土地1つをLv+1" },
   { id: "recall",    name: "リコール",       type: "spell", cost: 100, spell: "recall",   desc: "城へテレポート（総資産達成なら勝利！ 関門を規定数すべて通過済みなら周回ボーナスも得る）" },
@@ -242,7 +242,7 @@ const CARD_DB = [
   { id: "regen",     name: "リジェネ",       type: "spell", cost: 60,  spell: "regen", icon: "💚", desc: "負傷した自分のクリーチャー1体のHPを全回復する" },
   { id: "renew",     name: "引き直し",       type: "spell", cost: 40,  spell: "renew",    desc: "手札をすべて捨て、新たに6枚引く（手札事故のリセットに）" },
   // --- v4追加スペル ---
-  { id: "meteor",    name: "メテオ",         type: "spell", cost: 110, spell: "meteor",   icon: "☄️", desc: "敵クリーチャー1体に40ダメージ（現在HPが0以下になれば破壊し土地を解放／高HPの相手は削って弱らせる）。バニッシュより安価で小回りが利く" },
+  { id: "meteor",    name: "メテオ",         type: "spell", cost: 90,  spell: "meteor",   icon: "☄️", desc: "敵クリーチャー1体に40ダメージ（現在HPが0以下になれば破壊し土地を解放／高HPの相手は削って弱らせる）。バニッシュより安価で小回りが利く" }, // v23: 110→90G（猛火の儀(100G 70dmg)に見劣りしていた）
   { id: "freeze",    name: "フリーズ",       type: "spell", cost: 100, spell: "freeze",   icon: "❄️", desc: "相手を凍らせ、次のターンを1回休みにする" },
   { id: "treasure",  name: "トレジャー",     type: "spell", cost: 50,  spell: "treasure", icon: "💰", desc: "所有する土地1つにつき+40G（土地が多いほど得）" },
   { id: "steal",     name: "スティール",     type: "spell", cost: 80,  spell: "steal",    icon: "🎭", desc: "相手の手札からランダムに1枚奪う" },
@@ -297,14 +297,14 @@ const CARD_DB = [
   { id: "honeybee",     name: "ハニービー",       type: "creature", element: "wood", set: 2, cost: 45,  st: 30, hp: 25, ab: ["first"] },
   { id: "mycolon",      name: "マイコロン",       type: "creature", element: "wood", set: 2, cost: 50,  st: 25, hp: 40, ab: [] },
   { id: "matango",      name: "胞子撒きマタンゴ", type: "creature", element: "wood", set: 2, cost: 50,  st: 25, hp: 35, ab: ["rebirth"] },
-  { id: "ivysnake",     name: "アイビースネーク", type: "creature", element: "wood", set: 2, cost: 55,  st: 30, hp: 40, ab: ["capture"] },
+  { id: "ivysnake",     name: "アイビースネーク", type: "creature", element: "wood", set: 2, cost: 55,  st: 30, hp: 35, ab: ["absorb"] }, // v23: ソーンヴァインと完全同一だった→絞めて生気を吸う蛇（吸収）に差別化
   { id: "youngent",     name: "若木のエント",     type: "creature", element: "wood", set: 2, cost: 60,  st: 25, hp: 50, ab: ["grow"] },
   { id: "forestarcher", name: "フォレストアーチャー", type: "creature", element: "wood", set: 2, cost: 60, st: 30, hp: 30, ab: ["ranged"], rarity: "uncommon" },
   { id: "packwolf",     name: "パックウルフ",     type: "creature", element: "wood", set: 2, cost: 65,  st: 35, hp: 35, ab: ["pack"] },
   { id: "sylph",        name: "シルフ",           type: "creature", element: "wood", set: 2, cost: 70,  st: 40, hp: 35, ab: ["first"] },
   { id: "barkbeetle",   name: "バークビートル",   type: "creature", element: "wood", set: 2, cost: 75,  st: 30, hp: 55, ab: ["armor"], rarity: "uncommon" },
   { id: "mossshaman",   name: "モスシャーマン",   type: "creature", element: "wood", set: 2, cost: 80,  st: 40, hp: 40, ab: ["magicatk"], rarity: "uncommon" },
-  { id: "vinestrangler",name: "ヴァインストラングラー", type: "creature", element: "wood", set: 2, cost: 85, st: 45, hp: 45, ab: ["capture"], rarity: "uncommon" },
+  { id: "vinestrangler",name: "ヴァインストラングラー", type: "creature", element: "wood", set: 2, cost: 85, st: 45, hp: 45, ab: ["absorb"], rarity: "uncommon" }, // v23: アルラウネ(85G capture)との実質重複→絞め殺し＝吸収に差別化
   { id: "elvenhunter",  name: "エルヴンハンター", type: "creature", element: "wood", set: 2, cost: 90,  st: 45, hp: 40, ab: ["ranged", "pack"], rarity: "rare" },
   { id: "treeguardian", name: "巨木の守り手",     type: "creature", element: "wood", set: 2, cost: 95,  st: 30, hp: 75, ab: ["guard"], rarity: "uncommon" },
   { id: "greenhydra",   name: "グリーンヒュドラ", type: "creature", element: "wood", set: 2, cost: 100, st: 50, hp: 55, ab: ["grow"], rarity: "rare" },
@@ -328,7 +328,7 @@ const CARD_DB = [
   { id: "terracotta",   name: "テラコッタソルジャー", type: "creature", element: "earth", set: 2, cost: 85, st: 40, hp: 55, ab: [] },
   { id: "hillgiant",    name: "ヒルジャイアント", type: "creature", element: "earth", set: 2, cost: 90,  st: 50, hp: 50, ab: [] },
   { id: "stonesentinel",name: "ストーンセンチネル", type: "creature", element: "earth", set: 2, cost: 80, st: 20, hp: 70, ab: ["immobile"], rarity: "uncommon" },
-  { id: "mountainogre", name: "マウンテンオーガ", type: "creature", element: "earth", set: 2, cost: 95,  st: 55, hp: 45, ab: ["assault"], rarity: "uncommon" },
+  { id: "mountainogre", name: "マウンテンオーガ", type: "creature", element: "earth", set: 2, cost: 95,  st: 50, hp: 50, ab: ["armor"], rarity: "uncommon" }, // v23: オーガ(95G assault)との実質重複→岩の皮膚＝硬殻の重戦士に差別化
   { id: "crystalgolem", name: "クリスタルゴーレム", type: "creature", element: "earth", set: 2, cost: 95, st: 40, hp: 65, ab: ["armor"], rarity: "rare" },
   { id: "landturtle",   name: "ランドタートル",   type: "creature", element: "earth", set: 2, cost: 100, st: 20, hp: 80, ab: ["immobile", "armor"], rarity: "rare" },
   { id: "earthwyvern",  name: "アースワイバーン", type: "creature", element: "earth", set: 2, cost: 110, st: 55, hp: 55, ab: ["pierce"], rarity: "uncommon" },
@@ -343,15 +343,15 @@ const CARD_DB = [
   { id: "leechslime",   name: "リーチスライム",   type: "creature", element: "water", set: 2, cost: 55,  st: 25, hp: 35, ab: ["absorb"] },
   { id: "shellknight",  name: "シェルナイト",     type: "creature", element: "water", set: 2, cost: 55,  st: 30, hp: 45, ab: [] },
   { id: "mistwisp",     name: "ミストウィスプ",   type: "creature", element: "water", set: 2, cost: 55,  st: 25, hp: 35, ab: ["magicatk"], rarity: "uncommon" },
-  { id: "frostwolf",    name: "フロストウルフ",   type: "creature", element: "water", set: 2, cost: 60,  st: 40, hp: 30, ab: ["first"] },
+  { id: "frostwolf",    name: "フロストウルフ",   type: "creature", element: "water", set: 2, cost: 60,  st: 30, hp: 35, ab: ["pack"] }, // v23: フロストナーガと完全同一だった→狼らしく群れに差別化
   { id: "harpoonmerman",name: "ハープーンマーマン", type: "creature", element: "water", set: 2, cost: 65, st: 35, hp: 35, ab: ["ranged"], rarity: "uncommon" },
   { id: "snowharpy",    name: "スノーハーピー",   type: "creature", element: "water", set: 2, cost: 70,  st: 40, hp: 35, ab: ["first"] },
   { id: "nereid",       name: "水霊ネレイド",     type: "creature", element: "water", set: 2, cost: 75,  st: 35, hp: 45, ab: ["rebirth"], rarity: "uncommon" },
   { id: "tidemaiden",   name: "潮の巫女タイドメイデン", type: "creature", element: "water", set: 2, cost: 75, st: 40, hp: 40, ab: ["magicatk"], rarity: "uncommon" },
   { id: "abyssangler",  name: "アビスアングラー", type: "creature", element: "water", set: 2, cost: 80,  st: 45, hp: 45, ab: ["capture"], rarity: "uncommon" },
   { id: "frostlancer",  name: "フロストランサー", type: "creature", element: "water", set: 2, cost: 90,  st: 50, hp: 45, ab: ["pierce"], rarity: "uncommon" },
-  { id: "tideserpent",  name: "タイドサーペント", type: "creature", element: "water", set: 2, cost: 95,  st: 50, hp: 55, ab: [] },
-  { id: "kelpie",       name: "ケルピー",         type: "creature", element: "water", set: 2, cost: 85,  st: 45, hp: 50, ab: [] },
+  { id: "tideserpent",  name: "タイドサーペント", type: "creature", element: "water", set: 2, cost: 95,  st: 55, hp: 65, ab: [] }, // v23: シーサーペント(90G 50/60)に支配されていた→95Gらしいバニラ最大級に
+  { id: "kelpie",       name: "ケルピー",         type: "creature", element: "water", set: 2, cost: 85,  st: 45, hp: 45, ab: ["fly"] }, // v23: 水バニラ密集の解消→水馬らしく駆ける（飛翔＝2マス侵攻）
   { id: "glaciergolem", name: "グレイシャーゴーレム", type: "creature", element: "water", set: 2, cost: 105, st: 45, hp: 70, ab: ["armor"], rarity: "rare" },
   { id: "oceanpriestess", name: "オーシャンプリーステス", type: "creature", element: "water", set: 2, cost: 110, st: 50, hp: 50, ab: ["absorb", "magicatk"], rarity: "rare" },
   { id: "umibozu",      name: "ウミボウズ",       type: "creature", element: "water", set: 2, cost: 120, st: 60, hp: 60, ab: ["absorb"], rarity: "rare" },
@@ -360,16 +360,16 @@ const CARD_DB = [
   // --- 無属性（機械・時間・メタ。全員レア以上＝パック/交換所でのみ入手） ---
   { id: "tinsoldier",   name: "ブリキ兵ティンソルジャー", type: "creature", element: "neutral", set: 2, cost: 50, st: 30, hp: 30, ab: ["pack"], rarity: "rare" },
   { id: "clockbeetle",  name: "クロックワークビートル", type: "creature", element: "neutral", set: 2, cost: 55, st: 25, hp: 40, ab: ["armor"], rarity: "rare" },
-  { id: "willowisp",    name: "ウィルオーウィスプ", type: "creature", element: "neutral", set: 2, cost: 60, st: 25, hp: 25, ab: ["physnull"], rarity: "rare" },
+  { id: "willowisp",    name: "ウィルオーウィスプ", type: "creature", element: "neutral", set: 2, cost: 60, st: 25, hp: 25, ab: ["physnull", "magicatk"], rarity: "rare" }, // v23: ファントムとの重複解消→鬼火の炎は魔法攻撃（物理無効ミラー対決も制する）
   { id: "shadow",       name: "シャドウ",         type: "creature", element: "neutral", set: 2, cost: 65,  st: 30, hp: 30, ab: ["ranged"], rarity: "rare" },
   { id: "chronorabbit", name: "クロノラビット",   type: "creature", element: "neutral", set: 2, cost: 70,  st: 35, hp: 30, ab: ["first", "fly"], rarity: "rare" },
-  { id: "littlemimic",  name: "リトルミミック",   type: "creature", element: "neutral", set: 2, cost: 70,  st: 15, hp: 25, ab: ["mimic"], rarity: "rare" },
+  { id: "littlemimic",  name: "リトルミミック",   type: "creature", element: "neutral", set: 2, cost: 70,  st: 15, hp: 25, ab: ["mimic", "immobile"], rarity: "rare" }, // v23: 模倣は素のST/HPが無意味＝安い方が上位だった→不動（防衛専用の写し身）でドッペルゲンガーと役割分担
   { id: "fortunecat",   name: "招き猫フォーチュンキャット", type: "creature", element: "neutral", set: 2, cost: 75, st: 30, hp: 40, ab: ["mine", "lucky"], rarity: "rare" },
-  { id: "joker",        name: "ジョーカー",       type: "creature", element: "neutral", set: 2, cost: 85,  st: 35, hp: 35, ab: ["lucky", "lastward"], rarity: "rare" },
-  { id: "gremlin",      name: "グレムリン",       type: "creature", element: "neutral", set: 2, cost: 85,  st: 30, hp: 40, ab: ["dispel"], rarity: "rare" },
+  { id: "joker",        name: "ジョーカー",       type: "creature", element: "neutral", set: 2, cost: 70,  st: 35, hp: 40, ab: ["lucky", "lastward"], rarity: "rare" }, // v23: 85G 35/35は弱すぎた→70G 35/40（切り札らしい博打枠に）
+  { id: "gremlin",      name: "グレムリン",       type: "creature", element: "neutral", set: 2, cost: 65,  st: 30, hp: 40, ab: ["dispel"], rarity: "rare" }, // v23: 85→65G（看破の内蔵価値+小柄な身体に見合う値段へ）
   { id: "livingarmor",  name: "リビングアーマー", type: "creature", element: "neutral", set: 2, cost: 90,  st: 40, hp: 60, ab: ["armor"], rarity: "rare" },
   { id: "pegasus",      name: "ペガサス",         type: "creature", element: "neutral", set: 2, cost: 90,  st: 50, hp: 45, ab: ["first", "fly"], rarity: "rare" },
-  { id: "nightmare",    name: "ナイトメア",       type: "creature", element: "neutral", set: 2, cost: 95,  st: 50, hp: 40, ab: ["magicatk"], rarity: "rare" },
+  { id: "nightmare",    name: "ナイトメア",       type: "creature", element: "neutral", set: 2, cost: 95,  st: 45, hp: 40, ab: ["magicatk", "first"], rarity: "rare" }, // v23: スフィンクス(95G magicatk+guard)に劣後→夜襲の先制で攻め型に差別化
   { id: "etherdrake",   name: "エーテルドレイク", type: "creature", element: "neutral", set: 2, cost: 110, st: 55, hp: 50, ab: ["magicatk", "spellproof"], rarity: "rare" },
   { id: "mirrorknight", name: "鏡騎士ミラーナイト", type: "creature", element: "neutral", set: 2, cost: 120, st: 40, hp: 55, ab: ["physreflect"], rarity: "legendary" },
   { id: "orichalcum",   name: "オリハルコンゴーレム", type: "creature", element: "neutral", set: 2, cost: 130, st: 60, hp: 80, ab: ["armor", "spellproof"], rarity: "legendary" },
@@ -394,7 +394,7 @@ const CARD_DB = [
   { id: "flail",       name: "フレイル",         type: "item", set: 2, cost: 55,  st: 30, hp: 0, desc: "バトル時 ST+30" },
   { id: "warhorn",     name: "ウォーホーン",     type: "item", set: 2, cost: 60,  st: 15, hp: 0, grant: ["pack"], rarity: "uncommon", desc: "ST+15・群れを得る（自分の同属性クリーチャー1体につきST+5）" },
   { id: "braveblade",  name: "ブレイブブレイド", type: "item", set: 2, cost: 70,  st: 20, hp: 0, grant: ["lastward"], rarity: "uncommon", desc: "ST+20・背水を得る（HP半分以下でST+25）" },
-  { id: "warhammer",   name: "ウォーハンマー",   type: "item", set: 2, cost: 85,  st: 45, hp: 0, rarity: "uncommon", desc: "バトル時 ST+45" },
+  { id: "warhammer",   name: "ウォーハンマー",   type: "item", set: 2, cost: 80,  st: 45, hp: 0, rarity: "uncommon", desc: "バトル時 ST+45" }, // v23: 85→80G（バトルアックス(70G+40)からの傾斜を適正化）
   { id: "hunterbow",   name: "ハンターボウ",     type: "item", set: 2, cost: 90,  st: 20, hp: 0, grant: ["ranged"], rarity: "rare", desc: "ST+20・遠隔を得る（侵略・侵攻で相手の反撃を受けない）" },
   { id: "souleater",   name: "ソウルイーター",   type: "item", set: 2, cost: 100, st: 30, hp: 0, grant: ["absorb"], rarity: "rare", desc: "ST+30・吸収を得る（与えたダメージの半分だけHP回復）" },
   { id: "flamberge",   name: "フランベルジュ",   type: "item", set: 2, cost: 115, st: 60, hp: 0, rarity: "rare", desc: "バトル時 ST+60" },
@@ -403,8 +403,8 @@ const CARD_DB = [
   { id: "buckler",      name: "バックラー",       type: "item", set: 2, cost: 30,  st: 0,  hp: 15, desc: "バトル時 HP+15" },
   { id: "chainmail",    name: "チェインメイル",   type: "item", set: 2, cost: 55,  st: 0,  hp: 30, desc: "バトル時 HP+30" },
   { id: "stonering",    name: "硬殻の指輪ストーンリング", type: "item", set: 2, cost: 65, st: 0, hp: 20, grant: ["armor"], rarity: "uncommon", desc: "HP+20・硬殻を得る（受けるダメージを常に10軽減）" },
-  { id: "spikemail",    name: "スパイクメイル",   type: "item", set: 2, cost: 75,  st: 15, hp: 25, rarity: "uncommon", desc: "バトル時 ST+15 / HP+25（棘の鎧）" },
-  { id: "crystalarmor", name: "クリスタルアーマー", type: "item", set: 2, cost: 85, st: 0, hp: 45, rarity: "uncommon", desc: "バトル時 HP+45" },
+  { id: "spikemail",    name: "スパイクメイル",   type: "item", set: 2, cost: 75,  st: 0, hp: 25, reflect: 0.3, rarity: "uncommon", desc: "バトル時 HP+25・受けた攻撃ダメージの30%を棘が相手に反射する" }, // v23: ジャイアントベルトに支配されていた→棘の鎧らしく反射に差別化
+  { id: "crystalarmor", name: "クリスタルアーマー", type: "item", set: 2, cost: 80, st: 0, hp: 45, rarity: "uncommon", desc: "バトル時 HP+45" }, // v23: 85→80G（タワーシールド(70G+40)からの傾斜を適正化）
   { id: "dragonscale",  name: "ドラゴンスケイル", type: "item", set: 2, cost: 115, st: 0,  hp: 60, rarity: "rare", desc: "バトル時 HP+60" },
   { id: "aegisshield",  name: "イージスの盾",     type: "item", set: 2, cost: 135, st: 0,  hp: 30, grant: ["physnull"], rarity: "legendary", desc: "HP+30・このバトル中、物理無効を得る（魔法攻撃だけが通る）" },
   // --- 📜巻物（使うと攻撃が「記載ST固定の魔法攻撃」になる。本体STや強襲・属性補正は乗らない） ---
@@ -421,7 +421,7 @@ const CARD_DB = [
   { id: "smokebomb",     name: "煙玉",             type: "item", set: 2, cost: 50,  st: 0,  hp: 0,  escape: true, rarity: "uncommon", desc: "【防衛側専用】バトルを行わず土地を明け渡し、クリーチャーは手札に戻る（土地レベルは残る＝命あっての物種）" },
   { id: "chainnet",      name: "拘束鎖チェインネット", type: "item", set: 2, cost: 55, st: 10, hp: 0, grant: ["capture"], rarity: "uncommon", desc: "ST+10・捕縛を得る（防衛で撃退した侵略者を1ターン拘束）" },
   { id: "berserkpotion", name: "バーサクポーション", type: "item", set: 2, cost: 60, st: 35, hp: -15, rarity: "uncommon", desc: "バトル時 ST+35 / HP-15（力を絞り出す自傷の劇薬）" },
-  { id: "giantbelt",     name: "ジャイアントベルト", type: "item", set: 2, cost: 70, st: 25, hp: 25, rarity: "uncommon", desc: "バトル時 ST+25 / HP+25" },
+  { id: "giantbelt",     name: "ジャイアントベルト", type: "item", set: 2, cost: 70, st: 20, hp: 20, rarity: "uncommon", desc: "バトル時 ST+20 / HP+20" }, // v23: 70Gで合計+50は強すぎた→+40に
   { id: "rebirthamulet", name: "転生の護符",       type: "item", set: 2, cost: 70,  st: 0,  hp: 10, grant: ["rebirth"], rarity: "rare", desc: "HP+10・このバトルで倒されても手札に戻る（転生を得る）" },
   { id: "hazecloak",     name: "幻惑のマント",     type: "item", set: 2, cost: 90,  st: 0,  hp: 20, stDebuff: 20, rarity: "rare", desc: "HP+20・相手のST-20（最低10。霞んで狙いが定まらない）" },
   { id: "duelglove",     name: "決闘のグローブ",   type: "item", set: 2, cost: 110, st: 20, hp: 0, grant: ["double"], rarity: "rare", desc: "ST+20・連撃を得る（バトルで続けて2回攻撃）" },
@@ -442,7 +442,7 @@ const CARD_DB = [
   // --- ドロー・手札（4種） ---
   { id: "foresight",   name: "予知",         type: "spell", set: 2, cost: 30, spell: "foresight", noCpu: true, icon: "🔮", desc: "山札の上3枚を見て、好きな順に並べ替える" },
   { id: "revelation",  name: "天啓",         type: "spell", set: 2, cost: 45, spell: "revelation", icon: "💡", desc: "カードを1枚引き、さらに+50G" },
-  { id: "inspiration", name: "インスピレーション", type: "spell", set: 2, cost: 60, spell: "inspiration", rarity: "uncommon", icon: "✨", desc: "カードを3枚引き、そのあと手札から1枚捨てる" },
+  { id: "inspiration", name: "インスピレーション", type: "spell", set: 2, cost: 75, spell: "inspiration", rarity: "uncommon", icon: "✨", desc: "カードを3枚引き、そのあと手札から1枚捨てる" }, // v23: 60→75G（ドロー枠を支配していた）
   { id: "gravecall",   name: "墓所の呼び声", type: "spell", set: 2, cost: 90, spell: "gravecall", rarity: "rare", icon: "🪦", desc: "自分の捨て札から2枚まで選んで手札に戻す（サルベージの上位）" },
   // --- 移動（6種） ---
   { id: "tailwind",   name: "追い風",       type: "spell", set: 2, cost: 35, spell: "tailwind", noCpu: true, icon: "🍃", desc: "次のダイスの出目に+2する（ダイスブーストの倍化とは加算の順で併用可）" },
@@ -469,6 +469,8 @@ const CARD_DB = [
   { id: "spy",        name: "スパイ",       type: "spell", set: 2, cost: 45, spell: "spy", noCpu: true, icon: "🕵️", desc: "相手1人の手札をすべて見る" },
   { id: "cursedice",  name: "呪いのダイス", type: "spell", set: 2, cost: 60, spell: "cursedice", rarity: "uncommon", icon: "🎲", desc: "相手の次の出目は1〜3になる（ホーリーワードで4以上を指定していても3に抑え込む）" },
   { id: "mudswamp",   name: "泥沼",         type: "spell", set: 2, cost: 80, spell: "mudswamp", rarity: "uncommon", icon: "🟤", desc: "相手の次の移動は出目が半分になる（切り上げ）" },
+  { id: "roadblock",  name: "バリケード",   type: "spell", set: 2, cost: 70, spell: "roadblock", rarity: "uncommon", fx: true, noCpu: true, icon: "🚧",
+    desc: "【盤面】土地1つに2Rの通行封鎖。全プレイヤー（自分も含む）はそのマスへ進入できず、迂回を強いられる（v23の自由移動を制限する妨害）" },
   { id: "whisper",    name: "悪夢の囁き",   type: "spell", set: 2, cost: 85, spell: "whisper", rarity: "rare", icon: "😈", desc: "相手の手札からランダムに1枚捨てさせる" },
   { id: "manaburn",   name: "マナバーン",   type: "spell", set: 2, cost: 90, spell: "manaburn", rarity: "rare", icon: "🔥", desc: "相手の魔力の20%を消滅させる（奪えない・上限300G。富豪への嫌がらせ）" },
   { id: "nullfog",    name: "無力化の霧",   type: "spell", set: 2, cost: 95, spell: "nullfog", rarity: "rare", icon: "🌫️", desc: "敵クリーチャー1体の能力をすべて消す（2ラウンド。アイテムで得る能力は消えない）" },

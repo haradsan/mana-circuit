@@ -43,7 +43,7 @@ const COMEBACK_RATIO = 0.7; // 総資産が相手の7割未満なら劣勢（周
 // クリーチャー侵攻（march）
 const MARCH_COST_MIN  = 30;   // 行軍費の下限
 const MARCH_COST_RATE = 0.4;  // 行軍費 = クリーチャーコスト×この率
-// 盤面エフェクト（時限オーバーレイ）: sanctuary=結界 / snare=足止めの罠
+// 盤面エフェクト（時限オーバーレイ）: sanctuary=結界 / snare=足止めの罠 / block=🚧バリケード（v23・進入禁止）
 const OVERLAY_DURATION = 2;   // 効果の持続ラウンド数
 
 // 周回に必要な関門数。gatesNeeded:"all" なら盤面の全関門（＝全て必須通過点）
@@ -90,7 +90,7 @@ function activeFx(g, kind, ownerId = null) {
 const TARGETED_SPELLS = new Set([
   "quake", "drain", "plunder", "revenge", "vanish", "gust", "meteor", "freeze", "steal",
   "curseland", "grandquake", "nullfog", "silencefog", "cursedice", "mudswamp", "whisper",
-  "manaburn", "deport", "posswap", "freezerain", "r_blaze", "r_storm",
+  "manaburn", "deport", "posswap", "freezerain", "r_blaze", "r_storm", "roadblock",
 ]);
 // 停戦協定: 侵略・侵攻が禁止されているか
 function truceActive(g) { return !!activeFx(g, "truce"); }
@@ -158,6 +158,43 @@ function neighborsOf(g, tile) {
   g.tiles.forEach(t => { if (t.next.includes(tile.id)) ids.add(t.id); });
   ids.delete(tile.id);
   return [...ids].map(id => g.tiles[id]);
+}
+
+// ---------- 自由移動（v23） ----------
+// ダイス移動は「隣接マスならどちらの方向へ進んでもよい」（迂回・逆走OK）。制限は次の3つだけ:
+//   ① 同じ移動の中で直前にいたマスへは戻れない（即Uターン禁止＝その場往復で着地を選び放題になるのを防ぐ。
+//      移動の最初の1歩はどの方向でも選べる）
+//   ② ➡一方通行マス（tile.onewayTo）からは指定方向へしか出られず、出口側から入ることもできない
+//      （盤面の特別マス。S10地獄回廊・S14歯車道など）
+//   ③ 🚧バリケード（スペル・overlay kind:"block"）のマスへは進入できない
+// ②③で候補が全滅する場合は例外的に制限を無視する（袋小路で動けなくなるのを防ぐ保険）
+function moveOptions(g, tile, prevId = null) {
+  if (tile.onewayTo != null) return [g.tiles[tile.onewayTo]];
+  const all = neighborsOf(g, tile);
+  const blocked = t => {
+    if (t.onewayTo != null && t.onewayTo === tile.id) return true; // 一方通行の出口側から入る
+    const ov = overlayOf(g, t);
+    return !!ov && ov.kind === "block"; // 🚧バリケード
+  };
+  let opts = all.filter(t => !blocked(t));
+  if (opts.length === 0) opts = all; // 保険: 全方向が塞がれていたら制限を無視して動ける
+  if (prevId != null) {
+    const noBack = opts.filter(t => t.id !== prevId);
+    if (noBack.length) opts = noBack; // 行き止まり（候補が直前マスのみ）は例外的に引き返せる
+  }
+  return opts;
+}
+
+// 自由移動の「既定ルート」近似: prev を除いた最初の候補を辿って steps 進んだ先のタイル。
+// （AIの着地予測・ルートプレビュー用。walkAhead の自由移動版）
+function walkFreeAhead(g, fromId, startId, steps) {
+  let prev = fromId, cur = startId;
+  for (let i = 1; i < steps; i++) {
+    const nxt = moveOptions(g, g.tiles[cur], prev)[0];
+    prev = cur;
+    cur = nxt.id;
+  }
+  return g.tiles[cur];
 }
 
 // srcTile のクリーチャーが侵攻できる隣接マス（空き地 or 敵の土地。結界は不可）。

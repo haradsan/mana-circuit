@@ -583,12 +583,28 @@ function showProfilePicker() {
   });
 }
 
-// ---------- 捨てカード確認（対戦中・両者の捨札を見る） ----------
+// ---------- 捨てカード確認（対戦中・全員の捨札を見る） ----------
 // 山札が尽きると drawCard が捨札を切り直して山札に戻す（そのときはログで合図する）。
+// v23: プレイヤーごとのタブ切替式に変更。旧実装は全員分の縦積みリストで、三つ巴×スマホでは
+//   3列×30vhがダイアログを溢れ、内側リストがタッチスクロールを奪って「閉じる」に届かなくなる
+//   袋小路が起きていた（1画面1リストなら常にボタンまで収まる）。
+//   さらに受け身ダイアログ（UI._passiveClose）として登録：三つ巴では閲覧中もCPUの手番が進み、
+//   防衛アイテム選択などの進行ダイアログが割り込むことがある。その際は自動で閉じて
+//   Promise未解決のまま上書きされるのを防ぐ。
 function showDiscardViewer() {
   return new Promise(resolve => {
     const overlay = document.getElementById("overlay");
     const box = document.getElementById("dialog");
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      if (UI._passiveClose === close) UI._passiveClose = null;
+      overlay.classList.remove("show");
+      resolve();
+    };
+    UI._passiveClose = close;
+    let tab = 0;
     const section = p => {
       const counts = {};
       (p.discard || []).forEach(id => { if (CARD_BY_ID[id]) counts[id] = (counts[id] || 0) + 1; });
@@ -601,15 +617,22 @@ function showDiscardViewer() {
         <div class="bc-title" style="color:${PLAYER_COLORS[p.id]}">${P_ICONS[p.id]} ${esc(p.name)}｜山札 ${p.deck.length} ／ 捨札 ${p.discard.length}</div>
         <div class="deck-list">${list}</div></div>`;
     };
-    box.innerHTML = `<h2>🗑 捨てカード確認</h2>
-      <p class="dlg-body">全員の捨札（使用済み・失ったカード）の一覧です。<b>山札が尽きると捨札を切り直して山札に戻り</b>、そのときはログ（📜）で「🔀 山札が一巡！」と合図します。</p>
-      <div class="builder">${G.players.map(section).join("")}</div>
-      <div class="dlg-buttons"><button class="btn primary" data-value="close">閉じる</button></div>`;
+    const render = () => {
+      const tabs = G.players.map((q, i) =>
+        `<button class="btn small deck-slot ${i === tab ? "primary" : ""}" data-tab="${i}" style="color:${i === tab ? "" : PLAYER_COLORS[q.id]}">${P_ICONS[q.id]} ${esc(q.name)}（${q.discard.length}）</button>`).join("");
+      box.innerHTML = `<h2>🗑 捨てカード確認</h2>
+        <p class="dlg-body">各プレイヤーの捨札（使用済み・失ったカード）の一覧です。<b>山札が尽きると捨札を切り直して山札に戻り</b>、そのときはログ（📜）で「🔀 山札が一巡！」と合図します。行をクリックでカード詳細。</p>
+        <div class="deck-slots">${tabs}</div>
+        ${section(G.players[tab])}
+        <div class="dlg-buttons"><button class="btn primary" data-value="close">閉じる</button></div>`;
+      box.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => { tab = Number(b.dataset.tab); render(); }));
+      // 捨札の行をクリック → カード詳細ポップアップ（v22）
+      box.querySelectorAll("[data-info]").forEach(el =>
+        el.addEventListener("click", () => showCardDetail(el.dataset.info)));
+      box.querySelector("[data-value=close]").addEventListener("click", close);
+    };
+    render();
     overlay.classList.add("show");
-    // 捨札の行をクリック → カード詳細ポップアップ（v22）
-    box.querySelectorAll("[data-info]").forEach(el =>
-      el.addEventListener("click", () => showCardDetail(el.dataset.info)));
-    box.querySelector("[data-value=close]").addEventListener("click", () => { overlay.classList.remove("show"); resolve(); });
   });
 }
 

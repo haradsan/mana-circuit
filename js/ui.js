@@ -127,27 +127,33 @@ function renderBoard(g) {
       }
       html += `<text x="${x + TILE / 2}" y="${y + 70}" font-size="12" fill="#b8b2cc" text-anchor="middle">${TILE_LABELS[tile.type]}</text>`;
     }
-    // 盤面エフェクト（🌋溶岩/🛡️結界/💨追い風）のバッジ
+    // 盤面エフェクト（🛡️結界/🕸️罠/🚧バリケード）のバッジ
     const ov = overlayOf(g, tile);
     if (ov) {
-      const ovIcon = ov.kind === "sanctuary" ? "🛡️" : ov.kind === "snare" ? "🕸️" : "✨";
-      const ovColor = ov.kind === "sanctuary" ? "#8ecbff" : ov.kind === "snare" ? "#c9a0ff" : "#ddd";
+      const ovIcon = ov.kind === "sanctuary" ? "🛡️" : ov.kind === "snare" ? "🕸️" : ov.kind === "block" ? "🚧" : "✨";
+      const ovColor = ov.kind === "sanctuary" ? "#8ecbff" : ov.kind === "snare" ? "#c9a0ff" : ov.kind === "block" ? "#ffb84d" : "#ddd";
       html += `<rect x="${x}" y="${y}" width="${TILE}" height="${TILE}" rx="10" fill="none" stroke="${ovColor}" stroke-width="3" stroke-dasharray="7 5" opacity="0.9"/>`;
       html += `<text x="${x + TILE / 2}" y="${y + 16}" font-size="15" text-anchor="middle">${ovIcon}</text>`;
     }
-    // 分かれ道の矢印（進める方向を示す）
-    if (tile.next.length > 1) {
-      tile.next.forEach(nid => {
-        const nt = g.tiles[nid];
-        const dx = Math.sign(nt.x - tile.x), dy = Math.sign(nt.y - tile.y);
-        const cx2 = x + TILE / 2 + dx * (TILE / 2 - 2);
-        const cy2 = y + TILE / 2 + dy * (TILE / 2 - 2);
-        // 先端 + 垂直方向に開いた底辺の三角形
-        const tipX = cx2 + dx * 7, tipY = cy2 + dy * 7;
-        const b1X = cx2 - dx * 4 - dy * 6, b1Y = cy2 - dy * 4 - dx * 6;
-        const b2X = cx2 - dx * 4 + dy * 6, b2Y = cy2 - dy * 4 + dx * 6;
-        html += `<polygon points="${tipX},${tipY} ${b1X},${b1Y} ${b2X},${b2Y}" fill="#ffd76a" opacity="0.9"/>`;
-      });
+    // 矢印表示（v23・自由移動）:
+    //  ・➡一方通行マス＝唯一の出口を赤金の大矢印で明示（特別マスであることが一目で分かるように）
+    //  ・三叉路以上（隣接3方向以上）の合流マス＝出られる方向を小矢印で示す
+    //  ※通常のマスは全方向に進めるため矢印は描かない（盤面のノイズになる）
+    const arrow = (nt, fill, big) => {
+      const dx = Math.sign(nt.x - tile.x), dy = Math.sign(nt.y - tile.y);
+      const cx2 = x + TILE / 2 + dx * (TILE / 2 - 2);
+      const cy2 = y + TILE / 2 + dy * (TILE / 2 - 2);
+      const L = big ? 1.45 : 1; // 一方通行の矢印はひとまわり大きい
+      const tipX = cx2 + dx * 7 * L, tipY = cy2 + dy * 7 * L;
+      const b1X = cx2 - dx * 4 * L - dy * 6 * L, b1Y = cy2 - dy * 4 * L - dx * 6 * L;
+      const b2X = cx2 - dx * 4 * L + dy * 6 * L, b2Y = cy2 - dy * 4 * L + dx * 6 * L;
+      return `<polygon points="${tipX},${tipY} ${b1X},${b1Y} ${b2X},${b2Y}" fill="${fill}" opacity="0.95"${big ? `><animate attributeName="opacity" values="1;0.45;1" dur="1.6s" repeatCount="indefinite"/></polygon>` : "/>"}`;
+    };
+    if (tile.onewayTo != null) {
+      html += arrow(g.tiles[tile.onewayTo], "#ff9a3d", true);
+    } else {
+      const neigh = neighborsOf(g, tile).filter(t => !(t.onewayTo != null && t.onewayTo === tile.id));
+      if (neigh.length > 2) neigh.forEach(nt => { html += arrow(nt, "#ffd76a", false); });
     }
     // マスの通し番号（常時表示）。領地・クリーチャー選択の選択肢と盤面を対応づけるための目印
     html += `<text x="${x + 6}" y="${y + TILE - 6}" font-size="10" fill="#9a92b5" text-anchor="start">#${tile.id}</text>`;
@@ -957,32 +963,38 @@ function dirArrow(from, to) {
   return dy > 0 ? "⬇" : "⬆";
 }
 
-// startId から既定ルートで進んだ場合のマスアイコン列（【】=止まる予定のマス）
-function routePreview(g, startId, steps) {
+// startId から既定ルート（自由移動の近似＝直前マスへ戻らない最初の候補）で進んだ場合の
+// マスアイコン列（【】=止まる予定のマス）。fromId は startId へ入る直前のマス（Uターン除外用）
+function routePreview(g, startId, steps, fromId = null) {
   const icons = [];
   const shown = Math.min(steps, 6);
-  let cur = startId;
+  let prev = fromId, cur = startId;
   for (let s = 0; s < shown; s++) {
     const t = g.tiles[cur];
     let ic = t.type === "LAND" ? ELEMENTS[t.element].icon : TILE_ICONS[t.type];
     if (t.type === "LAND" && t.owner !== null) ic += P_MINI[t.owner] || "🔸";
     icons.push(s === steps - 1 ? `【${ic}】` : ic);
-    cur = t.next[0];
+    const nxt = moveOptions(g, t, prev)[0];
+    prev = cur;
+    cur = nxt.id;
   }
   return icons.join(" ") + (steps > shown ? " …" : "");
 }
 
-async function humanChooseDirection(p, tile, stepsLeft) {
+// v23（自由移動）: 進める方向＝moveOptions（隣接の双方向から直前マスを除いたもの）。
+// 移動の最初の1歩は毎ターン全方向が候補になる（逆走・迂回OK）
+async function humanChooseDirection(p, tile, stepsLeft, prevId = null) {
   const legend = G.hotseat ? "🔹=🔵1P 🔸=🔴2P"
     : G.players.length > 2 ? `🔹=自分 🔸=${esc(G.players[1].name)} 💚=${esc(G.players[2].name)}`
     : "🔹=自分 🔸=敵";
+  const opts = moveOptions(G, tile, prevId);
   const res = await showDialog({
-    title: "🔀 分かれ道",
-    body: `残り${stepsLeft}マス。進む方向を選んでください（【】=止まる予定のマス、${legend}の土地）`,
+    title: prevId === null ? "🧭 進む方向" : "🔀 分かれ道",
+    body: `残り${stepsLeft}マス。進む方向を選んでください（好きな方向へ進めます。【】=止まる予定のマス、${legend}の土地）`,
     peek: true,
-    buttons: tile.next.map(nid => ({
-      label: `${dirArrow(tile, G.tiles[nid])} ${routePreview(G, nid, stepsLeft)}`,
-      value: String(nid),
+    buttons: opts.map(nt => ({
+      label: `${dirArrow(tile, nt)} ${routePreview(G, nt.id, stepsLeft, tile.id)}`,
+      value: String(nt.id),
     })),
   });
   return Number(res.action);

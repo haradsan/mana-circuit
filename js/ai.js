@@ -24,10 +24,14 @@ let AI_PROFILE = AI_PROFILES.normal;
 // 未設定なら従来どおりグローバルの AI_PROFILE（ステージ既定 × 全体難易度）を使う
 function aiProf(p) { return (p && p.aiProfile) || AI_PROFILE; }
 
-// 相手全員（三つ巴では2人）が既定ルートで1〜6マス以内に踏み得るマスidの集合（防衛系スペルの判断用）
+// 相手全員（三つ巴では2人）が1〜6マス以内に踏み得るマスidの集合（防衛系スペルの判断用）。
+// v23（自由移動）: 正規ルートの前方に加えて逆走（backstepDests）も踏み得る
 function aiNearTilesOfOpponents(g, p) {
   const near = new Set();
-  opponentsOf(g, p).forEach(q => { for (let n = 1; n <= 6; n++) near.add(walkAhead(g, q.pos, n).id); });
+  opponentsOf(g, p).forEach(q => {
+    for (let n = 1; n <= 6; n++) near.add(walkAhead(g, q.pos, n).id);
+    backstepDests(g, q.pos, 6).forEach(t => near.add(t.id));
+  });
   return near;
 }
 
@@ -414,12 +418,14 @@ function aiChooseLevelUp(g, p, tile) {
   return tile.level < aiProf(p).levelSingle && p.magic > cost + 300;
 }
 
-// --- 分かれ道: どちらへ進むか。next のタイルidを返す ---
-function aiChooseDirection(g, p, tile, stepsLeft) {
-  let best = tile.next[0], bestScore = -Infinity;
-  for (const nid of tile.next) {
+// --- 進む方向の選択（v23: 自由移動）: moveOptions の候補ごとに「既定ルート近似」で
+//     stepsLeft 先まで歩いて評価し、最も実りのある方向のタイルidを返す ---
+function aiChooseDirection(g, p, tile, stepsLeft, prevId = null) {
+  const opts = moveOptions(g, tile, prevId);
+  let best = opts[0].id, bestScore = -Infinity;
+  for (const nb of opts) {
     let score = Math.random() * 20; // 同点時のゆらぎ
-    let cur = nid;
+    let prev = tile.id, cur = nb.id;
     for (let s = 0; s < stepsLeft; s++) {
       const t = g.tiles[cur];
       if (t.type === "GATE" && !p.gates.has(t.id)) score += RULES.gateBonus * 0.5;
@@ -428,9 +434,13 @@ function aiChooseDirection(g, p, tile, stepsLeft) {
         else if (p.gates.size >= gatesNeededOf(g)) score += 150;   // 周回ボーナス
       }
       if (s === stepsLeft - 1) score += aiLandingScore(g, p, t);
-      else cur = t.next[0];
+      else {
+        const nxt = moveOptions(g, t, prev)[0]; // 途中の分岐は既定候補で近似
+        prev = t.id;
+        cur = nxt.id;
+      }
     }
-    if (score > bestScore) { bestScore = score; best = nid; }
+    if (score > bestScore) { bestScore = score; best = nb.id; }
   }
   return best;
 }
@@ -647,10 +657,11 @@ function aiPickGrowthTarget(g, p) {
   return lands[0];
 }
 
-// 相手が既定ルートで1〜6マス以内に踏み得るマスidの集合
+// 相手が1〜6マス以内に踏み得るマスidの集合（v23: 自由移動＝逆走側も含める）
 function aiNearTiles(g, player) {
   const near = new Set();
   for (let n = 1; n <= 6; n++) near.add(walkAhead(g, player.pos, n).id);
+  backstepDests(g, player.pos, 6).forEach(t => near.add(t.id));
   return near;
 }
 

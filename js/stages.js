@@ -2,12 +2,15 @@
 // stages.js — ステージ定義（16面）・盤面グラフ構築・進行度セーブ
 // ============================================================
 // 盤面は「グラフ」: 各マスが next（次のマスidの配列）を持つ。
-// next が2つ以上あるマスは分かれ道（人間は選択ダイアログ、CPUは先読みで判断）。
+// v23（自由移動）: ダイス移動は隣接マスへ双方向に進める（moveOptions・state.js）。next は
+//   「正規ルート」（既定の周回方向・AIの近似先読み・walkAhead）と、一方通行の向きの定義に使う。
 //
 // ステージ定義:
 //   board.rings  : 長方形ループの列。{w,h,x0,y0,start?}。最初のリングの先頭マスが城(id 0)。
 //                  start=[x,y] でループの開始マスを回転指定（八の字の共有マス用）
-//   board.chords : 近道。{from:[x,y], cells:[[x,y]...], to:[x,y]} — from/to はリング上のマス
+//   board.chords : 近道。{from:[x,y], cells:[[x,y]...], to:[x,y]} — from/to はリング上のマス。
+//                  oneway:true を付けると通路の中間マスが➡一方通行マスになる（from→to 方向にしか
+//                  進めず、出口側から入ることもできない。盤面に矢印で表示される）
 //   board.warpPairs : [["x,y","x,y"]] 対応マスへ飛ぶ（typesでWARP指定すること）
 //   types        : {"x,y": "GATE"|"CARD"|"MAGIC"|"MAGMA"|"BOOST"|"WARP"|"FORTUNE"|"SPRING"} 指定なしはLAND
 //   theme        : ステージの雰囲気カラー {glow, bg, path, dot}（背景グラデーション・回路の道の色）
@@ -64,6 +67,16 @@ function buildBoard(stage) {
     for (let i = 1; i < path.length; i++) {
       const a = idxOf(path[i - 1]), b2 = idxOf(path[i]);
       if (a !== b2 && !tiles[a].next.includes(b2)) tiles[a].next.push(b2);
+    }
+  });
+
+  // ➡一方通行（v23）: oneway:true の通路は中間マスに onewayTo（唯一の出口）を刻む。
+  // from/to 端点はリング上の共有マスなので自由なまま＝「入口から入り、出口へ抜ける」だけの道になる
+  (b.chords || []).forEach(c => {
+    if (!c.oneway) return;
+    const path = [c.from, ...c.cells, c.to];
+    for (let i = 1; i < path.length - 1; i++) {
+      tiles[idxOf(path[i])].onewayTo = idxOf(path[i + 1]);
     }
   });
 
@@ -265,7 +278,8 @@ const STAGES = [
     desc: "最終決戦。28マスの城郭の頂から🏰玉座へ一直線に堕ちる「地獄回廊」——ただし🌋マグマだらけ。魔王は初期魔力+200。",
     board: {
       rings: [{ w: 9, h: 7 }],
-      chords: [{ from: [4, 0], cells: [[4, 1], [4, 2], [4, 3], [4, 4], [4, 5]], to: [4, 6] }],
+      // 地獄回廊は「堕ちる」だけの➡一方通行（v23: 自由移動化に伴い明示）
+      chords: [{ from: [4, 0], cells: [[4, 1], [4, 2], [4, 3], [4, 4], [4, 5]], to: [4, 6], oneway: true }],
     },
     types: {
       "0,3": "GATE", "4,0": "GATE", "8,3": "GATE",
@@ -371,11 +385,12 @@ const STAGES = [
         { w: 10, h: 10 },
         { w: 4, h: 4, x0: 3, y0: 3 },
       ],
+      // 歯車道は4本とも➡一方通行（v23: 自由移動化に伴い明示。内環自体は自由に回れる）
       chords: [
-        { from: [4, 0], cells: [[4, 1], [4, 2]], to: [4, 3] }, // 北の歯車道（外→内）
-        { from: [0, 4], cells: [[1, 4], [2, 4]], to: [3, 4] }, // 西の歯車道（外→内）
-        { from: [4, 6], cells: [[4, 7], [4, 8]], to: [4, 9] }, // 南の歯車道（内→外）
-        { from: [6, 4], cells: [[7, 4], [8, 4]], to: [9, 4] }, // 東の歯車道（内→外）
+        { from: [4, 0], cells: [[4, 1], [4, 2]], to: [4, 3], oneway: true }, // 北の歯車道（外→内）
+        { from: [0, 4], cells: [[1, 4], [2, 4]], to: [3, 4], oneway: true }, // 西の歯車道（外→内）
+        { from: [4, 6], cells: [[4, 7], [4, 8]], to: [4, 9], oneway: true }, // 南の歯車道（内→外）
+        { from: [6, 4], cells: [[7, 4], [8, 4]], to: [9, 4], oneway: true }, // 東の歯車道（内→外）
       ],
     },
     types: {
@@ -468,6 +483,7 @@ function validateStages() {
     tiles.forEach(t => {
       if (t.next.length === 0) console.error(`[stages] ${s.id}: マス${t.id}(${t.x},${t.y})に行き先がない`);
       if (t.type === "WARP" && t.warpTo === undefined) console.error(`[stages] ${s.id}: WARP ${t.x},${t.y} に対応先がない`);
+      if (t.onewayTo != null && !t.next.includes(t.onewayTo)) console.error(`[stages] ${s.id}: 一方通行マス${t.id}の出口が正規ルート(next)にない`);
     });
     const bfs = (startId, edges) => {
       const seen = new Set([startId]);
