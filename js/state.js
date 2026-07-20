@@ -11,7 +11,7 @@ const DEFAULT_RULES = {
   tollRate: 0.6,       // 通行料 = 土地価値 × tollRate × 連鎖倍率
   magicTileG: 150,     // 魔力マス
   gateBonus: 100,      // 関門通過ボーナス
-  lapBase: 200,        // 周回ボーナス基本値
+  lapBase: 350,        // 周回ボーナス基本値（v22: 200→350。周回の労力に見合う報酬に引き上げ）
   invaderSt: 0,        // 侵略側ST補正（闘技場ステージ用）
   landHpMult: 1,       // 土地HPボーナス倍率
   cpuMagicBonus: 0,    // CPUの初期魔力補正（最終ステージ用）
@@ -475,8 +475,9 @@ function ownedLands(g, playerId) {
 
 // 周回ボーナス（所有土地が多いほど増える）。大きく劣勢なら1.5倍の「逆転の風」。
 // v19: ⛪大聖堂（祝祭）を所有していればさらに1.5倍
+// v22: 基本値200→350・土地係数25→40（約1.6〜1.75倍）。周回プレイの見返りを強化
 function lapBonus(g, p) {
-  const base = RULES.lapBase + ownedLands(g, p.id).length * 25;
+  const base = RULES.lapBase + ownedLands(g, p.id).length * 40;
   const comeback = assetsOf(g, p) < assetsOf(g, opponentOf(g, p)) * COMEBACK_RATIO;
   const festival = ownedLands(g, p.id).some(t =>
     t.creature && CARD_BY_ID[t.creature.cardId].ab.includes("festival"));

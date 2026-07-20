@@ -243,7 +243,80 @@ function cardHTML(c, opts = {}) {
     <span class="c-rarity" style="color:${rm.color}" title="${rm.label}">${rm.stars}</span>
     <span class="c-elem" title="${c.type === "creature" ? ELEMENTS[c.element].name + "属性" : c.type === "item" ? "アイテム" : "スペル"}">${elemIcon}</span>
     <div class="c-name">${esc(c.name)}</div><div class="c-body">${body}</div>
+    ${opts.ribbon ? `<span class="c-ribbon ${opts.ribbonCls || ""}">${opts.ribbon}</span>` : ""}
     <div class="c-shine"></div></div>`;
+}
+
+// 属性相性（4すくみ）の関係を返す: "adv"=meが有利 / "dis"=meが不利 / "even"=互角 / "none"=無属性が絡む（輪の外）
+function elemRelation(myElem, foeElem) {
+  if (myElem === "neutral" || foeElem === "neutral") return "none";
+  if (hasElemAdvantage(myElem, foeElem)) return "adv";
+  if (hasElemAdvantage(foeElem, myElem)) return "dis";
+  return "even";
+}
+// 相性の輪（🔥→🌳→⛰️→💧→🔥）のミニ表示。hl に指定した属性を光らせる
+function elemWheelHTML(hl = []) {
+  const ring = ["fire", "wood", "earth", "water"];
+  const chip = e => `<span class="ew-chip ${hl.includes(e) ? "ew-hl" : ""}" style="--ec:${ELEMENTS[e].color}">${ELEMENTS[e].icon}${ELEMENTS[e].name}</span>`;
+  return `<span class="elem-wheel" title="属性相性の輪: 左が右に強い（4すくみ）">` +
+    ring.map(chip).join(`<span class="ew-arrow">→</span>`) +
+    `<span class="ew-arrow">→</span>${chip("fire")}</span>`;
+}
+
+// ---------- カード詳細ポップアップ（v22） ----------
+// 📚アルバム・🛠デッキ構築・🎁シールド戦・🗑捨札から、カード1枚のフルサイズ表示＋
+// ステータス＋特性（能力）の説明を確認できる。既存のダイアログ（#overlay）の上に重なる独立レイヤー。
+// クリック（背景・✖）で閉じる。ゲーム進行には一切影響しない（表示のみ）。
+function showCardDetail(cardId) {
+  const c = CARD_BY_ID[cardId];
+  if (!c) return;
+  let pop = document.getElementById("card-pop");
+  if (!pop) {
+    pop = document.createElement("div");
+    pop.id = "card-pop";
+    document.body.appendChild(pop);
+  }
+  const rm = RARITY_META[cardRarity(c)];
+  const setInfo = CARD_SETS.find(s => s.set === cardSet(c));
+  const typeName = c.type === "creature" ? `クリーチャー（${ELEMENTS[c.element].icon}${ELEMENTS[c.element].name}属性）`
+    : c.type === "item" ? "アイテム" : "スペル";
+  const row = (k, v) => `<div class="cd-row"><span class="cd-k">${k}</span><span class="cd-v">${v}</span></div>`;
+  let info = row("タイプ", typeName) + row("コスト", `${c.cost}G`) +
+    row("レア度", `<span style="color:${rm.color}">${rm.stars} ${rm.label}</span>`) +
+    row("収録", `${setInfo.icon} ${esc(setInfo.name)}`);
+  if (c.type === "creature") {
+    info += row("ST / HP", `⚔ ${c.st} ／ ❤️ ${c.hp}`);
+    if (c.element === "neutral") {
+      info += row("属性相性", `⚪ 相性の輪の<b>外</b>＝有利・不利なし（土地の加護も受けない）`);
+    } else {
+      const beats = ELEM_ADVANTAGE[c.element]; // この属性が有利を取る相手
+      const beatenBy = LAND_ELEMENTS.find(e => ELEM_ADVANTAGE[e] === c.element); // この属性に有利を取る相手
+      info += row("属性相性", `${ELEMENTS[beats].icon}${ELEMENTS[beats].name}に<b>有利</b>（ST+${ELEM_ADV_ST}）／` +
+        `${ELEMENTS[beatenBy].icon}${ELEMENTS[beatenBy].name}が<b>苦手</b>（相手にST+${ELEM_ADV_ST}）` +
+        `<div class="cd-wheel">${elemWheelHTML([c.element])}</div>`);
+    }
+  }
+  if (c.type === "item") info += row("補正", `${c.st ? `ST+${c.st} ` : ""}${c.hp ? `HP+${c.hp}` : ""}` || "—");
+  // 特性（能力）は名前だけでなく説明文まで表示（今回の要望の中心）
+  const abHtml = (c.ab || []).length
+    ? `<div class="cd-abs"><div class="cd-abs-t">🔖 特性</div>` +
+      c.ab.map(a => `<div class="cd-ab"><b class="ab">${ABILITY_INFO[a].name}</b><span>${esc(ABILITY_INFO[a].desc)}</span></div>`).join("") + `</div>`
+    : "";
+  const descHtml = c.desc ? `<div class="cd-abs"><div class="cd-abs-t">✨ 効果</div><div class="cd-desc">${esc(c.desc)}</div></div>` : "";
+  pop.innerHTML = `<div class="cd-box">
+      <button class="cd-close" title="閉じる">✖</button>
+      <div class="cd-flex">
+        <div class="cd-card">${cardHTML(c)}</div>
+        <div class="cd-info">
+          <div class="cd-name">${esc(c.name)}</div>
+          ${info}${abHtml}${descHtml}
+        </div>
+      </div>
+      <div class="cd-hint">クリックで閉じる</div>
+    </div>`;
+  pop.classList.add("show");
+  const close = () => pop.classList.remove("show");
+  pop.onclick = close; // 背景・✖・どこをクリックしても閉じる（表示専用）
 }
 
 // 3Dフリップできるカード（裏面=共通のカードバック／表面=カード本体）。
@@ -468,7 +541,7 @@ function showDialog(opts) {
     if (opts.body) html += `<p class="dlg-body">${opts.body}</p>`;
     if (opts.cards && opts.cards.length) {
       html += `<div class="dlg-cards">` +
-        opts.cards.map(ci => cardHTML(ci.card, { disabled: ci.disabled, selectable: !ci.disabled })).join("") +
+        opts.cards.map(ci => cardHTML(ci.card, { disabled: ci.disabled, selectable: !ci.disabled, ribbon: ci.ribbon, ribbonCls: ci.ribbonCls })).join("") +
         `</div>`;
     }
     html += `<div class="dlg-buttons">`;
@@ -744,17 +817,34 @@ function openBattleView(g, attackerName, attCard, attItem, tile, defItem) {
     (c.ab.includes("physnull") ? `<span class="f-mod">🌫 物理無効</span>` : "") +
     (c.ab.includes("physreflect") ? `<span class="f-mod">🪞 物理反射</span>` : "") +
     ((c.ab.includes("magicatk") || (item && item.magicatk)) ? `<span class="f-mod">✨ 魔法攻撃</span>` : "");
+  // 属性4すくみの有利不利をバッジと相性バナーで明示（v22）
+  const rel = elemRelation(attCard.element, defCard.element); // 攻撃側から見た関係
+  const elemMod = r =>
+    r === "adv" ? `<span class="f-mod f-adv">⚡ 属性有利 ST+${ELEM_ADV_ST}</span>` :
+    r === "dis" ? `<span class="f-mod f-dis">⚠ 属性不利</span>` : "";
+  const relBanner =
+    rel === "adv"  ? `<span class="be-rel be-adv">⚡ 有利 ST+${ELEM_ADV_ST} ▶</span>` :
+    rel === "dis"  ? `<span class="be-rel be-dis">◀ 不利（相手にST+${ELEM_ADV_ST}）</span>` :
+    rel === "none" ? `<span class="be-rel be-none">⚪ 相性なし（無属性）</span>` :
+                     `<span class="be-rel be-even">— 互角 —</span>`;
+  const elemChip = e => `<span class="be-elem" style="--ec:${ELEMENTS[e].color}">${ELEMENTS[e].icon} ${ELEMENTS[e].name}</span>`;
+  const elemBanner = `<div class="bc-elems">
+      ${elemChip(attCard.element)}${relBanner}${elemChip(defCard.element)}
+      <div class="bc-wheel">${elemWheelHTML([attCard.element, defCard.element].filter(e => e !== "neutral"))}</div>
+    </div>`;
   const defMods =
     (support > 0 ? `<span class="f-mod">🏰 援護ST+${support}</span>` : "") +
     (dCur < defCard.hp ? `<span class="f-mod">🩹 HP残${dCur}</span>` : "") +
     (defCard.ab.includes("capture") ? `<span class="f-mod">🕸️ 捕縛</span>` : "") +
+    elemMod(rel === "adv" ? "dis" : rel === "dis" ? "adv" : rel) +
     typeMods(defCard, defItem);
   cutin.innerHTML = `
     <div class="bc-flash" id="bc-flash"></div>
     <div class="bc-inner">
       <h2 class="bc-title">⚔ バトル！ <small>${esc(ELEMENTS[tile.element].name)}の土地 Lv${tile.level}</small></h2>
+      ${elemBanner}
       <div class="battle-arena">
-        ${fighter(attCard, attItem, 0, "att", typeMods(attCard, attItem))}
+        ${fighter(attCard, attItem, 0, "att", elemMod(rel) + typeMods(attCard, attItem))}
         <div class="vs">VS</div>
         ${fighter(defCard, defItem, defBonus, "def", defMods)}
       </div>

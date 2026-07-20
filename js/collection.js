@@ -91,6 +91,7 @@ function drawPack(n = 3, guarantee = "uncommon", guaranteeCount = 1, set = 1) {
 // 報酬枚数と保証（原さん指定）: 新規クリア=10枚＋レア2枚保証 / 正規勝利=5枚＋レア1枚保証 / トレーニング=3枚＋アンコモン1枚保証
 const REWARD_FIRST_CLEAR = 10;
 const REWARD_WIN         = 5;
+const REWARD_ROYALE_BONUS = 2; // ⚔三つ巴の勝利は1対1より+2枚（3人戦の難しさに見合う報酬・v22）
 const REWARD_TRAINING    = 3;
 const GUARANTEE_FIRST_CLEAR = 2; // 初クリアはレア以上を2枚保証（10枚パック）
 const TRAINING_STREAK_FOR_RARE = 3; // トレーニング連勝ボーナス: この連勝数からは毎回レア以上1枚保証
@@ -226,7 +227,9 @@ function albumTile(c, count) {
   const art = owned && typeof cardArtSVG === "function"
     ? `<div class="at-art">${cardArtSVG(c)}</div>`
     : `<div class="at-icon">${owned ? cardIconOf(c) : "❔"}</div>`;
-  return `<div class="album-tile rar-${rar} ${owned ? "" : "locked"}" title="${esc(owned ? rm.label + "／" + deckTip(c) : "未収集")}">
+  // 所持カードはクリックで詳細ポップアップ（ステータス＋特性の説明・v22）
+  return `<div class="album-tile rar-${rar} ${owned ? "clickable" : "locked"}" ${owned ? `data-detail="${c.id}"` : ""}
+    title="${esc(owned ? rm.label + "／" + deckTip(c) + "／クリックで詳細" : "未収集")}">
     <div class="at-rarity" style="color:${rm.color}">${rm.stars}</div>
     ${art}
     <div class="at-name">${owned ? esc(c.name) : "？？？"}</div>
@@ -256,6 +259,9 @@ function showAlbum() {
     html += `</div><div class="dlg-buttons"><button class="btn primary" data-value="close">閉じる</button></div>`;
     box.innerHTML = html;
     overlay.classList.add("show");
+    // 所持カードのタイルをクリック → 詳細ポップアップ（ステータス＋特性の説明・v22）
+    box.querySelectorAll("[data-detail]").forEach(el =>
+      el.addEventListener("click", () => showCardDetail(el.dataset.detail)));
     box.querySelector("[data-value=close]").addEventListener("click", () => { overlay.classList.remove("show"); resolve(); });
   });
 }
@@ -283,17 +289,19 @@ function showDeckBuilder() {
           title="${d ? `保存済み（${DECK_SIZE}枚）` : "未保存（空きスロット）"}${i === active ? "・対戦で使用中" : ""}">
           ${mark}デッキ${i + 1}${d ? "" : "（空）"}</button>`;
       }).join("");
+      // 🔍ボタン＝カード詳細ポップアップ（行クリック＝追加/削除とは別の操作・v22）
+      const infoBtn = id => `<span class="pi-info" data-info="${id}" title="カード詳細を見る">🔍</span>`;
       const poolHtml = ownedIds.map(id => {
         const c = CARD_BY_ID[id], avail = owned[id] - cnt(id);
         return `<div class="pool-item ${avail <= 0 ? "exhausted" : ""}" data-add="${id}" title="${esc(deckTip(c))}">
           <span class="pi-icon">${cardIconOf(c)}</span><span class="pi-name">${esc(c.name)}</span>
-          <span class="pi-cost">${c.cost}G</span><span class="pi-have">残${avail}/${owned[id]}</span></div>`;
+          <span class="pi-cost">${c.cost}G</span><span class="pi-have">残${avail}/${owned[id]}</span>${infoBtn(id)}</div>`;
       }).join("");
       const dc = {}; deck.forEach(id => dc[id] = (dc[id] || 0) + 1);
       const deckHtml = Object.keys(dc).sort((a, b) => typeOrder(a) - typeOrder(b) || CARD_BY_ID[a].cost - CARD_BY_ID[b].cost)
         .map(id => { const c = CARD_BY_ID[id]; return `<div class="deck-item" data-remove="${id}" title="クリックで1枚外す">
           <span class="pi-icon">${cardIconOf(c)}</span><span class="pi-name">${esc(c.name)}</span>
-          <span class="di-count">×${dc[id]}</span></div>`; }).join("")
+          <span class="di-count">×${dc[id]}</span>${infoBtn(id)}</div>`; }).join("")
         || `<div class="deck-empty">左の所持カードをクリックして追加</div>`;
       box.innerHTML = `<h2>🛠 デッキ構築 <span class="album-count">👤 ${esc(currentProfileName())}｜編集中: デッキ${slot + 1}｜${deck.length} / ${DECK_SIZE} 枚</span></h2>
         <div class="deck-slots">${slotTabs}</div>
@@ -313,6 +321,10 @@ function showDeckBuilder() {
       wire();
     };
     const wire = () => {
+      // 🔍詳細（追加/削除より先に登録し、stopPropagationで行クリックへの伝播を止める・v22）
+      box.querySelectorAll("[data-info]").forEach(el => el.addEventListener("click", e => {
+        e.stopPropagation(); showCardDetail(el.dataset.info);
+      }));
       box.querySelectorAll("[data-slot]").forEach(el => el.addEventListener("click", () => {
         slot = Number(el.dataset.slot);
         deck = (deckInSlot(slot) || []).filter(id => CARD_BY_ID[id]);
@@ -582,7 +594,7 @@ function showDiscardViewer() {
       (p.discard || []).forEach(id => { if (CARD_BY_ID[id]) counts[id] = (counts[id] || 0) + 1; });
       const ids = Object.keys(counts).sort((a, b) => typeOrder(a) - typeOrder(b) || CARD_BY_ID[a].cost - CARD_BY_ID[b].cost);
       const list = ids.length
-        ? ids.map(id => { const c = CARD_BY_ID[id]; return `<div class="disc-item" title="${esc(deckTip(c))}">
+        ? ids.map(id => { const c = CARD_BY_ID[id]; return `<div class="disc-item clickable" data-info="${id}" title="${esc(deckTip(c))}／クリックで詳細">
             <span class="pi-icon">${cardIconOf(c)}</span><span class="pi-name">${esc(c.name)}</span><span class="di-count">×${counts[id]}</span></div>`; }).join("")
         : `<div class="deck-empty">捨札はまだありません</div>`;
       return `<div class="builder-col">
@@ -594,6 +606,9 @@ function showDiscardViewer() {
       <div class="builder">${G.players.map(section).join("")}</div>
       <div class="dlg-buttons"><button class="btn primary" data-value="close">閉じる</button></div>`;
     overlay.classList.add("show");
+    // 捨札の行をクリック → カード詳細ポップアップ（v22）
+    box.querySelectorAll("[data-info]").forEach(el =>
+      el.addEventListener("click", () => showCardDetail(el.dataset.info)));
     box.querySelector("[data-value=close]").addEventListener("click", () => { overlay.classList.remove("show"); resolve(); });
   });
 }
@@ -740,19 +755,20 @@ function showSealedBuilder(pool) {
     };
     const render = () => {
       const v = validity();
+      const infoBtn = id => `<span class="pi-info" data-info="${id}" title="カード詳細を見る">🔍</span>`;
       const poolHtml = poolIds.map(id => {
         const c = CARD_BY_ID[id], avail = poolCount[id] - cnt(id);
         const rm = RARITY_META[cardRarity(c)];
         return `<div class="pool-item ${avail <= 0 ? "exhausted" : ""}" data-add="${id}" title="${esc(deckTip(c))}">
           <span class="pi-icon">${cardIconOf(c)}</span>
           <span class="pi-name">${esc(c.name)} <span style="color:${rm.color}">${rm.stars}</span></span>
-          <span class="pi-cost">${c.cost}G</span><span class="pi-have">残${avail}/${poolCount[id]}</span></div>`;
+          <span class="pi-cost">${c.cost}G</span><span class="pi-have">残${avail}/${poolCount[id]}</span>${infoBtn(id)}</div>`;
       }).join("");
       const dc = {}; deck.forEach(id => dc[id] = (dc[id] || 0) + 1);
       const deckHtml = Object.keys(dc).sort((a, b) => typeOrder(a) - typeOrder(b) || CARD_BY_ID[a].cost - CARD_BY_ID[b].cost)
         .map(id => { const c = CARD_BY_ID[id]; return `<div class="deck-item" data-remove="${id}" title="クリックで1枚外す">
           <span class="pi-icon">${cardIconOf(c)}</span><span class="pi-name">${esc(c.name)}</span>
-          <span class="di-count">×${dc[id]}</span></div>`; }).join("")
+          <span class="di-count">×${dc[id]}</span>${infoBtn(id)}</div>`; }).join("")
         || `<div class="deck-empty">左の開封プールをクリックして追加</div>`;
       box.innerHTML = `<h2>🎁 シールド戦 — デッキ構築 <span class="album-count">${deck.length} / ${DECK_SIZE} 枚</span></h2>
         <p class="dlg-body">開封した<b>${pool.length}枚のプール</b>から<b>${DECK_SIZE}枚</b>のデッキを組んでください。
@@ -769,6 +785,9 @@ function showSealedBuilder(pool) {
           <button class="btn" data-value="cancel">やめる（プール破棄）</button>
           <button class="btn primary" data-value="start" ${v.ok ? "" : "disabled"}>⚔ このデッキで出陣</button>
         </div>`;
+      box.querySelectorAll("[data-info]").forEach(el => el.addEventListener("click", e => {
+        e.stopPropagation(); showCardDetail(el.dataset.info);
+      }));
       box.querySelectorAll("[data-add]").forEach(el => el.addEventListener("click", () => {
         const id = el.dataset.add;
         if (deck.length >= DECK_SIZE || cnt(id) >= poolCount[id]) return;

@@ -158,8 +158,17 @@ async function showGameOver() {
     if (youWin) await playVictoryFx("VICTORY!", "⚔ 三つ巴を制覇！");
     let gained = 0;
     if (youWin && typeof grantWinCards === "function") {
-      const pack = grantWinCards(REWARD_WIN, G.rewardSet || 1);
-      if (pack) { gained = pack.length; await showPackReveal(pack, "🏆 三つ巴 勝利報酬！", `カードを${pack.length}枚手に入れた！`); }
+      // ⚔三つ巴は1対1（5枚）より+2枚＝7枚（3人戦を制する難しさに見合う報酬・v22）
+      const pack = grantWinCards(REWARD_WIN + REWARD_ROYALE_BONUS, G.rewardSet || 1);
+      if (pack) { gained = pack.length; await showPackReveal(pack, "🏆 三つ巴 勝利報酬！", `カードを${pack.length}枚手に入れた！（⚔三つ巴ボーナス＝1対1より+${REWARD_ROYALE_BONUS}枚）`); }
+    }
+    // ウィークリールール適用中の三つ巴勝利にもボーナスカード（正規対戦と同様・v22）
+    if (youWin && G.weekly && typeof drawPack === "function") {
+      const bonus = drawPack(WEEKLY_BONUS_CARDS, "uncommon", 1, G.rewardSet || 1);
+      addCards(bonus);
+      gained += bonus.length;
+      await showPackReveal(bonus, "🎪 ウィークリーボーナス！",
+        `今週のルール「${G.weekly.name}」適用中の勝利ボーナス（+${bonus.length}枚）！`);
     }
     const res = await showDialog({
       title: youWin ? "🏆 三つ巴を制覇！" : "💀 敗北…",
@@ -2173,11 +2182,18 @@ async function enemyLandFlow(p, tile) {
       const c = CARD_BY_ID[id];
       return c.type === "creature" && !c.ab.includes("immobile");
     });
+    // 属性4すくみの相性ヒント（v22）: 防衛クリーチャーに対して有利/不利になる属性を明示
+    const strongVs = LAND_ELEMENTS.find(e => ELEM_ADVANTAGE[e] === defCard.element); // 防衛に有利を取れる属性
+    const weakVs = ELEM_ADVANTAGE[defCard.element]; // 防衛が有利を取る＝送り込むと不利な属性
+    const elemHint = defCard.element === "neutral"
+      ? `<br>⚪ 相手は<b>無属性</b>＝相性の輪の外（どの属性でも有利・不利なし）`
+      : `<br>⚖ 相性: ${ELEMENTS[strongVs].icon}<b>${ELEMENTS[strongVs].name}属性なら有利（ST+${ELEM_ADV_ST}）</b>／${ELEMENTS[weakVs].icon}${ELEMENTS[weakVs].name}属性は<b>不利</b>（相手にST+${ELEM_ADV_ST}）`;
     const res = await showDialog({
       title: `⚔ 敵の土地（${ELEMENTS[tile.element].name}属性 Lv${tile.level}）`,
       body: (protectedTile ? `<b>${truceActive(G) ? "🏳️ 停戦協定により侵略できません" : "🛡️ 結界に守られていて侵略できません"}</b><br>` : "") +
         `通行料 <b>${toll}G</b> を支払うか、クリーチャーで侵略します<br>` +
         `防衛: ${ELEMENTS[defCard.element].icon}${esc(defCard.name)}（${ELEMENTS[defCard.element].name}属性・ST${defCard.st}${support ? `+${support}(援護)` : ""}/HP${curHp < defMaxHp ? `${curHp}/${defMaxHp}` : defMaxHp}${landHpBonus(tile, defCard) ? `+${landHpBonus(tile, defCard)}(土地の加護)` : ""}）` +
+        elemHint +
         (defCard.ab.length ? `<br>🔖 防衛能力: ${defCard.ab.map(a => ABILITY_INFO[a].name).join("・")}` : "") +
         (defCard.ab.includes("armor") ? `<br><b>⚠ 硬殻持ち</b>：受けるダメージが常に<b>-10</b>されます` : "") +
         (defCard.ab.includes("lastward") ? `<br><b>⚠ 背水持ち</b>：HPが半分以下になるとST+25で反撃してきます` : "") +
@@ -2188,7 +2204,16 @@ async function enemyLandFlow(p, tile) {
         (defCard.ab.includes("physreflect") ? `<br><b>⚠ 物理反射持ち</b>：物理攻撃は<b>そっくり跳ね返されます</b>（✨魔法攻撃なら通る）` : "") +
         (defCard.ab.includes("mimic") ? `<br><b>⚠ 模倣持ち</b>：バトルであなたのクリーチャーの<b>基本ST・HP・能力を写し取って</b>戦います（送り込んだ強さがそのまま返ってくる）` : "") +
         `<br>侵略はコストのみ（勝てば通行料は不要）。ただし<b>敗れると通行料${toll}Gも徴収</b>され、カードも失います`,
-      cards: creatures.map(id => ({ card: CARD_BY_ID[id], disabled: CARD_BY_ID[id].cost > p.magic })),
+      cards: creatures.map(id => {
+        const c = CARD_BY_ID[id];
+        // 各候補カードに相性リボン（⚡有利/⚠不利）を付けて一目で分かるように（v22）
+        const rel = elemRelation(c.element, defCard.element);
+        return {
+          card: c, disabled: c.cost > p.magic,
+          ribbon: rel === "adv" ? `⚡有利` : rel === "dis" ? `⚠不利` : "",
+          ribbonCls: rel === "adv" ? "rib-adv" : rel === "dis" ? "rib-dis" : "",
+        };
+      }),
       peek: true,
       buttons: [{ label: `通行料を支払う（${toll}G）`, value: "pay", primary: true }],
     });
@@ -2721,10 +2746,11 @@ function showHelp() {
       ・🎰<b>運命</b>＝ルーレット（大当り+300G／+150G／2枚ドロー／次のダイス2倍／はずれ-100G） ／
       ⛲<b>泉</b>＝自軍クリーチャー全回復＋60G<br><br>
       <b>連鎖</b>: 同じ属性の土地を複数持つと通行料が倍増（2つ→×1.5、3つ→×2.0、4つ以上→×2.5）<br>
-      <b>周回</b>: 関門を規定数そろえて城を<b>通過または停止</b>すると<b>周回ボーナス＝魔力（所有土地が多いほど増額）＋自軍クリーチャーHP全回復</b>。大きく劣勢のときは魔力<b>1.5倍</b>！<br>
+      <b>周回</b>: 関門を規定数そろえて城を<b>通過または停止</b>すると<b>周回ボーナス＝魔力（基本${DEFAULT_RULES.lapBase}G＋所有土地×40G）＋自軍クリーチャーHP全回復</b>。大きく劣勢のときは魔力<b>1.5倍</b>！<br>
       <b>🏰 領地コントロール</b>: 城にコマが<b>ぴったり停止（通過ではなく丁度）</b>すると、周回に関係なく<b>支配する全領地を対象に1回だけ行動</b>できる（侵攻／交代／レベルアップ）。
       ダイスでぴったり止まれない時は<b>✨リコール</b>で城へ帰ればこの権利が得られる（＝リコールの使いどころ）。<br><br>
-      <b>属性相性</b>: 🔥火 → 🌳木 → ⛰️地 → 💧水 → 🔥火（左が右に強い・<b>4すくみ</b>／＝水＞火＞木＞地＞水）。バトルで有利属性はST+${ELEM_ADV_ST}<br>
+      <b>属性相性</b>: 🔥火 → 🌳木 → ⛰️地 → 💧水 → 🔥火（左が右に強い・<b>4すくみ</b>／＝水＞火＞木＞地＞水）。バトルで有利属性はST+${ELEM_ADV_ST}。
+      <b>バトル開始時のカットインに⚡有利/⚠不利のバッジと相性の輪が表示</b>され、侵略時のクリーチャー選択でも各カードに⚡/⚠リボンが付く<br>
       <b>⚪ 無属性クリーチャー</b>: 相性の輪の<b>外</b>＝有利も不利も取らず、<b>土地の加護（属性一致HP+）も受けない</b>。
       そのぶんコスト効率が高く、全員レア以上でユニークな能力を持つ（どの土地に置いても同じ強さ）。<br>
       <b>バトル</b>: 侵略側が先攻（防衛側が<b>先制</b>持ちなら防衛が先攻）。土地と同属性の防衛側はHP+（土地Lv×10）。
@@ -2757,8 +2783,10 @@ function showHelp() {
       <b>🗑 捨札の確認</b>: ヘッダーの<b>🗑 捨札</b>で両者の捨てカードを確認できる。<b>山札が尽きると捨札を切り直して山札に戻り</b>、ログ（📜）で「🔀」と合図する。<br>
       <b>⚙ 難易度</b>: タイトル画面で<b>イージー／ノーマル／ハード</b>を選べる。相手ごとの強さの違いはそのままに、CPUの積極性・デッキ・資金力が変わる。<br>
       <b>👤 プレイヤー</b>: タイトル画面の「👤」で<b>5人まで</b>切り替えられる。プレイヤーごとに<b>コレクション・デッキ（5つまで保存）・ステージ進行度</b>が別々に記録される（名前は「✎」で変更）。<br>
-      <b>レア度</b>: カードには★（コモン）〜★★★★（レジェンド）のレア度があり、パックでは低レアほど出やすい。<br><br>
-      <b>⚔ 三つ巴</b>: あなた＋ステージの主＋<b>ランダムな乱入キャラ</b>の3人で戦うモード。<b>全ステージ</b>から選べ、勝てばカードを獲得（進行度は変化しない）。
+      <b>レア度</b>: カードには★（コモン）〜★★★★（レジェンド）のレア度があり、パックでは低レアほど出やすい。<br>
+      <b>🔍 カード詳細</b>: 📚アルバムの所持カードをクリック、🛠デッキ構築・🎁シールド戦の<b>🔍</b>、🗑捨札の行をクリックすると、
+      <b>カードの詳細ポップアップ</b>＝フルサイズのカード表示＋ステータス＋<b>特性（能力）の説明文</b>＋属性相性を確認できる。<br><br>
+      <b>⚔ 三つ巴</b>: あなた＋ステージの主＋<b>ランダムな乱入キャラ</b>の3人で戦うモード。<b>全ステージ</b>から選べ、勝てばカードを<b>${REWARD_WIN + REWARD_ROYALE_BONUS}枚</b>獲得＝1対1より+${REWARD_ROYALE_BONUS}枚（進行度は変化しない）。🎪週替りONならさらに+${WEEKLY_BONUS_CARDS}枚。
       対象を選ぶスペル（ドレイン・フリーズ等）は<b>相手を選択</b>して撃つ。3人だと相手を金欠にしても止まらないので、<b>自分の凱旋</b>を最短で狙うのが鍵。<br>
       <b>🎮 2人対戦（ホットシート）</b>: 同じ端末を交互に操作する<b>人間同士の対戦</b>。プレイヤーを2人選び、<b>全ステージ</b>から盤面を選べる。
       各自の<b>使用中デッキ</b>（未構築ならおまかせ）で戦い、手番の交代時は手札が伏せられる（報酬・進行度は変化しない）。<br>

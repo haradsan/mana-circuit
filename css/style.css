@@ -667,6 +667,42 @@ body.in-game #hud-tabs { display: flex; }
   color: var(--gold);
   text-shadow: 0 0 12px #ffd76a66;
 }
+/* ---------- 属性相性の視覚表示（v22） ---------- */
+.f-mod.f-adv { background: #1e3a24; border-color: #57c26a; color: #8ee0a0; font-weight: bold; }
+.f-mod.f-dis { background: #3a1e1e; border-color: #e05537; color: #ff9a8a; font-weight: bold; }
+.bc-elems {
+  display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+  margin: 4px 0 8px; padding: 6px 10px;
+  background: #221c33cc; border: 1px solid var(--border); border-radius: 10px;
+}
+.be-elem {
+  display: inline-block; padding: 2px 10px; border-radius: 8px; font-weight: bold; font-size: 14px;
+  border: 1.5px solid var(--ec, var(--border)); color: var(--ec, #fff);
+  background: #17131f; text-shadow: 0 1px 2px #000;
+}
+.be-rel { font-size: 13px; font-weight: bold; padding: 2px 10px; border-radius: 8px; }
+.be-rel.be-adv  { color: #8ee0a0; background: #1e3a24; box-shadow: 0 0 10px #57c26a44; }
+.be-rel.be-dis  { color: #ff9a8a; background: #3a1e1e; box-shadow: 0 0 10px #e0553744; }
+.be-rel.be-even { color: var(--dim); }
+.be-rel.be-none { color: #c8c2dd; }
+.bc-wheel { width: 100%; text-align: center; }
+/* 4すくみの輪（🔥→🌳→⛰️→💧→🔥）: 対戦中の2属性を光らせる */
+.elem-wheel { font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+.ew-chip { display: inline-block; padding: 1px 5px; border-radius: 6px; color: var(--ec, var(--dim)); opacity: 0.55; }
+.ew-chip.ew-hl {
+  opacity: 1; font-weight: bold; background: #17131f;
+  border: 1px solid var(--ec, var(--gold)); box-shadow: 0 0 8px var(--ec, #ffd76a);
+}
+.ew-arrow { color: var(--dim); opacity: 0.7; margin: 0 1px; }
+/* カード右上の相性リボン（侵略時のクリーチャー選択・v22） */
+.c-ribbon {
+  position: absolute; top: 30px; right: -6px; z-index: 4;
+  font-size: 10.5px; font-weight: bold; padding: 2px 7px; border-radius: 6px;
+  transform: rotate(4deg); pointer-events: none;
+  box-shadow: 0 2px 6px #000a;
+}
+.c-ribbon.rib-adv { background: #1e3a24; border: 1px solid #57c26a; color: #8ee0a0; }
+.c-ribbon.rib-dis { background: #3a1e1e; border: 1px solid #e05537; color: #ff9a8a; }
 #battle-log {
   background: #17131f;
   border: 1px solid var(--border);
@@ -699,6 +735,56 @@ body.in-game #hud-tabs { display: flex; }
 .at-name { font-size: 11px; font-weight: bold; margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .at-sub { font-size: 10px; color: #ffb0a0; }
 .at-count { position: absolute; top: 2px; right: 4px; font-size: 10px; color: var(--gold); font-weight: bold; }
+
+/* ---------- カード詳細ポップアップ（v22） ---------- */
+.album-tile.clickable { cursor: pointer; }
+.album-tile.clickable:hover { border-color: var(--gold); box-shadow: 0 0 10px #ffd76a44; }
+.disc-item.clickable { cursor: pointer; }
+.disc-item.clickable:hover { background: #332b48; }
+.pi-info {
+  flex: none; font-size: 13px; padding: 1px 4px; border-radius: 6px; cursor: pointer;
+  opacity: 0.6; border: 1px solid transparent;
+}
+.pi-info:hover { opacity: 1; background: #17131f; border-color: var(--gold); }
+#card-pop {
+  position: fixed; inset: 0; z-index: 280; /* ダイアログ(#overlay=100)の上に重なる独立レイヤー */
+  display: none; align-items: center; justify-content: center;
+  background: #000b; cursor: pointer;
+}
+#card-pop.show { display: flex; }
+.cd-box {
+  background: linear-gradient(180deg, #2a2340, var(--bg2) 120px);
+  border: 1px solid var(--gold);
+  outline: 1px solid #ffd76a33; outline-offset: 3px;
+  border-radius: 16px; padding: 20px 24px;
+  max-width: min(92vw, 560px); max-height: 86vh; overflow-y: auto;
+  box-shadow: 0 12px 48px #000d, 0 0 30px #ffd76a22;
+  position: relative;
+}
+.cd-close {
+  position: absolute; top: 8px; right: 10px; background: none; border: none;
+  color: var(--dim); font-size: 15px; cursor: pointer; font-family: inherit;
+}
+.cd-close:hover { color: var(--gold); }
+.cd-flex { display: flex; gap: 18px; align-items: flex-start; }
+.cd-card { flex: none; }
+.cd-info { flex: 1; min-width: 0; }
+.cd-name { font-size: 17px; font-weight: bold; color: var(--gold); margin-bottom: 8px; }
+.cd-row { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.7; }
+.cd-k { flex: none; width: 64px; color: var(--dim); }
+.cd-v { flex: 1; color: #e8e2f5; }
+.cd-v b { color: var(--gold); }
+.cd-wheel { margin-top: 2px; }
+.cd-abs { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+.cd-abs-t { font-size: 12px; color: var(--gold); font-weight: bold; margin-bottom: 4px; }
+.cd-ab { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; line-height: 1.6; margin-bottom: 4px; }
+.cd-ab b { flex: none; }
+.cd-ab span { color: #d8d2e8; }
+.cd-desc { font-size: 12.5px; color: #d8d2e8; line-height: 1.7; }
+.cd-hint { text-align: center; color: var(--dim); font-size: 11px; margin-top: 10px; }
+@media (max-width: 700px) {
+  .cd-flex { flex-direction: column; align-items: center; }
+}
 
 /* ---------- デッキ構築 ---------- */
 .builder { display: flex; gap: 12px; margin-bottom: 10px; }
