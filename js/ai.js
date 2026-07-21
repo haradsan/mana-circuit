@@ -25,12 +25,12 @@ let AI_PROFILE = AI_PROFILES.normal;
 function aiProf(p) { return (p && p.aiProfile) || AI_PROFILE; }
 
 // 相手全員（三つ巴では2人）が1〜6マス以内に踏み得るマスidの集合（防衛系スペルの判断用）。
-// v23（自由移動）: 正規ルートの前方に加えて逆走（backstepDests）も踏み得る
+// v24: 通常移動は順方向のみに戻ったため、逆走側（backstepDests）の警戒は外した
+// （逆走は🔄時流逆転・🎰時空の渦のときだけ＝稀なので前方だけ警戒する）
 function aiNearTilesOfOpponents(g, p) {
   const near = new Set();
   opponentsOf(g, p).forEach(q => {
     for (let n = 1; n <= 6; n++) near.add(walkAhead(g, q.pos, n).id);
-    backstepDests(g, q.pos, 6).forEach(t => near.add(t.id));
   });
   return near;
 }
@@ -115,6 +115,8 @@ function aiChooseSpell(g, p) {
     if (c.spell === "inspiration" && p.hand.length <= 3) return id;
     if (c.spell === "gravecall" && p.discard.length >= 2 && aiHandCards(p).filter(x => x.type === "creature").length <= 1) return id;
     if (c.spell === "deport" && aiPickDeportTarget(g, p)) return id;
+    if (c.spell === "reverse" && aiPickReverseTarget(g, p)) return id;
+    if (c.spell === "duplicate" && aiPickDuplicateTarget(g, p)) return id;
     if ((c.spell === "cursedice" || c.spell === "mudswamp") && aiPickSlowTarget(g, p)) return id;
     if (c.spell === "whisper" && aiPickStealTarget(g, p)) return id;
     if (c.spell === "manaburn" && richestOpponent(g, p).magic >= 450) return id;
@@ -168,6 +170,46 @@ function aiPickDeportTarget(g, p) {
   if (cands.length === 0) return null;
   cands.sort((a, b) => assetsOf(g, b) - assetsOf(g, a));
   return cands[0];
+}
+// 🔄 時流逆転（v24）: 相手の「反転後の進路」に自分の高額地が並ぶとき、反転させて通行料地帯へ押し返す。
+// 進路は各プレイヤーの向き（cameFrom）から moveOptions の既定候補で近似する
+function aiPickReverseTarget(g, p) {
+  // fromId を背後として既定ルートで n マス歩いたときに踏むタイル列
+  const walkTiles = (pos, fromId, n) => {
+    const out = [];
+    let prev = fromId, cur = pos;
+    for (let i = 0; i < n; i++) {
+      const nxt = moveOptions(g, g.tiles[cur], prev)[0];
+      if (!nxt) break;
+      prev = cur; cur = nxt.id;
+      out.push(g.tiles[cur]);
+    }
+    return out;
+  };
+  const myTollOn = tiles => tiles.reduce((s, t) =>
+    s + (t.type === "LAND" && t.owner === p.id && t.creature ? tollOf(g, t) : 0), 0);
+  let best = null, bestGain = 0;
+  for (const q of opponentsOf(g, p)) {
+    if (q.skipTurn) continue;
+    const fwd = moveOptions(g, g.tiles[q.pos], q.cameFrom ?? null)[0];
+    if (!fwd) continue;
+    const ahead = walkTiles(q.pos, q.cameFrom ?? null, 6); // 今の進路
+    const back = walkTiles(q.pos, fwd.id, 6);              // 反転後の進路（前方を背後にして歩く）
+    const gain = myTollOn(back) - myTollOn(ahead);
+    if (gain > bestGain) { bestGain = gain; best = q; }
+  }
+  return bestGain >= 150 ? best : null; // 反転で自領の高額地帯へ押し返せる時だけ使う
+}
+// 🧪 増殖の秘薬（v24）: 手札が細いとき、場の主力（85G以上。🐺群れ持ちは優先）を複製して厚みを増す
+function aiPickDuplicateTarget(g, p) {
+  if (p.hand.length > 4) return null;
+  const score = t => {
+    const c = CARD_BY_ID[t.creature.cardId];
+    return c.cost + (c.ab.includes("pack") ? 40 : 0) + (c.ab.includes("split") ? 40 : 0);
+  };
+  const cands = ownedLands(g, p.id).filter(t => t.creature).sort((a, b) => score(b) - score(a));
+  if (cands.length === 0) return null;
+  return CARD_BY_ID[cands[0].creature.cardId].cost >= 85 || score(cands[0]) >= 100 ? cands[0] : null;
 }
 // 呪いのダイス/泥沼: 勝ちに近い相手の歩みを鈍らせる
 function aiPickSlowTarget(g, p) {
@@ -418,7 +460,7 @@ function aiChooseLevelUp(g, p, tile) {
   return tile.level < aiProf(p).levelSingle && p.magic > cost + 300;
 }
 
-// --- 進む方向の選択（v23: 自由移動）: moveOptions の候補ごとに「既定ルート近似」で
+// --- 進む方向の選択（v24: 方向つき移動＝分岐でのみ呼ばれる）: moveOptions の候補ごとに「既定ルート近似」で
 //     stepsLeft 先まで歩いて評価し、最も実りのある方向のタイルidを返す ---
 function aiChooseDirection(g, p, tile, stepsLeft, prevId = null) {
   const opts = moveOptions(g, tile, prevId);
@@ -657,11 +699,10 @@ function aiPickGrowthTarget(g, p) {
   return lands[0];
 }
 
-// 相手が1〜6マス以内に踏み得るマスidの集合（v23: 自由移動＝逆走側も含める）
+// 相手が1〜6マス以内に踏み得るマスidの集合（v24: 順方向のみ警戒。逆走はスペル/イベント限定＝稀）
 function aiNearTiles(g, player) {
   const near = new Set();
   for (let n = 1; n <= 6; n++) near.add(walkAhead(g, player.pos, n).id);
-  backstepDests(g, player.pos, 6).forEach(t => near.add(t.id));
   return near;
 }
 

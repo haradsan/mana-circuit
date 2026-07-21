@@ -715,6 +715,7 @@ async function castSpell(p, cardId) {
     if (p.pos === 0) { if (!p.isCPU) log("すでに城にいます", "warn"); return false; }
     pay();
     p.pos = 0;
+    p.cameFrom = null; // 城からの再出発＝方向リセット
     log(`✨ ${p.name}のリコール！ 城へ帰還した`);
     renderBoard(G);
     // リコールは城に「ぴったり着地」＝exact。領地コントロール（全自領で1アクション）は必ず得られ、
@@ -824,6 +825,7 @@ async function castSpell(p, cardId) {
     }
     pay();
     p.pos = target.id;
+    p.cameFrom = null; // 飛び先では方向未確定＝どの方向へも出発できる
     log(`💫 ${p.name}のテレポート！ ${tileName(target)}へ飛んだ`);
     renderBoard(G);
 
@@ -1240,6 +1242,7 @@ async function castSpell(p, cardId) {
     if (!target) return false;
     pay();
     p.pos = target.id;
+    p.cameFrom = null; // 戻った先では方向未確定＝どの方向へも出発できる
     log(`↩️ ${p.name}のバックステップ！ ${tileName(target)}へ戻った`);
     renderBoard(G);
 
@@ -1270,8 +1273,56 @@ async function castSpell(p, cardId) {
     p.pos = target.pos;
     target.pos = tmp;
     p.lastPath = [];
+    p.cameFrom = null;      // 入れ替わった先では両者とも方向未確定
+    target.cameFrom = null;
     log(`♟️ ${p.name}のポジションスワップ！ ${target.name}とコマの位置が入れ替わった`, "warn");
     renderBoard(G);
+
+  } else if (c.spell === "reverse") {
+    // 🔄 時流逆転（v24）: プレイヤー1人（自分も可）の進行方向を反転させる。
+    // 通常移動は順方向のみ（v24）のため、逆走はこのスペルと🎰運命マスの渦でしか起きない
+    let target;
+    if (p.isCPU) {
+      target = aiPickReverseTarget(G, p);
+      if (!target) return false;
+    } else {
+      const res = await showDialog({
+        title: "🔄 時流逆転 — 対象を選択",
+        body: "進行方向を反転させるプレイヤーを選んでください（<b>自分</b>を選べば来た道を戻れます）",
+        peek: true,
+        buttons: G.players.filter(q => q.alive).map(q => ({
+          label: `${P_ICONS[q.id] || ""} ${esc(q.name)}${q.id === p.id ? "（自分）" : ""}`,
+          value: String(q.id),
+        })).concat([{ label: "やめる", value: "cancel" }]),
+      });
+      if (res.action === "cancel" || res.action === "dismiss") return false;
+      target = G.players[Number(res.action)];
+    }
+    pay();
+    reverseDirection(G, target);
+    SFX.spell();
+    log(`🔄 ${p.name}の時流逆転！ ${target.name}の進行方向が反転した`, target.id === p.id ? undefined : "warn");
+    renderBoard(G);
+
+  } else if (c.spell === "duplicate") {
+    // 🧪 増殖の秘薬（v24）: 自分の場のクリーチャー1体と同名のカードを手札に加える
+    // （🐺群れ・🫧分裂・🔁転生などと組むコンボ用。コレクションには影響しない＝対戦内だけの複製）
+    const mine = ownedLands(G, p.id).filter(t => t.creature);
+    let target;
+    if (p.isCPU) {
+      target = aiPickDuplicateTarget(G, p);
+      if (!target) return false;
+    } else {
+      target = await humanPickLand(mine, "🧪 増殖の秘薬 — 対象を選択",
+        "自分の場のクリーチャー1体を選ぶと、<b>同名カード1枚</b>が手札に加わります（🐺群れ・🫧分裂と好相性）",
+        "自分のクリーチャーがいません");
+      if (!target) return false;
+    }
+    pay();
+    const copyId = target.creature.cardId;
+    p.hand.push(copyId);
+    log(`🧪 ${p.name}の増殖の秘薬！ ${CARD_BY_ID[copyId].name}の同名カードが手札に加わった`);
+    await enforceHandLimit(p);
 
   } else if (c.spell === "deport") {
     const target = p.isCPU ? aiPickDeportTarget(G, p)
@@ -1280,6 +1331,7 @@ async function castSpell(p, cardId) {
     pay();
     target.pos = 0;
     target.lastPath = [];
+    target.cameFrom = null; // 城からの再出発＝方向リセット
     log(`🏰 ${p.name}の強制送還！ ${target.name}は城へ送り返された（周回はつかない）`, "warn");
     renderBoard(G);
 
@@ -1716,11 +1768,12 @@ async function humanPickLand(candidates, title, body, emptyMsg) {
 }
 
 // ---------- 移動 ----------
-// v23（自由移動）: 各歩で moveOptions（隣接の双方向・即Uターン禁止・➡一方通行/🚧封鎖を考慮）から
-// 進む先を選ぶ。候補が複数なら人間は選択ダイアログ・CPUは先読み評価。移動の最初の1歩は
-// prevId=null＝どの方向へも出発できる（逆走・迂回が自由にできる）
+// v24（方向つき移動）: 各歩で moveOptions（背後を除いた隣接・➡一方通行/🚧封鎖を考慮）から進む先を選ぶ。
+// 背後＝移動中は直前のマス、移動開始時は p.cameFrom（前のターンに来た方向）＝通常は逆走できない。
+// 分岐・交差で候補が複数なら人間は選択ダイアログ・CPUは先読み評価。ゲーム開始直後や
+// テレポート等の直後は cameFrom=null＝🧭どの方向へも出発できる
 async function movePlayer(p, steps) {
-  let prevId = null; // この移動で直前にいたマス（即Uターン禁止用）
+  let prevId = p.cameFrom ?? null; // 背後のマス（逆走禁止用。旧セーブ互換で undefined も null に）
   for (let i = 0; i < steps; i++) {
     const cur = G.tiles[p.pos];
     const opts = moveOptions(G, cur, prevId);
@@ -1731,6 +1784,7 @@ async function movePlayer(p, steps) {
         : await humanChooseDirection(p, cur, steps - i, prevId);
     }
     prevId = cur.id;
+    p.cameFrom = cur.id; // 進行方向を記憶（次のターンもこの方向を保つ）
     p.pos = nextId;
     p.lastPath.push(p.pos);
     renderBoard(G);
@@ -1840,6 +1894,7 @@ async function tileAction(p, tile) {
     case "WARP": {
       await sleep(300);
       p.pos = tile.warpTo;
+      p.cameFrom = null; // ワープ先では方向未確定＝どの方向へも出発できる
       p.lastPath.push(p.pos);
       SFX.spell();
       log(`🌀 ${p.name}はワープした！`);
@@ -1871,18 +1926,23 @@ async function tileAction(p, tile) {
       if (r < 0.10) {
         p.magic += 300; SFX.coin();
         log(`🎉 大当り！ 女神の祝福で +300G！`, "warn");
-      } else if (r < 0.40) {
+      } else if (r < 0.35) {
         p.magic += 150; SFX.coin();
         log(`💰 当り！ +150G`);
-      } else if (r < 0.65) {
+      } else if (r < 0.60) {
         const a = drawCard(G, p), b = drawCard(G, p);
         log(`🎴 運命の導き！ カードを${(a ? 1 : 0) + (b ? 1 : 0)}枚ドロー`);
         if (a && !p.isCPU) await animateDraw(CARD_BY_ID[a]);
         if (b && !p.isCPU) await animateDraw(CARD_BY_ID[b]);
         await enforceHandLimit(p);
-      } else if (r < 0.85) {
+      } else if (r < 0.80) {
         p.diceMult = 2;
         log(`🎲 追い風の予感！ 次のダイスの出目が2倍になる`);
+      } else if (r < 0.90) {
+        // 🌀 時空の渦（v24）: 進行方向が反転するイベント（逆走はスペルとこれでのみ起きる）
+        reverseDirection(G, p);
+        SFX.spell();
+        log(`🌀 時空の渦に呑まれた！ ${p.name}の進行方向が反転した`, "warn");
       } else {
         const loss = Math.min(100, p.magic);
         p.magic -= loss; SFX.hit();
@@ -2501,6 +2561,19 @@ async function doMarch(p, src, dst, itemId = null) {
   log(`🏇 ${p.name}の${card.name}が${tileName(src)}から${tileName(dst)}へ侵攻！（${cost > 0 ? `行軍費 -${cost}G` : "🎺進軍号令＝行軍費なし"}）`, "battle");
   renderAll(G);
 
+  // 🫧 分裂（v24・split）: 侵攻で移動先を占領できたとき、元の土地にも分裂体が残る（HPは折半・切り上げ）
+  // ＝元の土地は自領のまま「元と移動先」の2体に増える。無力化の霧（nulled）中は発動しない
+  const trySplit = () => {
+    if (!card.ab.includes("split") || creatureNulled(G, dst.creature)) return false;
+    const half = Math.max(1, Math.ceil(currentHp(dst.creature) / 2));
+    dst.creature.hp = half;
+    src.owner = p.id;
+    src.creature = { cardId: card.id, hp: half };
+    SFX.summon();
+    log(`🫧 ${card.name}の分裂！ ${tileName(src)}にも分裂体が残った（HPは${half}ずつに折半）`, "battle");
+    return true;
+  };
+
   if (dst.owner === null) {
     // 無血占領: クリーチャーごと領地が移る
     dst.owner = p.id;
@@ -2508,7 +2581,8 @@ async function doMarch(p, src, dst, itemId = null) {
     src.owner = null;
     src.creature = null;
     SFX.summon();
-    log(`🏇 ${card.name}は${tileName(dst)}を無血占領した！ 元の土地は空き地に戻った`);
+    if (!trySplit()) log(`🏇 ${card.name}は${tileName(dst)}を無血占領した！ 元の土地は空き地に戻った`);
+    else log(`🏇 ${card.name}は${tileName(dst)}を無血占領した！`);
   } else {
     // 敵地: 通常侵略と同じアイテム応酬つきバトル
     const attItem = itemId ? CARD_BY_ID[itemId] : null;
@@ -2538,6 +2612,7 @@ async function doMarch(p, src, dst, itemId = null) {
       src.owner = null;
       src.creature = null;
       log(`🏇 ${card.name}は${tileName(dst)}を制圧した！`, "battle");
+      trySplit(); // 🫧分裂: 制圧に成功したら元の土地にも分裂体が残る（v24）
       grantWarfire(p); // 🔥狼煙台（戦意）: 侵攻勝利ボーナス（v19）
     } else if (result.attHp > 0) {
       // 引き分け・両者生存: 侵攻側は傷を負って元の領地へ撤退。領地の変動なし
@@ -2616,7 +2691,7 @@ function showTileInfo(tile) {
       WARP:   "🌀 ワープマス — 止まると対のマスへ移動する",
       MAGMA:  `🌋 マグママス — 止まると魔力を失う（-${RULES.magmaLoss}G）`,
       BOOST:  "💨 疾風マス — 止まるとさらに2マス進む",
-      FORTUNE: "🎰 運命マス — 止まるとルーレット！ 大当り+300G／+150G／2枚ドロー／次のダイス2倍／はずれ-100G のどれかが起きる",
+      FORTUNE: "🎰 運命マス — 止まるとルーレット！ 大当り+300G／+150G／2枚ドロー／次のダイス2倍／🌀時空の渦（進行方向が反転）／はずれ-100G のどれかが起きる",
       SPRING: "⛲ 泉マス — 止まると自軍クリーチャーのHPが全回復＋60G",
     };
     parts.push(descs[tile.type] || "");
@@ -2734,8 +2809,11 @@ function showHelp() {
       <b>🎁 シールド戦</b>: その場で開封した<b>第一弾5＋第二弾5パック（計50枚）</b>だけで30枚デッキを組んで1戦する特別モード。
       開封プールは<b>使い捨て</b>（コレクションには入らない）なので、コレクションの厚さに関係なく誰でも対等に遊べる。勝てば通常の勝利報酬あり（進行度は変化しない）。<br><br>
       <b>ターンの流れ</b>: カードを1枚引く → （任意で手札のスペルをクリックして使用・1回まで）→ 🎲ダイスで移動<br>
-      <b>🧭 移動の方向は自由</b>: ダイスを振ったら<b>好きな方向へ</b>進める（逆走・迂回もOK）。毎ターン最初の1歩で方向を選び、
-      分かれ道でも自由にルートを選べる。ただし<b>同じ移動の中で直前のマスへ引き返す（即Uターン）ことはできない</b>。<br>
+      <b>🧭 移動は進行方向へ（v24）</b>: コマは<b>今の進行方向を保って</b>進む＝<b>逆走はできない</b>。
+      分かれ道・交差点では背後以外の<b>行く手を選べる</b>（ルートプレビュー付きダイアログ）。
+      ゲーム開始直後・💫テレポート・🌀ワープ・城への帰還などの直後は方向が未確定＝どの方向へも出発できる。<br>
+      <b>🔄 逆方向へ進むには</b>: <b>時流逆転</b>（スペル。自分に使えば来た道を戻れる／相手に使えば高額地帯へ押し返せる）か、
+      🎰運命マスの<b>時空の渦</b>（イベント）で進行方向が反転したときだけ。相手から強制的に反転させられることもある。<br>
       <b>➡ 一方通行マス</b>: 大きな矢印が明滅しているマスは<b>矢印の方向へしか進めない特別マス</b>（出口側から入ることもできない）。
       S10の地獄回廊・S14の歯車道など、盤面の見どころとして残る唯一の方向制限。<br><br>
       <b>マスに止まったとき — このターンの「能動的な行動」は合計1回だけ（その発動場所が①到達マスか②通過マスに変わる）</b><br>
@@ -2772,7 +2850,7 @@ function showHelp() {
       ・敵の土地 … 通行料を支払う or クリーチャーで侵略バトル<br>
       ・🎴カード＝1枚ドロー ／ 💎魔力＝魔力ゲット ／ ⛩️関門＝通過でボーナス<br>
       ・🌀ワープ＝対のマスへ移動 ／ 🌋マグマ＝魔力を失う ／ 💨疾風＝さらに2マス進む<br>
-      ・🎰<b>運命</b>＝ルーレット（大当り+300G／+150G／2枚ドロー／次のダイス2倍／はずれ-100G） ／
+      ・🎰<b>運命</b>＝ルーレット（大当り+300G／+150G／2枚ドロー／次のダイス2倍／🌀時空の渦＝進行方向が反転／はずれ-100G） ／
       ⛲<b>泉</b>＝自軍クリーチャー全回復＋60G<br><br>
       <b>連鎖</b>: 同じ属性の土地を複数持つと通行料が倍増（2つ→×1.5、3つ→×2.0、4つ以上→×2.5）<br>
       <b>周回</b>: 関門を規定数そろえて城を<b>通過または停止</b>すると<b>周回ボーナス＝魔力（基本${DEFAULT_RULES.lapBase}G＋所有土地×40G）＋自軍クリーチャーHP全回復</b>。大きく劣勢のときは魔力<b>1.5倍</b>！<br>

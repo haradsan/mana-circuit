@@ -91,6 +91,7 @@ const TARGETED_SPELLS = new Set([
   "quake", "drain", "plunder", "revenge", "vanish", "gust", "meteor", "freeze", "steal",
   "curseland", "grandquake", "nullfog", "silencefog", "cursedice", "mudswamp", "whisper",
   "manaburn", "deport", "posswap", "freezerain", "r_blaze", "r_storm", "roadblock",
+  "reverse", // 🔄時流逆転（v24）: プレイヤー1人の進行方向を反転
 ]);
 // 停戦協定: 侵略・侵攻が禁止されているか
 function truceActive(g) { return !!activeFx(g, "truce"); }
@@ -160,14 +161,18 @@ function neighborsOf(g, tile) {
   return [...ids].map(id => g.tiles[id]);
 }
 
-// ---------- 自由移動（v23） ----------
-// ダイス移動は「隣接マスならどちらの方向へ進んでもよい」（迂回・逆走OK）。制限は次の3つだけ:
-//   ① 同じ移動の中で直前にいたマスへは戻れない（即Uターン禁止＝その場往復で着地を選び放題になるのを防ぐ。
-//      移動の最初の1歩はどの方向でも選べる）
+// ---------- 方向つき移動（v24。v23の自由移動を「順方向のみ」へ変更） ----------
+// ダイス移動は「進行方向」を保って進む。制限は次の3つ:
+//   ① 背後のマス（prevId＝移動中は直前のマス・移動開始時は p.cameFrom＝前のターンに来た方向）へは戻れない
+//      ＝通常は逆走できない。分岐・交差では背後以外から行く手を選べる。
+//      逆方向へ進めるのは 🔄時流逆転（スペル）・🎰運命マスの時空の渦（イベント）で反転させられた時だけ
+//      （reverseDirection＝背後を「前方」に差し替える）。ゲーム開始直後・テレポート等の直後は
+//      cameFrom=null＝どの方向へも出発できる
 //   ② ➡一方通行マス（tile.onewayTo）からは指定方向へしか出られず、出口側から入ることもできない
 //      （盤面の特別マス。S10地獄回廊・S14歯車道など）
 //   ③ 🚧バリケード（スペル・overlay kind:"block"）のマスへは進入できない
-// ②③で候補が全滅する場合は例外的に制限を無視する（袋小路で動けなくなるのを防ぐ保険）
+// ②③で候補が全滅する場合は例外的に制限を無視する（袋小路で動けなくなるのを防ぐ保険）。
+// ①も候補が背後しか残らない場合（行き止まり・全封鎖）は引き返せる＝閉じ込めは起きない
 function moveOptions(g, tile, prevId = null) {
   if (tile.onewayTo != null) return [g.tiles[tile.onewayTo]];
   const all = neighborsOf(g, tile);
@@ -185,8 +190,16 @@ function moveOptions(g, tile, prevId = null) {
   return opts;
 }
 
-// 自由移動の「既定ルート」近似: prev を除いた最初の候補を辿って steps 進んだ先のタイル。
-// （AIの着地予測・ルートプレビュー用。walkAhead の自由移動版）
+// 🔄 進行方向の反転（v24）: 「今の前方」を背後に差し替える＝次の移動から逆向きに進む。
+// 発生源は 時流逆転スペル と 🎰運命マスの時空の渦 のみ。cameFrom=null（方向未確定）の時は
+// 既定の前方（moveOptionsの先頭候補）を背後にする＝正規ルートの逆向きへ
+function reverseDirection(g, p) {
+  const fwd = moveOptions(g, g.tiles[p.pos], p.cameFrom)[0];
+  p.cameFrom = fwd ? fwd.id : null;
+}
+
+// 既定ルートの近似: prev を除いた最初の候補を辿って steps 進んだ先のタイル。
+// （AIの着地予測・ルートプレビュー用。walkAhead の方向つき版）
 function walkFreeAhead(g, fromId, startId, steps) {
   let prev = fromId, cur = startId;
   for (let i = 1; i < steps; i++) {
@@ -373,6 +386,7 @@ function newGame(stageIdx = 0, opts = {}) {
       forcedDice: null,   // ホーリーワードで指定した目
       diceMult: null,     // ダイスブーストで次の出目を倍にする（2）
       lastPath: [],       // このターンの移動で通過したマスid（クリーチャー侵攻の出撃元判定用）
+      cameFrom: null,     // 背後のマスid（v24: 進行方向の記憶。null=方向未確定＝どの方向へも出発できる）
       passAllLands: false,// 周回達成ターンは全ての自領を②通過アクションの対象にする（城ぴったり到達・リコール）
       skipTurn: false,    // 次のターン休みか（捕縛/フリーズ）
       skipReason: null,   // skipTurnの理由: "capture"=🕸️捕縛 / "freeze"=❄️フリーズ（表示メッセージの出し分け用）
@@ -557,6 +571,7 @@ async function forcePay(g, payer, amount, receiver, logFn, chooseFn = null) {
     payer.pos = 0;
     payer.gates.clear();
     payer.lastPath = [];
+    payer.cameFrom = null; // 城からの再出発＝方向はリセット（どの方向へも出発できる）
     logFn(`🏰 ${payer.name}は全てを失い、城へ帰還して再起を図る（初期魔力${RULES.startMagic}Gで再スタート）`, "warn");
     if (typeof SFX !== "undefined" && SFX.lose) SFX.spell();
     if (typeof cpuSay === "function") cpuSay(payer, "restart");

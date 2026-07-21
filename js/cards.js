@@ -57,6 +57,8 @@ const ABILITY_INFO = {
   rebirth:  { name: "転生", desc: "バトルで倒されても消滅せず手札に戻る（土地は失う）" },
   fly:      { name: "飛翔", desc: "侵攻（march）で2マス先まで移動できる" },
   dispel:   { name: "看破", desc: "バトルで相手のアイテムを打ち消す（ディスペルワードを内蔵）" },
+  // v24: 分裂＝侵攻で領地を増やすたび、自分も増える希少特性（スプリットウーズ専用）
+  split:    { name: "分裂", desc: "侵攻（march）で移動先を占領すると、元の土地にも分裂体が残る（HPは折半・元の土地は自領のまま）。🐺群れ・🧪増殖の秘薬と好相性" },
   // 建造物のオーラ（個別効果）。建造物はST0・不動・バトルで反撃しない据え付けの施設
   beacon:   { name: "烽火", desc: "隣接する自領の防衛クリーチャーの ST+10（援護に加算）" },
   garden:   { name: "癒しの庭", desc: "隣接する自軍クリーチャーは自分のターン開始時に HP+10 回復する" },
@@ -357,6 +359,7 @@ const CARD_DB = [
   { id: "umibozu",      name: "ウミボウズ",       type: "creature", element: "water", set: 2, cost: 120, st: 60, hp: 60, ab: ["absorb"], rarity: "rare" },
   { id: "frostdragon",  name: "氷竜フロストドラゴン", type: "creature", element: "water", set: 2, cost: 130, st: 65, hp: 60, ab: ["magicatk"], rarity: "rare" },
   { id: "maelstrom",    name: "大渦の主メイルシュトローム", type: "creature", element: "water", set: 2, cost: 145, st: 65, hp: 75, ab: ["absorb", "capture"], rarity: "legendary" },
+  { id: "splitooze",    name: "スプリットウーズ", type: "creature", element: "water", set: 2, cost: 85,  st: 25, hp: 40, ab: ["split"], rarity: "rare" }, // v24: 希少特性🫧分裂＝侵攻で占領するたび元の土地にも分裂体（HP折半）。🐺群れ(同属性)・🧪増殖の秘薬とコンボ
   // --- 無属性（機械・時間・メタ。全員レア以上＝パック/交換所でのみ入手） ---
   { id: "tinsoldier",   name: "ブリキ兵ティンソルジャー", type: "creature", element: "neutral", set: 2, cost: 50, st: 30, hp: 30, ab: ["pack"], rarity: "rare" },
   { id: "clockbeetle",  name: "クロックワークビートル", type: "creature", element: "neutral", set: 2, cost: 55, st: 25, hp: 40, ab: ["armor"], rarity: "rare" },
@@ -450,6 +453,8 @@ const CARD_DB = [
   { id: "marchorder", name: "進軍号令",     type: "spell", set: 2, cost: 70, spell: "marchorder", rarity: "uncommon", noCpu: true, icon: "🎺", desc: "このターン、行軍費なしで②クリーチャー侵攻を行える（①で行動していても②の権利が残る）" },
   { id: "regroup",    name: "集結",         type: "spell", set: 2, cost: 90, spell: "regroup", rarity: "rare", noCpu: true, icon: "🔀", desc: "自分のクリーチャー2体の位置を入れ替える（HP・土地レベルはそのまま）" },
   { id: "posswap",    name: "ポジションスワップ", type: "spell", set: 2, cost: 100, spell: "posswap", rarity: "rare", noCpu: true, icon: "♟️", desc: "相手のコマと自分のコマの位置を入れ替える（マスの効果は発動しない）" },
+  { id: "timereverse", name: "時流逆転",     type: "spell", set: 2, cost: 55, spell: "reverse", rarity: "uncommon", icon: "🔄", desc: "プレイヤー1人（自分も可）の進行方向を反転させる（v24: 通常は逆走できない——自分に使えば来た道を戻り、相手に使えば高額地帯へ押し返せる）" }, // v24
+  { id: "mitosis",     name: "増殖の秘薬",   type: "spell", set: 2, cost: 75, spell: "duplicate", rarity: "rare", icon: "🧪", desc: "自分の場のクリーチャー1体を選び、その同名カード1枚を手札に加える（🐺群れ・🫧分裂・🔁転生と組むコンボの核）" }, // v24
   { id: "deport",     name: "強制送還",     type: "spell", set: 2, cost: 120, spell: "deport", rarity: "rare", icon: "🏰", desc: "相手のコマを城へ送り返す（周回はつかない。凱旋間際の相手を押し戻せ）" },
   // --- バトル支援（5種） ---
   { id: "bravery",   name: "決死の覚悟",   type: "spell", set: 2, cost: 40, spell: "bravery", noCpu: true, icon: "🎯", desc: "次の自分のバトルで会心率50%（会心＝ダメージ1.5倍）" },
@@ -470,7 +475,7 @@ const CARD_DB = [
   { id: "cursedice",  name: "呪いのダイス", type: "spell", set: 2, cost: 60, spell: "cursedice", rarity: "uncommon", icon: "🎲", desc: "相手の次の出目は1〜3になる（ホーリーワードで4以上を指定していても3に抑え込む）" },
   { id: "mudswamp",   name: "泥沼",         type: "spell", set: 2, cost: 80, spell: "mudswamp", rarity: "uncommon", icon: "🟤", desc: "相手の次の移動は出目が半分になる（切り上げ）" },
   { id: "roadblock",  name: "バリケード",   type: "spell", set: 2, cost: 70, spell: "roadblock", rarity: "uncommon", fx: true, noCpu: true, icon: "🚧",
-    desc: "【盤面】土地1つに2Rの通行封鎖。全プレイヤー（自分も含む）はそのマスへ進入できず、迂回を強いられる（v23の自由移動を制限する妨害）" },
+    desc: "【盤面】土地1つに2Rの通行封鎖。全プレイヤー（自分も含む）はそのマスへ進入できず、迂回を強いられる（進路を塞ぐ妨害。全方向を塞がれたコマは例外的に通れる）" },
   { id: "whisper",    name: "悪夢の囁き",   type: "spell", set: 2, cost: 85, spell: "whisper", rarity: "rare", icon: "😈", desc: "相手の手札からランダムに1枚捨てさせる" },
   { id: "manaburn",   name: "マナバーン",   type: "spell", set: 2, cost: 90, spell: "manaburn", rarity: "rare", icon: "🔥", desc: "相手の魔力の20%を消滅させる（奪えない・上限300G。富豪への嫌がらせ）" },
   { id: "nullfog",    name: "無力化の霧",   type: "spell", set: 2, cost: 95, spell: "nullfog", rarity: "rare", icon: "🌫️", desc: "敵クリーチャー1体の能力をすべて消す（2ラウンド。アイテムで得る能力は消えない）" },

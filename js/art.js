@@ -593,6 +593,7 @@ const CREATURE_ART = {
   umibozu:       { arch: "golem",    o: { blob: 1, big: 1 } },
   frostdragon:   { arch: "dragon" },
   maelstrom:     { arch: "jelly",    o: { big: 1 } },
+  splitooze:     { arch: "golem",    o: { blob: 1 } }, // v24: 分裂するスライム（leechslimeと同系のぷるぷる造形）
   // 無
   tinsoldier:    { arch: "humanoid", o: { small: 1, sword: 1, shield: 1 } },
   clockbeetle:   { arch: "insect" },

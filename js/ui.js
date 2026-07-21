@@ -963,7 +963,7 @@ function dirArrow(from, to) {
   return dy > 0 ? "⬇" : "⬆";
 }
 
-// startId から既定ルート（自由移動の近似＝直前マスへ戻らない最初の候補）で進んだ場合の
+// startId から既定ルート（方向つき移動の近似＝背後のマスへ戻らない最初の候補）で進んだ場合の
 // マスアイコン列（【】=止まる予定のマス）。fromId は startId へ入る直前のマス（Uターン除外用）
 function routePreview(g, startId, steps, fromId = null) {
   const icons = [];
@@ -981,8 +981,8 @@ function routePreview(g, startId, steps, fromId = null) {
   return icons.join(" ") + (steps > shown ? " …" : "");
 }
 
-// v23（自由移動）: 進める方向＝moveOptions（隣接の双方向から直前マスを除いたもの）。
-// 移動の最初の1歩は毎ターン全方向が候補になる（逆走・迂回OK）
+// v24（方向つき移動）: 進める方向＝moveOptions（隣接から背後＝prevIdを除いたもの）。
+// 通常は逆走できないため、このダイアログが出るのは分岐・交差か、方向未確定（🧭出発時）のときだけ
 async function humanChooseDirection(p, tile, stepsLeft, prevId = null) {
   const legend = G.hotseat ? "🔹=🔵1P 🔸=🔴2P"
     : G.players.length > 2 ? `🔹=自分 🔸=${esc(G.players[1].name)} 💚=${esc(G.players[2].name)}`
@@ -990,7 +990,7 @@ async function humanChooseDirection(p, tile, stepsLeft, prevId = null) {
   const opts = moveOptions(G, tile, prevId);
   const res = await showDialog({
     title: prevId === null ? "🧭 進む方向" : "🔀 分かれ道",
-    body: `残り${stepsLeft}マス。進む方向を選んでください（好きな方向へ進めます。【】=止まる予定のマス、${legend}の土地）`,
+    body: `残り${stepsLeft}マス。行く手を選んでください（背後には戻れません。【】=止まる予定のマス、${legend}の土地）`,
     peek: true,
     buttons: opts.map(nt => ({
       label: `${dirArrow(tile, nt)} ${routePreview(G, nt.id, stepsLeft, tile.id)}`,
