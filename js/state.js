@@ -96,6 +96,7 @@ const TARGETED_SPELLS = new Set([
   "curseland", "grandquake", "nullfog", "silencefog", "cursedice", "mudswamp", "whisper",
   "manaburn", "deport", "posswap", "freezerain", "r_blaze", "r_storm", "roadblock",
   "reverse", // 🔄時流逆転（v24）: プレイヤー1人の進行方向を反転
+  "snipe", "resistance", "uprising", "judgement", // ⚒️第三弾の逆転・決戦スペル（v29）
 ]);
 // 停戦協定: 侵略・侵攻が禁止されているか
 function truceActive(g) { return !!activeFx(g, "truce"); }
@@ -106,6 +107,51 @@ function landSpellShielded(g, tile) {
 }
 // カースランド: tile.curseUntil（通行料半減の期限ラウンド）
 function landCursed(g, tile) { return !!tile.curseUntil && tile.curseUntil >= g.round; }
+
+// ---------- 🃏 伏せ札（トラップ・v29） ----------
+// tile.trap = { cardId, owner }。自分の土地に裏向きで設置し、条件を満たすと公開・発動して捨札へ。
+// 土地の所有者が変わっていたら不発のまま所有者の捨札へ返す（overlayと同じlazy掃除方式＝
+// 侵略・売却・バニッシュ等どの経路で土地を失っても、次にアクセスした時点で片付く）
+function trapOf(g, tile) {
+  if (!tile || !tile.trap) return null;
+  if (tile.type !== "LAND" || tile.owner !== tile.trap.owner) {
+    const t = tile.trap;
+    tile.trap = null;
+    if (g && g.players[t.owner]) {
+      g.players[t.owner].discard.push(t.cardId);
+      if (typeof log === "function") log(`🃏 ${g.players[t.owner].name}の伏せ札（${CARD_BY_ID[t.cardId].name}）は土地とともに失われ、不発のまま捨札へ`, "warn");
+    }
+    return null;
+  }
+  return tile.trap;
+}
+// 発動・公開して捨札へ送る（発動処理そのものは main.js が行う）
+function discardTrap(g, tile) {
+  if (!tile.trap) return;
+  const t = tile.trap;
+  tile.trap = null;
+  if (g.players[t.owner]) g.players[t.owner].discard.push(t.cardId);
+}
+// 罠師（trapper・v29）: 盤上の自分の罠師の数（伏せ札発動時の報酬 +50G×体数 ＋1ドロー）
+function trapperCount(g, playerId) {
+  return g.tiles.filter(t => t.type === "LAND" && t.owner === playerId && t.creature &&
+    !creatureNulled(g, t.creature) && CARD_BY_ID[t.creature.cardId].ab.includes("trapper")).length;
+}
+
+// ---------- ⚔️ 決戦の刻・劣勢判定（v29） ----------
+// 劣勢＝自分の総資産が首位（自分以外で最大）の70%未満。反骨・逆転スペル・決戦のスペル割引が共有する唯一の判定
+function isUnderdog(g, p) {
+  const others = g.players.filter(q => q.id !== p.id);
+  if (others.length === 0) return false;
+  const top = Math.max(...others.map(q => assetsOf(g, q)));
+  return assetsOf(g, p) < top * COMEBACK_RATIO;
+}
+// スペルの実効コスト: ⚔️決戦の刻に劣勢者は25%OFF（切り捨て・最低10G）
+function spellCostOf(g, p, card) {
+  if (card.type !== "spell") return card.cost;
+  if (g && g.climax && isUnderdog(g, p)) return Math.max(10, Math.floor(card.cost * 0.75));
+  return card.cost;
+}
 // 無力化の霧: creature.nulledUntil（能力消失の期限ラウンド）
 function creatureNulled(g, creature) { return !!(creature && creature.nulledUntil && creature.nulledUntil >= g.round); }
 
@@ -465,6 +511,7 @@ function newGame(stageIdx = 0, opts = {}) {
     winner: null,
     weekly, // 適用中のウィークリールール（OFF/トレーニングなら null）
     fxList: [], // 全体エフェクト（第二弾スペル v20: 市場開放/魔力嵐/停戦協定など）
+    climax: false, // ⚔️決戦の刻（v29）: 凱旋リーチ発生 or ラウンド75%で発動し、以後ゲーム終了まで継続
   };
   // 初期手札5枚
   g.players.forEach(p => { for (let i = 0; i < 5; i++) drawCard(g, p); });

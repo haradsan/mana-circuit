@@ -73,6 +73,12 @@ const ABILITY_INFO = {
   cheer:      { name: "応援", desc: "隣接する自領のクリーチャーがバトルするとき、武具を貸すように ST+15 / HP+15 を与える（2体まで重複・自分のバトルには乗らない）" },
   siphon:     { name: "魔力強奪", desc: "バトルで与えたダメージと同量の魔力を相手から奪う（💰吸奪の武器と重ねられる）" },
   hybrid:     { name: "二形", desc: "クリーチャーとして召喚できるほか、バトル時に武具として装備もできる（装備した場合は使い切り）" },
+  // ---------- 第三弾「共鳴と策謀」の新能力（v29） ----------
+  resonance:  { name: "共鳴", desc: "所有者がスペルを使うたび、盤上のこのクリーチャーは ST/最大HP+5（🌱成長と同じ枠・上限+25）。スペルを撃つほど育つ" },
+  weaponlove: { name: "武芸", desc: "バトルでアイテム（二形・巻物も含む）を装備していると、さらに ST+15/HP+15。武具が手に馴染む達人" },
+  artificer:  { name: "工匠", desc: "バトルで装備した自分のアイテムは使い切りにならず、バトル後に手札へ戻る（このクリーチャーが生き残った場合）" },
+  trapper:    { name: "罠師", desc: "盤上にいる間、自分の🃏伏せ札が発動するたび +50G（罠師1体につき）。さらにカードを1枚引く（1発動につき1枚）" },
+  rebel:      { name: "反骨", desc: "バトル時、自分の総資産が首位の70%未満なら ST+20/HP+20。劣勢でこそ燃える闘志" },
 };
 
 // レア度: カードの希少度。card.rarity で個別指定、無ければコストとタイプから推定。
@@ -98,14 +104,15 @@ function cardSet(card) { return card.set || 1; }
 const CARD_SETS = [
   { set: 1, name: "第一弾", icon: "✦" },
   { set: 2, name: "第二弾「時流の回路」", icon: "⏳" },
+  { set: 3, name: "第三弾「共鳴と策謀」", icon: "⚡" },
 ];
 // レア度 → そのレア度のカードid一覧（パック排出で「レア度を決めてから一様に1枚選ぶ」ために使う）。
 // set指定（1/2）でその弾だけに絞る（null＝全弾。ウィークリー英雄の週などデッキ注入用）
 let _cardsByRarity = null;
 function cardsOfRarity(rarity, set = null) {
   if (!_cardsByRarity) {
-    _cardsByRarity = { all: {}, 1: {}, 2: {} };
-    ["all", 1, 2].forEach(k => RARITY_ORDER.forEach(r => { _cardsByRarity[k][r] = []; }));
+    _cardsByRarity = { all: {}, 1: {}, 2: {}, 3: {} };
+    ["all", 1, 2, 3].forEach(k => RARITY_ORDER.forEach(r => { _cardsByRarity[k][r] = []; }));
     CARD_DB.forEach(c => {
       const r = cardRarity(c);
       _cardsByRarity.all[r].push(c.id);
@@ -525,6 +532,78 @@ const CARD_DB = [
   { id: "fx_manastorm", name: "魔力嵐",       type: "spell", set: 2, cost: 120, spell: "fx_manastorm", fx: true, rarity: "rare", icon: "⚡", desc: "【盤面】2Rの間、すべての通行料1.5倍（全員＝土地持ちが得をする嵐）" },
   { id: "fx_silence",   name: "静寂のとばり", type: "spell", set: 2, cost: 100, spell: "fx_silence", fx: true, rarity: "rare", icon: "🌙", desc: "【盤面】2Rの間、対象を指定するスペル（メテオ/バニッシュ/ドレイン等）を全員使えない" },
   { id: "fx_goddess",   name: "女神の加護",   type: "spell", set: 2, cost: 130, spell: "fx_goddess", fx: true, rarity: "legendary", icon: "👼", desc: "【盤面】2Rの間、自分の土地の加護が2倍＋防衛の援護ST+10" },
+  // ============================================================
+  // ⚡ 第三弾「共鳴と策謀」（v29・55種）
+  // テーマ: コンボ（共鳴・武芸・工匠）／仕込み（伏せ札・罠師）／逆転と決戦（反骨・逆転/決戦スペル）
+  // 共鳴クリーチャーは素のST/HPを同コスト帯より控えめに（スペルで育てて逆転する）
+  // ============================================================
+  // --- クリーチャー: 火（7） ---
+  { id: "sparkfencer",  name: "スパークフェンサー", type: "creature", element: "fire", set: 3, cost: 45,  st: 30, hp: 25, ab: ["weaponlove"] },
+  { id: "embertrapper", name: "エンバートラッパー", type: "creature", element: "fire", set: 3, cost: 60,  st: 30, hp: 35, ab: ["trapper"], rarity: "uncommon" },
+  { id: "flamesmith",   name: "炎鍛冶フレイムスミス", type: "creature", element: "fire", set: 3, cost: 75, st: 35, hp: 40, ab: ["artificer"], rarity: "rare" },
+  { id: "rebelfiend",   name: "レベルフィーンド",   type: "creature", element: "fire", set: 3, cost: 85,  st: 45, hp: 40, ab: ["rebel"], rarity: "uncommon" },
+  { id: "duelistogre",  name: "デュエリストオーガ", type: "creature", element: "fire", set: 3, cost: 90,  st: 50, hp: 40, ab: ["weaponlove"], rarity: "uncommon" },
+  { id: "resonatedrake",name: "レゾナンスドレイク", type: "creature", element: "fire", set: 3, cost: 100, st: 50, hp: 45, ab: ["resonance"], rarity: "rare" },
+  { id: "blazebrand",   name: "焔剣竜ブレイズブランド", type: "creature", element: "fire", set: 3, cost: 150, st: 70, hp: 60, ab: ["weaponlove", "first"], rarity: "legendary" },
+  // --- クリーチャー: 木（7） ---
+  { id: "thornsetter",  name: "ソーンセッター",     type: "creature", element: "wood", set: 3, cost: 45,  st: 25, hp: 30, ab: ["trapper"] },
+  { id: "echoleaf",     name: "エコーリーフ",       type: "creature", element: "wood", set: 3, cost: 50,  st: 25, hp: 35, ab: ["resonance"] },
+  { id: "rebelelf",     name: "レジスタンスエルフ", type: "creature", element: "wood", set: 3, cost: 65,  st: 35, hp: 35, ab: ["rebel"], rarity: "uncommon" },
+  { id: "vinetrapper",  name: "ヴァイントラッパー", type: "creature", element: "wood", set: 3, cost: 70,  st: 35, hp: 40, ab: ["trapper", "capture"], rarity: "uncommon" },
+  { id: "greensmith",   name: "木工の匠グリーンスミス", type: "creature", element: "wood", set: 3, cost: 80, st: 30, hp: 50, ab: ["artificer"], rarity: "rare" },
+  { id: "spellbloom",   name: "スペルブルーム",     type: "creature", element: "wood", set: 3, cost: 95,  st: 40, hp: 50, ab: ["resonance", "guard"], rarity: "rare" },
+  { id: "echoent",      name: "共鳴樹エコーエント", type: "creature", element: "wood", set: 3, cost: 145, st: 60, hp: 80, ab: ["resonance", "immobile"], rarity: "legendary" },
+  // --- クリーチャー: 地（7） ---
+  { id: "pitgoblin",    name: "ピットゴブリン",     type: "creature", element: "earth", set: 3, cost: 40,  st: 25, hp: 25, ab: ["trapper"] },
+  { id: "shieldbearer", name: "シールドベアラー",   type: "creature", element: "earth", set: 3, cost: 55,  st: 20, hp: 50, ab: ["weaponlove"] },
+  { id: "rebeldwarf",   name: "反骨のドワーフ",     type: "creature", element: "earth", set: 3, cost: 60,  st: 30, hp: 40, ab: ["rebel"], rarity: "uncommon" },
+  { id: "runesmith",    name: "ルーンスミス",       type: "creature", element: "earth", set: 3, cost: 85,  st: 35, hp: 50, ab: ["artificer"], rarity: "rare" },
+  { id: "echogolem",    name: "エコーゴーレム",     type: "creature", element: "earth", set: 3, cost: 95,  st: 40, hp: 60, ab: ["resonance"], rarity: "uncommon" },
+  { id: "fortresstoad", name: "フォートレストード", type: "creature", element: "earth", set: 3, cost: 100, st: 30, hp: 70, ab: ["weaponlove", "guard"], rarity: "rare" },
+  { id: "gaiaresonant", name: "大地の共鳴主ガイアレゾナント", type: "creature", element: "earth", set: 3, cost: 150, st: 55, hp: 85, ab: ["resonance", "armor"], rarity: "legendary" },
+  // --- クリーチャー: 水（7） ---
+  { id: "bubbletrapper",name: "バブルトラッパー",   type: "creature", element: "water", set: 3, cost: 45,  st: 20, hp: 40, ab: ["trapper"] },
+  { id: "echofish",     name: "エコーフィッシュ",   type: "creature", element: "water", set: 3, cost: 50,  st: 25, hp: 35, ab: ["resonance"] },
+  { id: "rebelmerrow",  name: "反骨のメロウ",       type: "creature", element: "water", set: 3, cost: 65,  st: 35, hp: 35, ab: ["rebel"], rarity: "uncommon" },
+  { id: "harpoonmaid",  name: "ハープーンメイデン", type: "creature", element: "water", set: 3, cost: 75,  st: 40, hp: 40, ab: ["weaponlove"], rarity: "uncommon" },
+  { id: "tidesmith",    name: "潮の匠タイドスミス", type: "creature", element: "water", set: 3, cost: 80,  st: 30, hp: 50, ab: ["artificer"], rarity: "rare" },
+  { id: "mistcaster",   name: "ミストキャスター",   type: "creature", element: "water", set: 3, cost: 95,  st: 40, hp: 45, ab: ["resonance", "magicatk"], rarity: "rare" },
+  { id: "echoleviath",  name: "深淵竜エコーリヴァイア", type: "creature", element: "water", set: 3, cost: 150, st: 65, hp: 70, ab: ["resonance", "pierce"], rarity: "legendary" },
+  // --- クリーチャー: 無（2） ---
+  { id: "facelessduelist", name: "フェイスレスデュエリスト", type: "creature", element: "neutral", set: 3, cost: 110, st: 45, hp: 50, ab: ["weaponlove", "artificer"], rarity: "rare" },
+  { id: "paradoxwisp",  name: "パラドクスウィスプ", type: "creature", element: "neutral", set: 3, cost: 130, st: 40, hp: 40, ab: ["resonance", "spellproof", "magicatk"], rarity: "legendary" },
+  // --- アイテム（10） ---
+  { id: "resonanceedge",  name: "レゾナンスエッジ",   type: "item", set: 3, cost: 70, st: 15, hp: 0,  resonantSt: 8, rarity: "rare", desc: "ST+15。装備者の能力1つにつき さらにST+8（上限+32）＝多芸な使い手ほど鋭く共鳴する剣" },
+  { id: "resonanceaegis", name: "レゾナンスイージス", type: "item", set: 3, cost: 70, st: 0,  hp: 15, resonantHp: 8, rarity: "rare", desc: "HP+15。装備者の能力1つにつき さらにHP+8（上限+32）＝多芸な使い手ほど固く共鳴する盾" },
+  { id: "boomerangaxe",   name: "ブーメランアクス",   type: "item", set: 3, cost: 80, st: 25, hp: 0,  returning: true, rarity: "rare", desc: "ST+25。使い切りにならず、バトル後に手札へ戻る（装備者が倒された場合は戻らない）" },
+  { id: "desperateblade", name: "捨て身の刃デスペレート", type: "item", set: 3, cost: 65, st: 40, hp: -20, rarity: "uncommon", desc: "バトル時 ST+40 / HP-20（背水・反骨と好相性の諸刃の剣）" },
+  { id: "wardrum",        name: "軍鼓ウォードラム",   type: "item", set: 3, cost: 60, st: 10, hp: 0,  grant: ["assault"], rarity: "uncommon", desc: "ST+10・強襲を得る（侵略時さらにST+20＝攻めの太鼓）" },
+  { id: "guardbell",      name: "ガーディアンベル",   type: "item", set: 3, cost: 65, st: 0,  hp: 20, grant: ["capture"], rarity: "uncommon", desc: "HP+20・捕縛を得る（防衛で撃退した侵略者を1ターン拘束する守りの鐘）" },
+  { id: "chargerod",      name: "チャージロッド",     type: "item", set: 3, cost: 75, st: 10, hp: 0,  magicatk: true, grant: ["lucky"], rarity: "uncommon", desc: "ST+10・攻撃が魔法になり、豪運（会心率25%）を得る（雷を溜めて撃ち出す杖）" },
+  { id: "rebelplate",     name: "反骨の胸当て",       type: "item", set: 3, cost: 60, st: 0,  hp: 25, grant: ["rebel"], rarity: "uncommon", desc: "HP+25・反骨を得る（総資産が首位の70%未満ならST+20/HP+20）" },
+  { id: "grandbanner",    name: "大戦旗グランドバナー", type: "item", set: 3, cost: 85, st: 20, hp: 20, rarity: "rare", desc: "バトル時 ST+20 / HP+20（掲げる者に力と守りを）" },
+  { id: "trickdagger",    name: "トリックダガー",     type: "item", set: 3, cost: 65, st: 15, hp: 10, trapSynergy: 20, rarity: "rare", desc: "ST+15/HP+10。防衛時、この土地に自分の🃏伏せ札があれば さらにST+20/HP+20（罠と連携する暗器）" },
+  // --- スペル: 🃏伏せ札（トラップ）7種 ---
+  // trap:"invade"＝侵略・侵攻された瞬間に発動 / trap:"stop"＝敵が停止した瞬間に発動。
+  // 自分の土地に裏向きで設置（1つの土地に1枚）。発動したら公開して捨札へ。土地を失うと不発のまま捨札へ
+  { id: "trap_pit",    name: "ピットトラップ",   type: "spell", set: 3, cost: 50, spell: "settrap", trap: "invade", icon: "🕳️", desc: "【伏せ札】自分の土地に設置。侵略・侵攻された時に発動——落とし穴で侵略者のST-25" },
+  { id: "trap_bolt",   name: "カウンターボルト", type: "spell", set: 3, cost: 70, spell: "settrap", trap: "invade", rarity: "uncommon", icon: "⚡", desc: "【伏せ札】自分の土地に設置。侵略・侵攻された時に発動——バトルの前に侵略者へ30ダメージ（HPが尽きればバトルせず撃退）" },
+  { id: "trap_ambush", name: "アンブッシュ",     type: "spell", set: 3, cost: 65, spell: "settrap", trap: "invade", rarity: "uncommon", icon: "🗡️", desc: "【伏せ札】自分の土地に設置。侵略・侵攻された時に発動——伏兵が加勢し防衛側のST+25" },
+  { id: "trap_snatch", name: "マナスナッチ",     type: "spell", set: 3, cost: 55, spell: "settrap", trap: "stop", icon: "🧲", desc: "【伏せ札】自分の土地に設置。敵が停止した時に発動——その敵から60Gを奪う" },
+  { id: "trap_toll",   name: "二重徴収",         type: "spell", set: 3, cost: 60, spell: "settrap", trap: "stop", rarity: "uncommon", icon: "💰", desc: "【伏せ札】自分の土地に設置。敵が停止した時に発動——このマスの通行料が2倍になる" },
+  { id: "trap_sleep",  name: "スリープミスト",   type: "spell", set: 3, cost: 75, spell: "settrap", trap: "stop", rarity: "rare", icon: "💤", desc: "【伏せ札】自分の土地に設置。敵が停止した時に発動——眠り霧でその敵は次のターン1回休み" },
+  { id: "trap_gate",   name: "リターンゲート",   type: "spell", set: 3, cost: 90, spell: "settrap", trap: "stop", rarity: "rare", icon: "🌀", desc: "【伏せ札】自分の土地に設置。敵が停止した時に発動——通行料を取らずに、その敵を城へ強制送還する（周回はつかない）" },
+  // --- スペル: ⚒️逆転3種（underdog＝自分の総資産が首位の70%未満のときのみ使える） ---
+  { id: "snipe",      name: "スナイプショット", type: "spell", set: 3, cost: 80,  spell: "snipe", underdog: true, rarity: "uncommon", icon: "🎯", desc: "【逆転: 総資産が首位の70%未満のときのみ】首位のクリーチャー1体に50ダメージ（護法・結界は対象外）" },
+  { id: "resistance", name: "レジスタンス",     type: "spell", set: 3, cost: 90,  spell: "resistance", underdog: true, rarity: "rare", icon: "🔥", desc: "【逆転: 総資産が首位の70%未満のときのみ】首位の全土地を2ラウンドの間、通行料半減にする" },
+  { id: "uprising",   name: "アップライジング", type: "spell", set: 3, cost: 120, spell: "uprising", underdog: true, rarity: "rare", icon: "⚒️", desc: "【逆転: 総資産が首位の70%未満のときのみ】首位のLv3以上の土地1つをLv-2する（蜃気楼・結界は対象外）" },
+  // --- スペル: ⚔️決戦3種（climax＝決戦の刻のみ使える） ---
+  { id: "laststand",  name: "ラストスタンド",   type: "spell", set: 3, cost: 70,  spell: "laststand", climax: true, noCpu: true, rarity: "uncommon", icon: "⚔️", desc: "【決戦の刻のみ】次の自分のバトルで ST+30（防衛ならさらにHP+30）。攻めにも守りにも使える切り札" },
+  { id: "warchest",   name: "軍資金調達",       type: "spell", set: 3, cost: 100, spell: "warchest", climax: true, rarity: "uncommon", icon: "💰", desc: "【決戦の刻のみ】自分の土地1つにつき +35G（決戦の総力戦へ向けた資金集め）" },
+  { id: "judgement",  name: "ジャッジメント",   type: "spell", set: 3, cost: 130, spell: "judgement", climax: true, rarity: "legendary", icon: "⚖️", desc: "【決戦の刻のみ】最も魔力の多い相手から、その魔力の25%を奪う（決戦の天秤は富める者に傾かない）" },
+  // --- スペル: 🔧コンボ支援2種 ---
+  { id: "reforge",       name: "リフォージ",       type: "spell", set: 3, cost: 60, spell: "reforge", rarity: "uncommon", icon: "🔨", desc: "自分の捨て札からアイテムを1枚選んで手札に戻す（使ったあの武具をもう一度）" },
+  { id: "resonancecall", name: "レゾナンスコール", type: "spell", set: 3, cost: 90, spell: "resonancecall", rarity: "rare", icon: "✨", desc: "盤上の自軍クリーチャー全員の成長カウンタ+1（ST/最大HP+5・上限+25。HPも+5回復）。⚡共鳴持ちはこのスペル自体にも共鳴する" },
 ];
 
 const CARD_BY_ID = Object.fromEntries(CARD_DB.map(c => [c.id, c]));

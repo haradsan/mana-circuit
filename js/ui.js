@@ -135,6 +135,14 @@ function renderBoard(g) {
       html += `<rect x="${x}" y="${y}" width="${TILE}" height="${TILE}" rx="10" fill="none" stroke="${ovColor}" stroke-width="3" stroke-dasharray="7 5" opacity="0.9"/>`;
       html += `<text x="${x + TILE / 2}" y="${y + 16}" font-size="15" text-anchor="middle">${ovIcon}</text>`;
     }
+    // 🃏 伏せ札（v29）: 「何かが伏せてある」ことは全員に見える（中身は所有者のみ＝マス情報で確認）。
+    // 誰の仕掛けかは札の縁の色で分かる。ゆっくり明滅して不穏さを演出
+    if (tile.trap && tile.owner === tile.trap.owner) {
+      const tx = x + TILE - 15, ty = y + 6;
+      html += `<g opacity="0.95"><animate attributeName="opacity" values="0.95;0.55;0.95" dur="2.4s" repeatCount="indefinite"/>` +
+        `<rect x="${tx}" y="${ty}" width="11" height="15" rx="2" fill="#2a2140" stroke="${PLAYER_COLORS[tile.trap.owner]}" stroke-width="1.6"/>` +
+        `<text x="${tx + 5.5}" y="${ty + 11.5}" font-size="9" text-anchor="middle" fill="#d9a6ff">?</text></g>`;
+    }
     // 矢印表示（v23・自由移動）:
     //  ・➡一方通行マス＝唯一の出口を赤金の大矢印で明示（特別マスであることが一目で分かるように）
     //  ・三叉路以上（隣接3方向以上）の合流マス＝出られる方向を小矢印で示す

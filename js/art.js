@@ -639,6 +639,44 @@ const CREATURE_ART = {
   bannerbearer:  { arch: "humanoid", o: { banner: 1, leafhair: 1 } },        // 📣応援＝軍旗を掲げる木の旗手
   livingblade:   { arch: "humanoid", o: { sword: 1, small: 1 } },            // ⚔二形＝ひとりでに舞う剣
   livingshield:  { arch: "humanoid", o: { shield: 1, small: 1 } },           // 🛡二形＝ひとりでに構える盾
+  // ============================================================
+  // ⚡ 第三弾「共鳴と策謀」（v29・クリーチャー30種）
+  // ============================================================
+  // 火（武芸・罠師・工匠・反骨・共鳴）
+  sparkfencer:   { arch: "humanoid", o: { sword: 1 } },                      // 剣に火花を纏う剣士
+  embertrapper:  { arch: "humanoid", o: { small: 1, horns: 1 } },            // 熾火を仕掛ける小鬼
+  flamesmith:    { arch: "humanoid", o: { axe: 1, beard: 1 } },              // 槌を振るう炎の鍛冶
+  rebelfiend:    { arch: "humanoid", o: { horns: 1, wings: 1 } },            // 反骨の小悪魔
+  duelistogre:   { arch: "humanoid", o: { big: 1, sword: 1, horns: 1 } },    // 決闘好きの大鬼
+  resonatedrake: { arch: "dragon",   o: { flame: 1 } },                      // スペルに共鳴する竜
+  blazebrand:    { arch: "dragon",   o: { big: 1, flame: 1 } },              // 焔の剣を咥える竜
+  // 木
+  thornsetter:   { arch: "fairy" },                                          // 茨の罠を張る精
+  echoleaf:      { arch: "tree",     o: { small: 1 } },                      // 共鳴する若葉
+  rebelelf:      { arch: "humanoid", o: { bow: 1, leafhair: 1 } },           // 抵抗軍のエルフ
+  vinetrapper:   { arch: "tree",     o: { vines: 1 } },                      // 蔦の罠を張る樹
+  greensmith:    { arch: "humanoid", o: { small: 1, axe: 1, leafhair: 1 } }, // 木工の匠
+  spellbloom:    { arch: "tree",     o: { bloom: 1 } },                      // 詠唱で花開く霊樹
+  echoent:       { arch: "tree",     o: { big: 1 } },                        // 共鳴する古樹
+  // 地
+  pitgoblin:     { arch: "humanoid", o: { small: 1, horns: 1 } },            // 落とし穴掘りのゴブリン
+  shieldbearer:  { arch: "humanoid", o: { shield: 1, big: 1 } },             // 大盾の担い手
+  rebeldwarf:    { arch: "humanoid", o: { small: 1, axe: 1, beard: 1 } },    // 反骨のドワーフ
+  runesmith:     { arch: "humanoid", o: { beard: 1, staff: 1 } },            // ルーンを刻む匠
+  echogolem:     { arch: "golem",    o: { veins: 1 } },                      // 共鳴の紋が走る岩人形
+  fortresstoad:  { arch: "turtle" },                                         // 要塞のような巨蟇
+  gaiaresonant:  { arch: "golem",    o: { big: 1, veins: 1, shine: 1 } },    // 大地と共鳴する巨神
+  // 水
+  bubbletrapper: { arch: "jelly" },                                          // 泡の罠を張るクラゲ
+  echofish:      { arch: "serpent",  o: { fins: 1 } },                       // 共鳴の波紋を放つ魚
+  rebelmerrow:   { arch: "mermaid" },                                        // 反骨の人魚
+  harpoonmaid:   { arch: "mermaid",  o: { knight: 1 } },                     // 銛の乙女
+  tidesmith:     { arch: "humanoid", o: { trident: 1, beard: 1 } },          // 潮流を織る匠
+  mistcaster:    { arch: "humanoid", o: { hat: 1, staff: 1 } },              // 霧の詠唱者
+  echoleviath:   { arch: "serpent",  o: { big: 1, fins: 1 } },               // 深淵に共鳴する海竜
+  // 無
+  facelessduelist: { arch: "humanoid", o: { sword: 1, genie: 1 } },          // 顔なき決闘者
+  paradoxwisp:   { arch: "fairy",    o: { wings: false } },                  // 矛盾を漂う燐光
 };
 
 // ---------- アイテムの造形 ----------
@@ -770,6 +808,12 @@ const ITEM_ART = {
   calmcharm: { arch: "charm" }, smokebomb: { arch: "orb" }, chainnet: { arch: "lance" },
   berserkpotion: { arch: "orb" }, giantbelt: { arch: "armor" }, rebirthamulet: { arch: "charm" },
   hazecloak: { arch: "armor", o: { halo: 1 } }, duelglove: { arch: "dagger", o: { dual: 1 } },
+  // ⚡第三弾（v29）
+  resonanceedge: { arch: "sword", o: { ornate: 1 } }, resonanceaegis: { arch: "shield", o: { shine: 1 } },
+  boomerangaxe: { arch: "axe" }, desperateblade: { arch: "dagger" },
+  wardrum: { arch: "banner" }, guardbell: { arch: "charm" },
+  chargerod: { arch: "wand", o: { big: 1 } }, rebelplate: { arch: "armor" },
+  grandbanner: { arch: "banner" }, trickdagger: { arch: "dagger", o: { dual: 1 } },
 };
 
 // ---------- 背景シーン（属性の魔力が満ちる空間＋魔法陣＋地面の影） ----------

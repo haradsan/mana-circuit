@@ -279,11 +279,11 @@ async function chooseRewardSet() {
   };
   const res = await showDialog({
     title: "🎁 報酬パックの弾を選択",
-    body: "どちらの弾のカードパックを受け取りますか？",
+    body: "どの弾のカードパックを受け取りますか？",
     buttons: CARD_SETS.map(row),
   });
   const n = Number(res.action);
-  return n === 2 ? 2 : 1;
+  return CARD_SETS.some(s => s.set === n) ? n : 1; // v29: 第三弾にも対応（CARD_SETS準拠）
 }
 
 // ---------- 途中棄権（投了） ----------
@@ -358,7 +358,7 @@ async function playTurn(p) {
   }
   // 2人対戦（ホットシート）: 手札を伏せた交代画面を挟んでから手番を始める
   if (G.hotseat && !p.isCPU) await hotseatHandoff(p);
-  setMessage(`${p.name}のターン（ラウンド${G.round}）`);
+  setMessage(`${p.name}のターン（ラウンド${G.round}${G.climax ? "・⚔決戦の刻" : ""}）`);
   turnStartTick(p); // 第二弾（v19）: 🌱成長・⛏採掘・🌿癒しの庭のターン開始処理
   renderAll(G);
   if (p.isCPU) {
@@ -371,6 +371,14 @@ async function playTurn(p) {
   const drawn = drawCard(G, p);
   if (drawn) log(p.isCPU ? `${p.name}はカードを引いた` : `カードを引いた: ${CARD_BY_ID[drawn].name}`);
   if (drawn && !p.isCPU) await animateDraw(CARD_BY_ID[drawn]);
+  // ⚔️決戦の刻（v29）: 全員ドロー+1＝攻防と妨害の応酬が濃くなる
+  if (G.climax) {
+    const extra = drawCard(G, p);
+    if (extra) {
+      log(p.isCPU ? `⚔ 決戦の刻——${p.name}は追加でカードを引いた` : `⚔ 決戦の刻——追加ドロー: ${CARD_BY_ID[extra].name}`);
+      if (!p.isCPU) await animateDraw(CARD_BY_ID[extra]);
+    }
+  }
   await enforceHandLimit(p);
   renderAll(G);
 
@@ -489,10 +497,26 @@ function turnStartTick(p) {
   }
 }
 
+// ⚔️ 決戦の刻（v29）: ①誰かが凱旋リーチ ②ラウンドが上限の75%——どちらか早い方で発動し、
+// 以後ゲーム終了まで継続。全員ドロー+1／劣勢者スペル25%OFF／決戦スペル解禁。BGMもボス曲へ。
+function checkClimax() {
+  if (!G || G.over || G.climax || G.training) return;
+  const reach = G.players.some(q => assetsOf(G, q) >= RULES.target);
+  const lateRound = G.round >= Math.ceil(RULES.maxRounds * 0.75);
+  if (!reach && !lateRound) return;
+  G.climax = true;
+  SFX.spell();
+  log(`⚔⚔⚔ 決戦の刻！ ${reach ? "凱旋リーチの出現" : "残りラウンドわずか"}——ここからは全員ドロー+1枚、` +
+    `劣勢者（首位の70%未満）はスペル25%OFF、⚔️決戦スペルが解禁される！`, "warn");
+  if (typeof BGM !== "undefined" && BGM.setTrack && BGM.track !== "boss") BGM.setTrack("boss");
+  renderAll(G);
+}
+
 // 目標資産に到達／転落したときの通知（⚑凱旋リーチ）。ターンの終わりに全員ぶんチェックする。
 // 「あとは城へ帰るだけ」の状態を全員に見えるようにして、凱旋レースの緊張感を作る
 function notifyReach() {
   if (G.over) return;
+  checkClimax(); // ⚔️決戦の刻の発動チェック（v29・リーチとラウンド進行の両方をここで拾う）
   G.players.forEach(p => {
     const reached = assetsOf(G, p) >= RULES.target;
     if (reached && !p.reached) {
@@ -609,7 +633,10 @@ let _spellClickResolve = null;
 function markCastableSpells(p) {
   document.querySelectorAll("#hand .card").forEach(el => {
     const c = CARD_BY_ID[el.dataset.card];
-    if (c.type === "spell" && c.cost <= p.magic) {
+    // v29: 実効コスト（決戦の刻の劣勢割引）と使用条件（逆転=劣勢時のみ／決戦=決戦の刻のみ）で判定
+    const usable = c.type === "spell" && spellCostOf(G, p, c) <= p.magic &&
+      !(c.underdog && !isUnderdog(G, p)) && !(c.climax && !G.climax);
+    if (usable) {
       el.classList.add("castable");
       el.addEventListener("click", onSpellClick);
     }
@@ -655,16 +682,39 @@ async function humanPickOpponent(p, title, body, filterFn = null) {
 async function castSpell(p, cardId) {
   beginLogToast();
   try {
-    return await castSpellEffect(p, cardId);
+    const ok = await castSpellEffect(p, cardId);
+    // ⚡共鳴（resonance・v29）: スペルの行使に成功するたび、盤上の自軍の共鳴クリーチャーが育つ
+    if (ok && !G.over) resonanceTick(p);
+    return ok;
   } finally {
     endLogToast();
+  }
+}
+
+// ⚡共鳴（v29）: 所有者がスペルを使うたび、盤上の共鳴クリーチャーの成長カウンタ+1（ST/HP+5・上限+25）。
+// 🌱成長・🕊️ブレッシングと同じ grown 枠を共用する（battle.js/maxHpOf がそのまま拾う）
+function resonanceTick(p) {
+  const grown = [];
+  ownedLands(G, p.id).forEach(t => {
+    if (!t.creature || creatureNulled(G, t.creature)) return;
+    const c = CARD_BY_ID[t.creature.cardId];
+    if (!c.ab.includes("resonance") || (t.creature.grown || 0) >= 5) return;
+    t.creature.grown = (t.creature.grown || 0) + 1;
+    t.creature.hp = Math.min(maxHpOf(t.creature), currentHp(t.creature) + 5);
+    grown.push(`${c.name}(+${t.creature.grown * 5})`);
+  });
+  if (grown.length) {
+    SFX.spell();
+    log(`⚡ スペルに共鳴！ ${grown.join("・")}のST/HP上昇`, "", { toast: true });
   }
 }
 
 async function castSpellEffect(p, cardId) {
   const c = CARD_BY_ID[cardId];
   const opp = opponentOf(G, p); // 筆頭の相手（総資産トップ）。リベンジ・劣勢判定の基準
-  if (c.cost > p.magic) return false;
+  // ⚔️決戦の刻（v29）: 劣勢者はスペルコスト25%OFF（spellCostOf・state.js）
+  const cost = spellCostOf(G, p, c);
+  if (cost > p.magic) return false;
   // 🤫沈黙の霧（v20）: このターンはスペルを使えない
   if (p.spellSealed) {
     if (!p.isCPU) log(`🤫 沈黙の霧に閉ざされている——このターンはスペルを使えない`, "warn");
@@ -675,7 +725,21 @@ async function castSpellEffect(p, cardId) {
     if (!p.isCPU) log(`🌙 静寂のとばり——対象を指定するスペルは今は使えない`, "warn");
     return false;
   }
-  const pay = () => { p.magic -= c.cost; discardFromHand(p, cardId); };
+  // ⚒️逆転スペル（v29）: 自分の総資産が首位の70%未満のときのみ
+  if (c.underdog && !isUnderdog(G, p)) {
+    if (!p.isCPU) log(`⚒️ ${c.name}は劣勢（総資産が首位の70%未満）のときにしか使えない`, "warn");
+    return false;
+  }
+  // ⚔️決戦スペル（v29）: 決戦の刻のみ
+  if (c.climax && !G.climax) {
+    if (!p.isCPU) log(`⚔ ${c.name}は決戦の刻（誰かが凱旋リーチ or 終盤）にしか使えない`, "warn");
+    return false;
+  }
+  const pay = () => {
+    p.magic -= cost;
+    if (cost < c.cost) log(`⚔ 決戦の刻——劣勢の${p.name}は${c.name}を${cost}Gで行使（25%OFF）`);
+    discardFromHand(p, cardId);
+  };
 
   if (c.spell === "quake") {
     const target = p.isCPU ? aiPickQuakeTarget(G, p)
@@ -1781,6 +1845,131 @@ async function castSpellEffect(p, cardId) {
     pay();
     addFx(G, "goddess", p.id, OVERLAY_DURATION);
     log(`👼 ${p.name}の女神の加護！ ${OVERLAY_DURATION}Rの間、自分の土地の加護2倍＋援護ST+10`);
+
+  // ---------- 第三弾スペル（v29） ----------
+  } else if (c.spell === "settrap") {
+    // 🃏伏せ札: 自分の土地に裏向きで設置（1つの土地に1枚）。カードは捨札ではなく盤面へ
+    const cands = ownedLands(G, p.id).filter(t => !trapOf(G, t));
+    const target = p.isCPU ? aiPickTrapTarget(G, p, c)
+      : await humanPickLand(cands,
+        `${c.icon} ${c.name} — 伏せる土地を選択`,
+        `自分の土地に<b>裏向き</b>で設置します（1つの土地に1枚まで）。<br>${esc(c.desc)}<br><b>相手には「何かが伏せてある」ことしか見えません</b>`,
+        "伏せ札を置ける自分の土地がありません（1つの土地に1枚まで）");
+    if (!target) return false;
+    p.magic -= cost;
+    if (cost < c.cost) log(`⚔ 決戦の刻——劣勢の${p.name}は${c.name}を${cost}Gで行使（25%OFF）`);
+    removeFromHand(p, cardId); // 捨札には送らない＝盤面に伏せる
+    target.trap = { cardId, owner: p.id };
+    log(`🃏 ${p.name}は${tileName(target)}に何かを伏せた……`, "warn");
+    renderBoard(G);
+
+  } else if (c.spell === "snipe") {
+    // 🎯逆転: 首位のクリーチャー1体に50ダメージ
+    const leader = opponentOf(G, p);
+    const pool = ownedLands(G, leader.id).filter(t => t.creature && !isSanctuaryProtected(G, t) && !isSpellProof(t));
+    const target = p.isCPU ? (pool.slice().sort((a, b) => currentHp(a.creature) - currentHp(b.creature))[0] || null)
+      : await humanPickLand(pool, "🎯 スナイプショット — 対象を選択",
+        `首位 ${esc(leader.name)} のクリーチャー1体に<b>50ダメージ</b>（現在HPが0以下になれば破壊し土地を解放／護法・結界は対象外）`,
+        "狙撃できる首位のクリーチャーがいません（護法・結界は対象外）");
+    if (!target) return false;
+    pay();
+    const victim = CARD_BY_ID[target.creature.cardId];
+    target.creature.hp = currentHp(target.creature) - 50;
+    if (target.creature.hp <= 0) {
+      G.players[target.owner].discard.push(target.creature.cardId);
+      target.creature = null;
+      target.owner = null;
+      log(`🎯 ${p.name}のスナイプショット！ ${victim.name}を撃ち抜いた——${tileName(target)}は空き地に戻った`, "warn");
+    } else {
+      log(`🎯 ${p.name}のスナイプショット！ ${victim.name}に50ダメージ（残りHP ${target.creature.hp}）`, "warn");
+    }
+
+  } else if (c.spell === "resistance") {
+    // 🔥逆転: 首位の全土地を2R通行料半減
+    const leader = opponentOf(G, p);
+    const lands = ownedLands(G, leader.id).filter(t => !landSpellShielded(G, t));
+    if (lands.length === 0) { if (!p.isCPU) log("首位に呪える土地がありません（蜃気楼・結界は対象外）", "warn"); return false; }
+    pay();
+    lands.forEach(t => { t.curseUntil = Math.max(t.curseUntil || 0, G.round + OVERLAY_DURATION - 1); });
+    log(`🔥 ${p.name}のレジスタンス！ 民衆が立ち上がり、首位${leader.name}の全土地${lands.length}件が${OVERLAY_DURATION}Rの間通行料半減`, "warn");
+
+  } else if (c.spell === "uprising") {
+    // ⚒️逆転: 首位のLv3以上の土地1つをLv-2
+    const leader = opponentOf(G, p);
+    const pool = ownedLands(G, leader.id).filter(t => t.level >= 3 && !landSpellShielded(G, t));
+    const target = p.isCPU ? (pool.slice().sort((a, b) => b.level - a.level)[0] || null)
+      : await humanPickLand(pool, "⚒️ アップライジング — 対象を選択",
+        `首位 ${esc(leader.name)} のLv3以上の土地1つを<b>Lv-2</b>します（蜃気楼・結界は対象外）`,
+        "対象となる首位の土地（Lv3以上）がありません");
+    if (!target) return false;
+    pay();
+    target.level = Math.max(1, target.level - 2);
+    log(`⚒️ ${p.name}のアップライジング！ 蜂起した民衆が${tileName(target)}をLv${target.level}まで切り崩した`, "warn");
+
+  } else if (c.spell === "laststand") {
+    // ⚔️決戦: 次のバトルでST+30（防衛ならさらにHP+30）
+    pay();
+    p.nextBattleSt = (p.nextBattleSt || 0) + 30;
+    p.nextDefHp = (p.nextDefHp || 0) + 30;
+    log(`⚔ ${p.name}のラストスタンド！ 次のバトルでST+30（防衛ならさらにHP+30）`, "warn");
+
+  } else if (c.spell === "warchest") {
+    // 💰決戦: 土地1つにつき+35G
+    pay();
+    const n = ownedLands(G, p.id).length;
+    const gain = n * 35;
+    p.magic += gain;
+    SFX.coin();
+    log(`💰 ${p.name}の軍資金調達！ 領地${n}件から軍資金+${gain}G`, "warn");
+
+  } else if (c.spell === "judgement") {
+    // ⚖️決戦: 最も魔力の多い相手から25%を奪う
+    const target = richestOpponent(G, p);
+    if (target.magic < 100) { if (!p.isCPU) log("奪うに値する魔力を持つ相手がいません（100G以上が対象）", "warn"); return false; }
+    pay();
+    const amount = Math.floor(target.magic * 0.25);
+    target.magic -= amount;
+    p.magic += amount;
+    SFX.coin();
+    log(`⚖ ${p.name}のジャッジメント！ 天秤が傾き、${target.name}の魔力の25%＝${amount}Gを没収した`, "warn");
+
+  } else if (c.spell === "reforge") {
+    // 🔨コンボ支援: 捨て札からアイテムを1枚回収
+    const items = p.discard.filter(id => CARD_BY_ID[id].type === "item");
+    if (items.length === 0) { if (!p.isCPU) log("捨て札にアイテムがありません", "warn"); return false; }
+    let pickId;
+    if (p.isCPU) {
+      pickId = items.slice().sort((a, b) => CARD_BY_ID[b].cost - CARD_BY_ID[a].cost)[0];
+    } else {
+      const res = await showDialog({
+        title: "🔨 リフォージ — 打ち直すアイテムを選択",
+        body: "自分の捨て札のアイテム1枚を手札に戻します",
+        cards: [...new Set(items)].map(id => ({ card: CARD_BY_ID[id] })),
+        peek: true,
+        buttons: [{ label: "やめる", value: "cancel" }],
+      });
+      if (res.action !== "card") return false;
+      pickId = res.cardId;
+    }
+    pay();
+    const ri = p.discard.lastIndexOf(pickId);
+    if (ri >= 0) p.discard.splice(ri, 1);
+    p.hand.push(pickId);
+    log(`🔨 ${p.name}のリフォージ！ ${CARD_BY_ID[pickId].name}を打ち直して手札に戻した`);
+    await enforceHandLimit(p);
+
+  } else if (c.spell === "resonancecall") {
+    // ✨コンボ支援: 自軍全体の成長カウンタ+1（このスペル自体にも⚡共鳴が反応する＝castSpellのresonanceTick）
+    const targets = ownedLands(G, p.id).filter(t => t.creature && (t.creature.grown || 0) < 5);
+    if (targets.length === 0) { if (!p.isCPU) log("成長できる自軍クリーチャーが盤上にいません", "warn"); return false; }
+    pay();
+    const names = [];
+    targets.forEach(t => {
+      t.creature.grown = (t.creature.grown || 0) + 1;
+      t.creature.hp = Math.min(maxHpOf(t.creature), currentHp(t.creature) + 5);
+      names.push(`${CARD_BY_ID[t.creature.cardId].name}(+${t.creature.grown * 5})`);
+    });
+    log(`✨ ${p.name}のレゾナンスコール！ ${names.join("・")}が高まった`);
   }
 
   SFX.spell();
@@ -2305,7 +2494,41 @@ async function ownLandFlow(p, tile) {
 // --- 敵の土地: 通行料 or 侵略（①停止マスの処理）。侵略バトルをしたら true を返す ---
 async function enemyLandFlow(p, tile) {
   const owner = G.players[tile.owner];
-  const toll = tollOf(G, tile);
+
+  // 🃏 stop型の伏せ札（v29）: 敵が停止した瞬間＝通行料や侵略の判断より前に発動する
+  let tollMult = 1;
+  const trap = trapOf(G, tile);
+  if (trap && CARD_BY_ID[trap.cardId].trap === "stop") {
+    const tc = CARD_BY_ID[trap.cardId];
+    discardTrap(G, tile);
+    SFX.spell();
+    log(`🃏 伏せ札発動！ ${owner.name}の${tc.icon}${tc.name}！`, "warn");
+    await awardTrapper(owner);
+    renderBoard(G);
+    if (tc.id === "trap_snatch") {
+      const amount = Math.min(60, p.magic);
+      p.magic -= amount;
+      owner.magic += amount;
+      SFX.coin();
+      log(`🧲 磁力が財布を吸い上げる——${p.name}から${amount}Gを奪った！`, "warn");
+    } else if (tc.id === "trap_toll") {
+      tollMult = 2;
+      log(`💰 徴税吏が待ち構えていた——このマスの通行料は2倍！`, "warn");
+    } else if (tc.id === "trap_sleep") {
+      p.skipTurn = true;
+      p.skipReason = "freeze";
+      log(`💤 眠りの霧が${p.name}を包む——次のターンは1回休み！`, "warn");
+    } else if (tc.id === "trap_gate") {
+      log(`🌀 転送陣が開き、${p.name}は城へ強制送還された！（通行料は発生しない）`, "warn");
+      p.pos = 0;
+      p.cameFrom = null; // 城からの再出発＝方向リセット
+      renderAll(G);
+      return false; // 通行料も侵略も発生しない
+    }
+    renderAll(G);
+  }
+
+  const toll = tollOf(G, tile) * tollMult;
   const defCard = CARD_BY_ID[tile.creature.cardId];
   const defMaxHp = maxHpOf(tile.creature); // 🌱成長分を含めた実最大HP（v19）
   const curHp = tile.creature.hp ?? defMaxHp;
@@ -2406,18 +2629,63 @@ async function humanPickBattleItem(p, committedCost, title, isDefense = false, e
   return res.action === "card" ? res.cardId : null;
 }
 
+// 🪤 罠師（trapper・v29）: 自分の伏せ札が発動するたび、盤上の罠師1体につき+50G＋カードを1枚引く
+async function awardTrapper(owner) {
+  const n = trapperCount(G, owner.id);
+  if (n <= 0) return;
+  const gain = n * 50;
+  owner.magic += gain;
+  SFX.coin();
+  const d = drawCard(G, owner);
+  log(`🪤 ${owner.name}の罠師が仕掛けを回収！ +${gain}G${d ? "・カードを1枚引いた" : ""}`, "", { toast: true });
+  if (d) await enforceHandLimit(owner);
+  renderPanels(G);
+}
+
+// 🛠 バトルで使ったアイテムを捨札から手札へ戻す（工匠／🪃ブーメランアクス・v29）
+async function reclaimBattleItem(pl, itemId, prefix) {
+  const i = pl.discard.lastIndexOf(itemId);
+  if (i < 0) return;
+  pl.discard.splice(i, 1);
+  pl.hand.push(itemId);
+  log(`${prefix} ${CARD_BY_ID[itemId].name}は使い切りにならず手札へ戻った！`, "", { toast: true });
+  await enforceHandLimit(pl);
+}
+
 // 防衛側のアイテム応酬 → バトル演出まで（結果の適用は呼び出し側）
 // 通常の侵略もクリーチャー侵攻も同じ応酬を通る。
 // battleOpts: { attGrown, attSrcId }＝march（盤上からの侵攻）時の成長段階・出撃元（v19）
 async function fightFor(p, tile, attCard, attItem, battleOpts = {}) {
   const defender = G.players[tile.owner];
+
+  // 🃏 invade型の伏せ札（v29）: 侵略・侵攻を宣言された瞬間＝アイテム応酬より前に公開・発動する
+  let trapFx = {};
+  let trapFired = false;
+  const trapNow = trapOf(G, tile);
+  if (trapNow && CARD_BY_ID[trapNow.cardId].trap === "invade") {
+    const tc = CARD_BY_ID[trapNow.cardId];
+    discardTrap(G, tile);
+    SFX.spell();
+    log(`🃏 伏せ札発動！ ${defender.name}の${tc.icon}${tc.name}！`, "warn");
+    trapFired = true;
+    if (tc.id === "trap_pit") trapFx = { attTrapSt: -25, trapName: tc.name };
+    else if (tc.id === "trap_bolt") trapFx = { attPreDmg: 30, trapName: tc.name };
+    else if (tc.id === "trap_ambush") trapFx = { defTrapSt: 25, trapName: tc.name };
+    await awardTrapper(defender);
+    renderBoard(G);
+  }
+  // 🗡トリックダガー連携（v29）: このバトルで罠が発動した／stop型の伏せ札がまだこの土地にある
+  const defTrapSynergy = trapFired || !!trapOf(G, tile);
+
   let defItem = null;
+  let defItemId = null; // 工匠・戻る武具の回収用（itemFormOf後も元のカードidを覚えておく）
   if (defender.isCPU) {
     const id = aiChooseDefenseItem(G, defender, tile, attCard, attItem);
     if (id) {
       defItem = itemFormOf(CARD_BY_ID[id]); // v25: 二形のクリーチャーは擬似アイテムに変換して装備
       defender.magic -= defItem.cost;
       discardFromHand(defender, id);
+      defItemId = id;
     }
   } else {
     const defCard = CARD_BY_ID[tile.creature.cardId];
@@ -2428,6 +2696,7 @@ async function fightFor(p, tile, attCard, attItem, battleOpts = {}) {
       defItem = itemFormOf(CARD_BY_ID[itemId2]);
       defender.magic -= defItem.cost;
       discardFromHand(defender, itemId2);
+      defItemId = itemId2;
     }
   }
 
@@ -2459,7 +2728,7 @@ async function fightFor(p, tile, attCard, attItem, battleOpts = {}) {
   // バトル演出（結果は先に計算し、カットインで表示だけ流す。実戦は会心あり・土地の援護・群れあり）
   // ⏩スキップが押されたら残りのログを一括表示して即座に決着へ（UI.battleSkip）
   const result = resolveBattle(attCard, tile, attItem, defItem,
-    { rng: true, g: G, attackerId: p.id, ...spellBuffs, ...battleOpts });
+    { rng: true, g: G, attackerId: p.id, ...spellBuffs, ...trapFx, defTrapSynergy, ...battleOpts });
   openBattleView(G, p.name, attCard, attItem, tile, defItem);
   await sleep(600);
   await playBattleLines(result.log);
@@ -2481,6 +2750,15 @@ async function fightFor(p, tile, attCard, attItem, battleOpts = {}) {
   }
   await sleep(UI.battleSkip ? 250 : 900);
   closeBattleView();
+  // 🛠工匠・🪃戻る武具（v29）: 防衛側が守り切っていれば、装備したアイテムは使い切りにならず手札へ戻る
+  if (defItemId && !result.escaped && !result.attackerWins && tile.creature) {
+    const defC = CARD_BY_ID[tile.creature.cardId];
+    const artificerOk = defC.ab.includes("artificer") && !creatureNulled(G, tile.creature);
+    if (artificerOk || (defItem && defItem.returning)) {
+      await reclaimBattleItem(defender, defItemId,
+        artificerOk ? `🛠 ${defC.name}の工匠！` : "🪃 投じた武具が舞い戻る——");
+    }
+  }
   return result;
 }
 
@@ -2551,6 +2829,13 @@ async function doInvade(p, tile, cardId, itemId = null) {
     }
     // v25: 🏗築城＝守り抜いてLv+1／🔥焦土＝戦火でLv-1（forcePayで土地を手放していたら何も起きない）
     if (!defNulled && tile.owner === defender.id) applyBattleLandEffects(tile, defCid, true);
+  }
+  // 🛠工匠・🪃戻る武具（v29）: 侵略側が生き残っていれば（占領 or 生還しての撤退）装備アイテムを回収
+  if (itemId && result.attHp > 0) {
+    const artificerOk = c.ab.includes("artificer");
+    if (artificerOk || (attItem && attItem.returning)) {
+      await reclaimBattleItem(p, itemId, artificerOk ? `🛠 ${c.name}の工匠！` : "🪃 投じた武具が舞い戻る——");
+    }
   }
   renderAll(G);
 }
@@ -2778,6 +3063,13 @@ async function doMarch(p, src, dst, itemId = null) {
       log(`🏇 ${card.name}は敗れて${result.attRebirth ? "手札へ退いた" : "退いた"}… 元の土地も失った`, "warn");
       if (!defNulled) applyBattleLandEffects(dst, defCid, true); // v25: 🏗築城／🔥焦土
     }
+    // 🛠工匠・🪃戻る武具（v29）: 侵攻側が生き残っていれば（制圧 or 生還撤退）装備アイテムを回収
+    if (itemId && result.attHp > 0) {
+      const artificerOk = card.ab.includes("artificer") && !attNulled;
+      if (artificerOk || (attItem && attItem.returning)) {
+        await reclaimBattleItem(p, itemId, artificerOk ? `🛠 ${card.name}の工匠！` : "🪃 投じた武具が舞い戻る——");
+      }
+    }
   }
   renderAll(G);
 }
@@ -2814,7 +3106,18 @@ function showTileInfo(tile) {
     const ov = overlayOf(G, tile);
     if (ov) parts.push(ov.kind === "sanctuary"
       ? `🛡️ 結界に守られている（侵略・侵攻・敵スペルの対象にならない）`
+      : ov.kind === "block"
+      ? `🚧 バリケードで通行止め（進入できない）`
       : `🕸️ 罠が仕掛けられている（術者以外が通過・停止すると足止め）`);
+    // 🃏伏せ札（v29）: 自分の伏せ札は中身が見える。相手のは「何かが伏せてある」ことだけ分かる
+    const tr = trapOf(G, tile);
+    if (tr) {
+      const humans = G.players.filter(q => !q.isCPU);
+      const mine = humans.length === 1 && humans[0].id === tr.owner; // 2人対戦では互いに伏せ札の中身は見せない
+      parts.push(mine
+        ? `🃏 <b>あなたの伏せ札</b>: ${CARD_BY_ID[tr.cardId].icon}${esc(CARD_BY_ID[tr.cardId].name)} — ${esc(CARD_BY_ID[tr.cardId].desc)}`
+        : `🃏 <b>何かが伏せてある……</b>（${esc(G.players[tr.owner].name)}の仕掛け。侵略か停止で発動するかもしれない）`);
+    }
   } else {
     const descs = {
       CASTLE: "🏰 城 — 関門を規定数そろえて通過・停止すると周回ボーナス（魔力＋全回復）。ぴったり停止で領地コントロール。目標資産で帰還すれば勝利！",
@@ -3064,6 +3367,21 @@ function showHelp() {
       ⏳<b>第二弾ステージ（S13〜S16）</b>: 大型の「隊商の大草原」「時計仕掛けの大環」を越えた先に、
       👑精霊王を従えるボス——「五王の間」の巫女セレスティアと、最終決戦「時流の玉座」の時空王アイオーンが待つ
       （ボスは精霊王を<b>確定でデッキに投入</b>してくる）。<br>
+      <b>⚡ 第三弾「共鳴と策謀」（v29・55種）</b>: コンボと駆け引きの拡張。新能力——
+      <span class="ab">共鳴</span>自分がスペルを使うたびST/HP+5（上限+25） ／
+      <span class="ab">武芸</span>アイテム装備でさらにST+15/HP+15 ／
+      <span class="ab">工匠</span>装備したアイテムがバトル後に手札へ戻る ／
+      <span class="ab">罠師</span>自分の伏せ札が発動するたび+50G＆1ドロー ／
+      <span class="ab">反骨</span>総資産が首位の70%未満ならST+20/HP+20。<br>
+      🃏<b>伏せ札（トラップ）</b>: スペル枠で<b>自分の土地に裏向きで設置</b>する新型スペル（1つの土地に1枚）。
+      相手には「何かが伏せてある」ことしか見えない。<b>侵略された時</b>に発動するもの（🕳️落とし穴＝侵略者ST-25、
+      ⚡カウンターボルト＝バトル前に30ダメージ、🗡️伏兵＝防衛ST+25）と、<b>敵が停止した時</b>に発動するもの
+      （🧲60G強奪、💰通行料2倍、💤1回休み、🌀城へ強制送還）がある。土地を失うと不発のまま捨札へ。<br>
+      ⚔️<b>決戦の刻</b>: <b>誰かが凱旋リーチ</b>するか<b>ラウンドが上限の75%</b>に達すると発動し、以後ゲーム終了まで続く
+      （トレーニング以外）。全員<b>ドロー+1枚</b>／劣勢者（総資産が首位の70%未満）は<b>スペルコスト25%OFF</b>／
+      <b>⚔️決戦スペル</b>（ラストスタンド・軍資金調達・ジャッジメント）が解禁される。BGMもボス曲に変わる。<br>
+      ⚒️<b>逆転スペル</b>（スナイプショット・レジスタンス・アップライジング）は<b>劣勢のときにしか使えない</b>強力な牙——
+      首位が独走するほど、追う側の手札が輝く。<br>
       <b>🎪 ウィークリールール</b>: 毎週月曜に切り替わる特殊ルール（通行料2倍・初期手札レジェンド保証など）。タイトルの「🎪 週替り」でON/OFF。
       ONで正規対戦に勝つと<b>ボーナスカード+${typeof WEEKLY_BONUS_CARDS !== "undefined" ? WEEKLY_BONUS_CARDS : 2}枚</b>（トレーニングには適用されない）。<br>
       <b>👥 情報窓（画面上部・3名分）</b>: 各プレイヤーの<b>順位・魔力・総資産（バー）・連鎖・関門・周回・山札</b>を

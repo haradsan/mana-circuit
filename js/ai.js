@@ -151,8 +151,40 @@ function aiChooseSpell(g, p) {
     if (c.spell === "fx_silence" && assetsOf(g, p) >= RULES.target) return id;
     if (c.spell === "fx_goddess" && ownedLands(g, p.id).filter(t =>
         t.creature && CARD_BY_ID[t.creature.cardId].element === t.element).length >= 2) return id;
+    // ---------- 第三弾スペル（v29） ----------
+    if (c.spell === "settrap" && aiPickTrapTarget(g, p, c)) return id;
+    // 逆転スペルは劣勢時のみ使える（castSpellEffectのゲートと同じ条件で判定してから返す）
+    if (c.spell === "snipe" && isUnderdog(g, p) && ownedLands(g, opponentOf(g, p).id).some(t =>
+        t.creature && !isSanctuaryProtected(g, t) && !isSpellProof(t) && currentHp(t.creature) <= 50)) return id;
+    if (c.spell === "resistance" && isUnderdog(g, p) && ownedLands(g, opponentOf(g, p).id).filter(t =>
+        !landSpellShielded(g, t) && tollOf(g, t) >= 150).length >= 2) return id;
+    if (c.spell === "uprising" && isUnderdog(g, p) && ownedLands(g, opponentOf(g, p).id).some(t =>
+        t.level >= 3 && !landSpellShielded(g, t))) return id;
+    // 決戦スペルは決戦の刻のみ
+    if (c.spell === "warchest" && g.climax && ownedLands(g, p.id).length >= 3) return id;
+    if (c.spell === "judgement" && g.climax && richestOpponent(g, p).magic >= 400) return id;
+    if (c.spell === "reforge" && p.discard.some(x =>
+        CARD_BY_ID[x].type === "item" && CARD_BY_ID[x].cost >= 70)) return id;
+    if (c.spell === "resonancecall" && ownedLands(g, p.id).filter(t =>
+        t.creature && (t.creature.grown || 0) < 5).length >= 3) return id;
   }
   return null;
+}
+
+// 🃏 伏せ札（v29）: 罠を仕掛ける自分の土地を選ぶ。
+// invade型＝奪われたくない高価値の駐留地に／stop型＝敵が踏むと実入りの大きい高通行料の土地に。
+// 無駄打ち（価値の薄い土地への設置）はしない
+function aiPickTrapTarget(g, p, card) {
+  const cands = ownedLands(g, p.id).filter(t => !trapOf(g, t));
+  if (cands.length === 0) return null;
+  if (card.trap === "invade") {
+    const pool = cands.filter(t => t.creature && landValue(t) >= 240)
+      .sort((a, b) => landValue(b) - landValue(a));
+    return pool[0] || null;
+  }
+  const pool = cands.slice().sort((a, b) => tollOf(g, b) - tollOf(g, a));
+  if (card.id === "trap_toll") return tollOf(g, pool[0]) >= 100 ? pool[0] : null; // 二重徴収は高額地でこそ
+  return pool[0] || null;
 }
 
 // ---------- 第二弾スペルのターゲット選択（v20） ----------

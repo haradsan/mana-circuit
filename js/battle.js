@@ -11,6 +11,9 @@ const LASTWARD_ST     = 25;   // 背水のST補正（HP半分以下）
 const PACK_ST_MAX     = 30;   // 群れのST上限（+5×6体分）
 const GROW_STEP       = 5;    // 成長1段階あたりのST/HP上昇（上限は grown=5 ＝ +25）
 const BLIGHT_DEF_HP   = 30;   // 🔥焦土（v25）の防衛時HP補正（代償として土地レベルが下がる）
+const WEAPONLOVE_BONUS = 15;  // ⚔武芸（v29）: アイテム装備時の ST/HP 補正
+const REBEL_BONUS      = 20;  // 🔥反骨（v29）: 劣勢（総資産が首位の70%未満）時の ST/HP 補正
+const RESONANT_ITEM_MAX = 32; // ⚡共鳴武具（v29）: 能力数スケールの上限
 
 // 成長（grow）の段階（0〜5）。creature = tile.creature（{cardId, hp, grown}）
 function grownOf(creature) { return Math.min(5, (creature && creature.grown) || 0); }
@@ -87,9 +90,27 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   // バトル支援スペル（v20）: ウォークライ/攻城の号令/護りの風/決死の覚悟（fightForがoptsで渡す）
   const attSpellSt = opts.attStBonus || 0;
   const defSpellSt = opts.defStBonus || 0;
+  // 🃏伏せ札（v29）: fightForがバトル前に発動させた罠の効果（ピットトラップ=侵略者ST減／アンブッシュ=防衛ST増）
+  const attTrapSt = opts.attTrapSt || 0;
+  const defTrapSt = opts.defTrapSt || 0;
+  // ⚔武芸（weaponlove・v29）: アイテム（二形・巻物含む）を装備しているとST/HP+15
+  const attWeapon = attAb.has("weaponlove") && attItemEff ? WEAPONLOVE_BONUS : 0;
+  const defWeapon = defAb.has("weaponlove") && defItemEff ? WEAPONLOVE_BONUS : 0;
+  // 🔥反骨（rebel・v29）: 総資産が首位の70%未満の劣勢時にST/HP+20（判定はstate.jsのisUnderdog）
+  const underdogOf = pid => !!(opts.g && pid != null && typeof isUnderdog === "function" &&
+    opts.g.players[pid] && isUnderdog(opts.g, opts.g.players[pid]));
+  const attRebel = attAb.has("rebel") && underdogOf(opts.attackerId) ? REBEL_BONUS : 0;
+  const defRebel = defAb.has("rebel") && underdogOf(tile.owner) ? REBEL_BONUS : 0;
+  // ⚡共鳴武具（v29）: 装備者の能力1つにつきST/HP+8（上限+32）。能力はアイテム付与込みの実効セットで数える
+  const resonantOf = (itemEff, abSet, key) =>
+    (itemEff && itemEff[key]) ? Math.min(RESONANT_ITEM_MAX, abSet.size * itemEff[key]) : 0;
+  const attResoSt = resonantOf(attItemEff, attAb, "resonantSt"), attResoHp = resonantOf(attItemEff, attAb, "resonantHp");
+  const defResoSt = resonantOf(defItemEff, defAb, "resonantSt"), defResoHp = resonantOf(defItemEff, defAb, "resonantHp");
+  // 🗡トリックダガー（v29）: 防衛時、この土地に自分の伏せ札があれば（このバトルで発動した分も含む）ST/HP+20
+  const defTrick = (defItemEff && defItemEff.trapSynergy && opts.defTrapSynergy) ? defItemEff.trapSynergy : 0;
 
-  let attSt = attCard.st + (attItemEff ? attItemEff.st : 0) + (attAb.has("assault") ? 20 : 0) + RULES.invaderSt + attGrown * GROW_STEP + warFx + attSpellSt;
-  let defSt = defCard.st + (defItemEff ? defItemEff.st : 0) + defGrown * GROW_STEP + defSpellSt;
+  let attSt = attCard.st + (attItemEff ? attItemEff.st : 0) + (attAb.has("assault") ? 20 : 0) + RULES.invaderSt + attGrown * GROW_STEP + warFx + attSpellSt + attTrapSt + attWeapon + attRebel + attResoSt;
+  let defSt = defCard.st + (defItemEff ? defItemEff.st : 0) + defGrown * GROW_STEP + defSpellSt + defTrapSt + defWeapon + defRebel + defResoSt + defTrick;
   if (warFx) log.push(`🔥 戦火の世！ 攻め手の${attCard.name}はST+${warFx}`);
   if (attSpellSt) log.push(`📣 支援の詠唱！ ${attCard.name}のST+${attSpellSt}`);
   if (defSpellSt) log.push(`📣 支援の詠唱！ ${defCard.name}のST+${defSpellSt}`);
@@ -123,13 +144,28 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   const blightHp = defAb.has("blight") ? BLIGHT_DEF_HP : 0;
   const defWindHp = opts.defHpBonus || 0; // 護りの風（v20）
   if (defWindHp) log.push(`🌬️ 護りの風！ ${defCard.name}のHP+${defWindHp}`);
-  const attExtra = (attItemEff ? attItemEff.hp : 0) + attCheer;
-  const defExtra = (defItemEff ? defItemEff.hp : 0) + defBonus + guardBonus + defWindHp + defCheer + blightHp;
+  const attExtra = (attItemEff ? attItemEff.hp : 0) + attCheer + attWeapon + attRebel + attResoHp;
+  const defExtra = (defItemEff ? defItemEff.hp : 0) + defBonus + guardBonus + defWindHp + defCheer + blightHp + defWeapon + defRebel + defResoHp + defTrick;
   // 決死の覚悟（v20）: 会心率の底上げ（豪運と重複時は高い方）
   const attCritRate = Math.max(attAb.has("lucky") ? CRIT_RATE_LUCKY : CRIT_RATE, opts.attCritRate || 0);
   const defCritRate = Math.max(defAb.has("lucky") ? CRIT_RATE_LUCKY : CRIT_RATE, opts.defCritRate || 0);
   let attHp = attCard.hp + attGrown * GROW_STEP + attExtra;
   let defHp = defBaseHp + defExtra;
+
+  // ⚡カウンターボルト（v29）: バトル前に侵略者へ直撃ダメージ。HPが尽きればバトルは始まらず撃退
+  if (opts.attPreDmg) {
+    attHp -= opts.attPreDmg;
+    log.push(`⚡ ${opts.trapName || "罠"}の直撃！ ${attCard.name}に${opts.attPreDmg}ダメージ（残りHP ${Math.max(0, attHp)}）`);
+  }
+  if (attTrapSt) log.push(`🃏 ${opts.trapName || "罠"}の効果！ ${attCard.name}のST${attTrapSt}`);
+  if (defTrapSt) log.push(`🃏 ${opts.trapName || "罠"}の効果！ ${defCard.name}のST+${defTrapSt}`);
+  if (attWeapon) log.push(`⚔ ${attCard.name}の武芸！ 武具が手に馴染み ST+${attWeapon}/HP+${attWeapon}`);
+  if (defWeapon) log.push(`⚔ ${defCard.name}の武芸！ 武具が手に馴染み ST+${defWeapon}/HP+${defWeapon}`);
+  if (attRebel) log.push(`🔥 ${attCard.name}の反骨！ 劣勢の闘志で ST+${attRebel}/HP+${attRebel}`);
+  if (defRebel) log.push(`🔥 ${defCard.name}の反骨！ 劣勢の闘志で ST+${defRebel}/HP+${defRebel}`);
+  if (attResoSt || attResoHp) log.push(`⚡ ${attItemEff.name}が${attCard.name}の力に共鳴！ ${attResoSt ? `ST+${attResoSt}` : `HP+${attResoHp}`}（能力${attAb.size}個）`);
+  if (defResoSt || defResoHp) log.push(`⚡ ${defItemEff.name}が${defCard.name}の力に共鳴！ ${defResoSt ? `ST+${defResoSt}` : `HP+${defResoHp}`}（能力${defAb.size}個）`);
+  if (defTrick) log.push(`🗡 ${defItemEff.name}が伏せ札と連携！ ${defCard.name}のST+${defTrick}/HP+${defTrick}`);
 
   // 📜巻物: 攻撃が「記載ST固定の魔法攻撃」に置き換わる＝本体ST・強襲・属性・援護・群れの補正は乗らない
   if (attScroll > 0) { attSt = attScroll; log.push(`📜 ${attCard.name}は${attItemEff.name}を展開！ 攻撃がST${attScroll}固定の魔法砲撃になる`); }
@@ -194,16 +230,17 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
     const terms = parts.filter(([, v]) => v).map(([lbl, v]) => `${v > 0 ? "+" : ""}${v}(${lbl})`);
     return terms.length ? `${total} ＝ ${base} ${terms.join(" ")}` : `${total}`;
   };
+  const attHpParts = [["成長", attGrown * GROW_STEP], ["装備", attItemEff ? attItemEff.hp : 0], ["応援", attCheer], ["武芸", attWeapon], ["反骨", attRebel], ["共鳴", attResoHp], ["罠", -(opts.attPreDmg || 0)]];
   if (attScroll > 0) {
-    log.push(`📊【式】侵略 ${attCard.name}: ST ${attSt}（📜巻物固定） ／ HP ${bd(attHp, attCard.hp, [["成長", attGrown * GROW_STEP], ["装備", attExtra]])}`);
+    log.push(`📊【式】侵略 ${attCard.name}: ST ${attSt}（📜巻物固定） ／ HP ${bd(attHp, attCard.hp, attHpParts)}`);
   } else {
-    log.push(`📊【式】侵略 ${attCard.name}: ST ${bd(attSt, attCard.st, [["装備", attItemEff ? attItemEff.st : 0], ["強襲", attAb.has("assault") ? 20 : 0], ["属性", advAtt ? ELEM_ADV_ST : 0], ["成長", attGrown * GROW_STEP], ["群れ", attPack], ["応援", attCheer], ["闘技場", RULES.invaderSt]])} ／ HP ${bd(attHp, attCard.hp, [["成長", attGrown * GROW_STEP], ["装備", attItemEff ? attItemEff.hp : 0], ["応援", attCheer]])}`);
+    log.push(`📊【式】侵略 ${attCard.name}: ST ${bd(attSt, attCard.st, [["装備", attItemEff ? attItemEff.st : 0], ["強襲", attAb.has("assault") ? 20 : 0], ["属性", advAtt ? ELEM_ADV_ST : 0], ["成長", attGrown * GROW_STEP], ["群れ", attPack], ["応援", attCheer], ["闘技場", RULES.invaderSt], ["罠", attTrapSt], ["武芸", attWeapon], ["反骨", attRebel], ["共鳴", attResoSt]])} ／ HP ${bd(attHp, attCard.hp, attHpParts)}`);
   }
-  const defHpParts = [["装備", defItemEff ? defItemEff.hp : 0], ["土地の加護", defBonus], ["守護", guardBonus], ["焦土", blightHp], ["応援", defCheer], ["護りの風", defWindHp]];
+  const defHpParts = [["装備", defItemEff ? defItemEff.hp : 0], ["土地の加護", defBonus], ["守護", guardBonus], ["焦土", blightHp], ["応援", defCheer], ["護りの風", defWindHp], ["武芸", defWeapon], ["反骨", defRebel], ["共鳴", defResoHp], ["連携", defTrick]];
   if (defScroll > 0) {
     log.push(`📊【式】防衛 ${defCard.name}: ST ${defSt}（📜巻物固定） ／ HP ${bd(defHp, defBaseHp, defHpParts)}`);
   } else {
-    log.push(`📊【式】防衛 ${defCard.name}: ST ${bd(defSt, defCard.st, [["装備", defItemEff ? defItemEff.st : 0], ["属性", advDef ? ELEM_ADV_ST : 0], ["成長", defGrown * GROW_STEP], ["群れ", defPack], ["援護", support], ["応援", defCheer]])} ／ HP ${bd(defHp, defBaseHp, defHpParts)}`);
+    log.push(`📊【式】防衛 ${defCard.name}: ST ${bd(defSt, defCard.st, [["装備", defItemEff ? defItemEff.st : 0], ["属性", advDef ? ELEM_ADV_ST : 0], ["成長", defGrown * GROW_STEP], ["群れ", defPack], ["援護", support], ["応援", defCheer], ["罠", defTrapSt], ["武芸", defWeapon], ["反骨", defRebel], ["共鳴", defResoSt], ["連携", defTrick]])} ／ HP ${bd(defHp, defBaseHp, defHpParts)}`);
   }
   // 侵略は「一撃で相手の実効HPを削り切れば占領」。硬殻は一撃ごとに-10されるためここで織り込む。
   const attBlocked = !attMagic && (defAb.has("physnull") || defAb.has("physreflect")); // 侵略の攻撃が通らない
@@ -315,7 +352,10 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   // 反撃側は「自分も相手も生存」のときだけ手番を得る。
   // 遠隔（侵略側）＝防衛側は反撃できない。建造物（防衛側）＝反撃しない。
   const defCanCounter = !attRanged && !defStruct;
-  if (defFirst) {
+  if (attHp <= 0) {
+    // ⚡カウンターボルト（v29）: 罠の直撃で侵略者が倒れた＝バトルは始まらない
+    log.push(`💥 ${attCard.name}は罠に倒れ、バトルは始まらなかった…`);
+  } else if (defFirst) {
     log.push(`🛡 ${defCard.name}の先制攻撃！`);
     defTurn();
     if (attHp > 0 && defHp > 0) attTurn();
