@@ -996,7 +996,7 @@ function showStageSelect(opts = {}) {
         [`🔵 <b>${esc(versus.names[0])}</b> vs 🔴 <b>${esc(versus.names[1])}</b>`, weeklyChip, mlChip])
       : sealed
       ? hero("🎁 シールド戦の間",
-        `その場で開封した<b>第一弾5＋第二弾5パック（計${SEALED_PACKS_PER_SET * SEALED_PACK_SIZE * 2}枚）</b>だけで
+        `その場で開封した<b>第一弾4＋第二弾4＋第三弾4パック（計${SEALED_PACKS_PER_SET * SEALED_PACK_SIZE * 3}枚）</b>だけで
          ${DECK_SIZE}枚デッキを組み、ステージの主に挑む——<b>コレクションの厚さに関係なく誰でも対等</b>の腕くらべ。
          開封プールはコレクションに入りません（勝てば通常どおりカード${REWARD_WIN}枚獲得・進行度は変化しません）。<b>全ステージから選択可</b>。`,
         [`👤 <b>${esc(currentProfileName())}</b>`, `⚙ 難易度: <b>${diff.icon} ${diff.label}</b>`, weeklyChip, mlChip])

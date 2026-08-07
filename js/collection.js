@@ -718,24 +718,26 @@ function showPackReveal(cardIds, title, sub, opts = {}) {
   });
 }
 
-// ---------- 🎁 シールド戦（v21） ----------
-// その場で第一弾5＋第二弾5パック（各5枚＝計50枚）を開封し、出たカードだけで30枚デッキを組んで1戦。
+// ---------- 🎁 シールド戦（v21・v30で三弾体制に） ----------
+// その場で第一弾4＋第二弾4＋第三弾4パック（各5枚＝計60枚）を開封し、出たカードだけで30枚デッキを組んで1戦。
 // 開封したプールはコレクションに加算しない（使い捨て）＝コレクションが浅いプロファイルでも対等に遊べる。
-const SEALED_PACKS_PER_SET = 5;
+// v30: 懸案だった「シールド戦は第一弾+第二弾のみ」を解消（第三弾の伏せ札・共鳴・不屈/倍返しもプールに出る）
+const SEALED_PACKS_PER_SET = 4;
 const SEALED_PACK_SIZE = 5;
 const SEALED_MIN_CREATURES = 16; // プールに保証するクリーチャー数（MIN_CREATURES=12のデッキを確実に組めるように）
 
-// シールド戦のカードプールを引く。戻り値 { set1, set2, pool }（poolはset1+set2の50枚）。
+// シールド戦のカードプールを引く。戻り値 { set1, set2, set3, pool }（poolは3弾ぶんの60枚）。
 // クリーチャーが極端に少ないプールはデッキが組めないので引き直す（比率的にまず起きないが保険）
 function drawSealedPool() {
   let last = null;
   for (let tries = 0; tries < 20; tries++) {
-    const set1 = [], set2 = [];
+    const set1 = [], set2 = [], set3 = [];
     for (let i = 0; i < SEALED_PACKS_PER_SET; i++) {
       set1.push(...drawPack(SEALED_PACK_SIZE, "uncommon", 1, 1));
       set2.push(...drawPack(SEALED_PACK_SIZE, "uncommon", 1, 2));
+      set3.push(...drawPack(SEALED_PACK_SIZE, "uncommon", 1, 3));
     }
-    last = { set1, set2, pool: [...set1, ...set2] };
+    last = { set1, set2, set3, pool: [...set1, ...set2, ...set3] };
     const creatures = last.pool.filter(id => CARD_BY_ID[id].type === "creature").length;
     if (creatures >= SEALED_MIN_CREATURES) return last;
   }

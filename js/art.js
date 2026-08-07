@@ -677,6 +677,18 @@ const CREATURE_ART = {
   // 無
   facelessduelist: { arch: "humanoid", o: { sword: 1, genie: 1 } },          // 顔なき決闘者
   paradoxwisp:   { arch: "fairy",    o: { wings: false } },                  // 矛盾を漂う燐光
+  // ============================================================
+  // ⚡ 第三弾・追補「見切りと雪辱」（v30・クリーチャー9種）
+  // ============================================================
+  emberguard:    { arch: "humanoid", o: { shield: 1 } },                     // 篝火を守る番兵（不屈）
+  paybackogre:   { arch: "humanoid", o: { big: 1, club: 1, horns: 1 } },     // 殴られてから本気を出す大鬼（倍返し）
+  seekerfairy:   { arch: "fairy" },                                          // 罠を見抜く探索妖精（罠外し）
+  vengeflora:    { arch: "tree",     o: { face: 1 } },                       // 傷つくほど怒る復讐樹（倍返し）
+  trapeater:     { arch: "jawplant" },                                       // 罠ごと噛み砕く大顎（罠外し）
+  anvilgolem:    { arch: "golem",    o: { big: 1 } },                        // 金床のように打たれ強い（不屈）
+  pearlmaiden:   { arch: "mermaid" },                                        // 真珠の殻に守られた姫（不屈・守護）
+  tideavenger:   { arch: "humanoid", o: { trident: 1 } },                    // 潮の恨みを返す復讐者（倍返し）
+  vendettalord:  { arch: "humanoid", o: { sword: 1, horns: 1, wings: 1 } },  // 一太刀受けてから倍で返す復讐公
 };
 
 // ---------- アイテムの造形 ----------

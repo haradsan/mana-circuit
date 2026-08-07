@@ -1970,6 +1970,35 @@ async function castSpellEffect(p, cardId) {
       names.push(`${CARD_BY_ID[t.creature.cardId].name}(+${t.creature.grown * 5})`);
     });
     log(`✨ ${p.name}のレゾナンスコール！ ${names.join("・")}が高まった`);
+
+  // ---------- 第三弾・追補「見切りと雪辱」スペル（v30） ----------
+  } else if (c.spell === "trapsweep") {
+    // 🧹敵の伏せ札1枚を公開して不発のまま除去（罠師の報酬は「発動」ではないので出ない）
+    const cands = G.tiles.filter(t => { const tr = trapOf(G, t); return tr && tr.owner !== p.id; });
+    const target = p.isCPU ? (cands[0] || null)
+      : await humanPickLand(cands, "🧹 トラップスウィープ — 対象を選択",
+        "敵の🃏伏せ札1枚を<b>公開して取り除きます</b>（不発＝罠師の報酬も出ません）",
+        "取り除ける敵の伏せ札がありません");
+    if (!target) return false;
+    pay();
+    const tr = trapOf(G, target);
+    const tc = CARD_BY_ID[tr.cardId];
+    discardTrap(G, target);
+    log(`🧹 ${p.name}のトラップスウィープ！ ${tileName(target)}の伏せ札は${tc.icon}${tc.name}だった——不発のまま取り除いた`, "warn");
+    renderBoard(G);
+
+  } else if (c.spell === "braceup") {
+    // 🛡️次のバトルで自軍クリーチャーに不屈を付与（fightForがattExtraAb/defExtraAbでbattle.jsへ渡す）
+    pay();
+    p.nextBattleEndure = true;
+    log(`🛡 ${p.name}の見切りの構え！ 次のバトルで自軍クリーチャーは不屈を得る（倒される一撃をHP1で耐える）`);
+
+  } else if (c.spell === "mirrorpact") {
+    // ⚖️逆転: 次に通行料を支払ったとき、その2倍を支払先から奪い返す（1回きり）
+    if (p.tollPayback) { if (!p.isCPU) log("雪辱の契約はすでに結ばれています", "warn"); return false; }
+    pay();
+    p.tollPayback = true;
+    log(`⚖ ${p.name}は雪辱の契約を結んだ——次に支払う通行料は、屈辱ごと2倍にして取り返す！`, "warn");
   }
 
   SFX.spell();
@@ -2567,6 +2596,8 @@ async function enemyLandFlow(p, tile) {
         (defCard.ab.includes("physnull") ? `<br><b>⚠ 物理無効持ち</b>：<b>✨魔法攻撃</b>（魔法攻撃持ちクリーチャー／マジックワンド等の装備）以外ではダメージを与えられません` : "") +
         (defCard.ab.includes("physreflect") ? `<br><b>⚠ 物理反射持ち</b>：物理攻撃は<b>そっくり跳ね返されます</b>（✨魔法攻撃なら通る）` : "") +
         (defCard.ab.includes("mimic") ? `<br><b>⚠ 模倣持ち</b>：バトルであなたのクリーチャーの<b>基本ST・HP・能力を写し取って</b>戦います（送り込んだ強さがそのまま返ってくる）` : "") +
+        (defCard.ab.includes("endure") ? `<br><b>⚠ 不屈持ち</b>：倒される一撃を<b>一度だけHP1で耐えます</b>（単発の一撃では落とせない——🐲連撃なら貫ける）` : "") +
+        (defCard.ab.includes("payback") ? `<br><b>⚠ 倍返し持ち</b>：ダメージを与えると、<b>反撃がダメージ2倍</b>で返ってきます（一撃で仕留めないと危険）` : "") +
         `<br>侵略はコストのみ（勝てば通行料は不要）。ただし<b>敗れると通行料${toll}Gも徴収</b>され、カードも失います`,
       cards: creatures.map(id => {
         const c = CARD_BY_ID[id];
@@ -2602,10 +2633,24 @@ async function enemyLandFlow(p, tile) {
   }
   log(`${p.name}は通行料${toll}Gを${owner.name}に支払う`, "", { toast: true });
   await forcePay(G, p, toll, owner, log, landSellChooser(p)); // 払いきれなければ城で再起（敗北はしない）
+  applyTollPayback(p, owner, toll); // ⚖️雪辱の契約（v30）: 支払った直後に2倍を奪い返す
   // 高額の通行料をせしめた相手キャラはほくそ笑む（存在感の演出）
   if (toll >= 150 && typeof cpuSay === "function") cpuSay(owner, "tollGain");
   renderAll(G);
   return false;
+}
+
+// ⚖️雪辱の契約（mirrorpact・v30）: 通行料を支払った直後、その2倍を支払先から奪い返す（1回きり）。
+// 🃏二重徴収で膨れた通行料もそのまま倍返しの種になる。相手の所持魔力が上限
+function applyTollPayback(p, owner, toll) {
+  if (!p.tollPayback || toll <= 0) return;
+  p.tollPayback = false;
+  const back = Math.min(toll * 2, owner.magic);
+  owner.magic -= back;
+  p.magic += back;
+  SFX.coin();
+  log(`⚖ 雪辱の契約が満ちる——${p.name}は支払った屈辱を倍にして返した！ ${owner.name}から${back}Gを奪い返す`, "warn");
+  renderPanels(G);
 }
 
 // 手札からバトル用アイテムを選ぶ（人間用）。ないなら聞かずに null。
@@ -2658,21 +2703,30 @@ async function reclaimBattleItem(pl, itemId, prefix) {
 async function fightFor(p, tile, attCard, attItem, battleOpts = {}) {
   const defender = G.players[tile.owner];
 
-  // 🃏 invade型の伏せ札（v29）: 侵略・侵攻を宣言された瞬間＝アイテム応酬より前に公開・発動する
+  // 🃏 invade型の伏せ札（v29）: 侵略・侵攻を宣言された瞬間＝アイテム応酬より前に公開・発動する。
+  // 🪝罠外し（disarm・v30）: 侵略側が罠外し持ち（クリーチャー能力 or 装備の付与）なら、発動させずに取り除く
   let trapFx = {};
   let trapFired = false;
   const trapNow = trapOf(G, tile);
   if (trapNow && CARD_BY_ID[trapNow.cardId].trap === "invade") {
     const tc = CARD_BY_ID[trapNow.cardId];
+    const attDisarm = (!battleOpts.attNulled && (attCard.ab || []).includes("disarm")) ||
+      !!(attItem && (attItem.grant || []).includes("disarm"));
     discardTrap(G, tile);
     SFX.spell();
-    log(`🃏 伏せ札発動！ ${defender.name}の${tc.icon}${tc.name}！`, "warn");
-    trapFired = true;
-    if (tc.id === "trap_pit") trapFx = { attTrapSt: -25, trapName: tc.name };
-    else if (tc.id === "trap_bolt") trapFx = { attPreDmg: 30, trapName: tc.name };
-    else if (tc.id === "trap_ambush") trapFx = { defTrapSt: 25, trapName: tc.name };
-    await awardTrapper(defender);
-    renderBoard(G);
+    if (attDisarm) {
+      // 不発＝罠師の報酬も出ない。トリックダガーの連携も切れる（trapFiredはfalseのまま）
+      log(`🪝 ${attCard.name}の罠外し！ ${defender.name}の伏せ札（${tc.icon}${tc.name}）を不発のまま取り除いた`, "warn");
+      renderBoard(G);
+    } else {
+      log(`🃏 伏せ札発動！ ${defender.name}の${tc.icon}${tc.name}！`, "warn");
+      trapFired = true;
+      if (tc.id === "trap_pit") trapFx = { attTrapSt: -25, trapName: tc.name };
+      else if (tc.id === "trap_bolt") trapFx = { attPreDmg: 30, trapName: tc.name };
+      else if (tc.id === "trap_ambush") trapFx = { defTrapSt: 25, trapName: tc.name };
+      await awardTrapper(defender);
+      renderBoard(G);
+    }
   }
   // 🗡トリックダガー連携（v29）: このバトルで罠が発動した／stop型の伏せ札がまだこの土地にある
   const defTrapSynergy = trapFired || !!trapOf(G, tile);
@@ -2721,9 +2775,12 @@ async function fightFor(p, tile, attCard, attItem, battleOpts = {}) {
     defHpBonus: defender.nextDefHp || 0,
     attCritRate: p.nextBattleCrit || 0,
     defCritRate: defender.nextBattleCrit || 0,
+    // 🛡見切りの構え（braceup・v30）: 次のバトルで不屈を付与（battle.jsのabilitiesに合流する）
+    attExtraAb: p.nextBattleEndure ? ["endure"] : null,
+    defExtraAb: defender.nextBattleEndure ? ["endure"] : null,
   };
-  p.nextBattleSt = 0; p.nextBattleCrit = 0;
-  defender.nextBattleSt = 0; defender.nextDefHp = 0; defender.nextBattleCrit = 0;
+  p.nextBattleSt = 0; p.nextBattleCrit = 0; p.nextBattleEndure = false;
+  defender.nextBattleSt = 0; defender.nextDefHp = 0; defender.nextBattleCrit = 0; defender.nextBattleEndure = false;
 
   // バトル演出（結果は先に計算し、カットインで表示だけ流す。実戦は会心あり・土地の援護・群れあり）
   // ⏩スキップが押されたら残りのログを一括表示して即座に決着へ（UI.battleSkip）
@@ -2825,6 +2882,7 @@ async function doInvade(p, tile, cardId, itemId = null) {
     if (toll > 0) {
       log(`${p.name}は侵略に失敗し、通行料${toll}Gを${defender.name}に支払う`, "warn");
       await forcePay(G, p, toll, defender, log, landSellChooser(p)); // 払いきれなければ城で再起
+      applyTollPayback(p, defender, toll); // ⚖️雪辱の契約（v30）: 侵略失敗の通行料も倍返しの対象
       renderAll(G);
     }
     // v25: 🏗築城＝守り抜いてLv+1／🔥焦土＝戦火でLv-1（forcePayで土地を手放していたら何も起きない）
@@ -3149,7 +3207,7 @@ async function startSealed(stageIdx) {
   const stage = STAGES[stageIdx];
   const ok = await showDialog({
     title: `🎁 シールド戦 — ${stage.icon} ${esc(stage.name)}`,
-    body: `その場で<b>第一弾${SEALED_PACKS_PER_SET}パック＋第二弾${SEALED_PACKS_PER_SET}パック（計${SEALED_PACKS_PER_SET * SEALED_PACK_SIZE * 2}枚）</b>を開封し、
+    body: `その場で<b>第一弾${SEALED_PACKS_PER_SET}＋第二弾${SEALED_PACKS_PER_SET}＋第三弾${SEALED_PACKS_PER_SET}パック（計${SEALED_PACKS_PER_SET * SEALED_PACK_SIZE * 3}枚）</b>を開封し、
       出たカードだけで<b>${DECK_SIZE}枚デッキ</b>を組んで <b>${esc(stage.cpuName)}</b> に挑みます。<br><br>
       ⚠ 開封したカードは<b>この1戦だけの使い捨て</b>です（コレクションには入りません）。<br>
       🏆 勝てば通常どおり<b>勝利報酬パック（${REWARD_WIN}枚）</b>を獲得できます（こちらはコレクションに入ります）。`,
@@ -3163,7 +3221,9 @@ async function startSealed(stageIdx) {
   await showPackReveal(pool.set1, `🎁 シールド戦 — ✦第一弾パック×${SEALED_PACKS_PER_SET}`,
     `第一弾のカード${pool.set1.length}枚を開封！（プールは使い捨て・コレクションには入りません）`, { noNew: true });
   await showPackReveal(pool.set2, `🎁 シールド戦 — ⏳第二弾パック×${SEALED_PACKS_PER_SET}`,
-    `第二弾のカード${pool.set2.length}枚を開封！ ここから${DECK_SIZE}枚のデッキを組もう`, { noNew: true });
+    `第二弾のカード${pool.set2.length}枚を開封！`, { noNew: true });
+  await showPackReveal(pool.set3, `🎁 シールド戦 — ⚡第三弾パック×${SEALED_PACKS_PER_SET}`,
+    `第三弾のカード${pool.set3.length}枚を開封！ ここから${DECK_SIZE}枚のデッキを組もう`, { noNew: true });
   const deck = await showSealedBuilder(pool.pool);
   if (!deck) return false;
   startGame(stageIdx, { sealed: true, sealedDeck: deck });
@@ -3245,7 +3305,7 @@ function showHelp() {
       <b>💸 魔力が尽きても敗北にはならない</b>: 支払いきれないときは土地を売却し、それでも足りなければ
       持てる魔力を全て渡して<b>🏰城へ帰還し、初期魔力で再スタート</b>する（相手を身ぐるみ剥いでも決着はつかない——勝つには自分が凱旋するしかない）。<br>
       <b>⏱ 決着モード</b>: タイトルの「⏱ 決着」で<b>短期戦／標準／長期戦／大戦</b>を選べる。目標資産とラウンド上限が変わり、対戦の長さを好みに調整できる。<br>
-      <b>🎁 シールド戦</b>: その場で開封した<b>第一弾5＋第二弾5パック（計50枚）</b>だけで30枚デッキを組んで1戦する特別モード。
+      <b>🎁 シールド戦</b>: その場で開封した<b>第一弾4＋第二弾4＋第三弾4パック（計60枚）</b>だけで30枚デッキを組んで1戦する特別モード。
       開封プールは<b>使い捨て</b>（コレクションには入らない）なので、コレクションの厚さに関係なく誰でも対等に遊べる。勝てば通常の勝利報酬あり（進行度は変化しない）。<br><br>
       <b>ターンの流れ</b>: カードを1枚引く → （任意で手札のスペルをクリックして使用・1回まで）→ 🎲ダイスで移動<br>
       <b>🧭 移動は進行方向へ（v24）</b>: コマは<b>今の進行方向を保って</b>進む＝<b>逆走はできない</b>。
@@ -3382,6 +3442,14 @@ function showHelp() {
       <b>⚔️決戦スペル</b>（ラストスタンド・軍資金調達・ジャッジメント）が解禁される。BGMもボス曲に変わる。<br>
       ⚒️<b>逆転スペル</b>（スナイプショット・レジスタンス・アップライジング）は<b>劣勢のときにしか使えない</b>強力な牙——
       首位が独走するほど、追う側の手札が輝く。<br>
+      <b>⚡ 第三弾・追補「見切りと雪辱」（v30・15種）</b>: 数値の足し引きではない<b>「受けの駆け引き」</b>の拡張。新能力——
+      <span class="ab">不屈</span>バトル中一度だけ、倒される一撃を<b>HP1で耐える</b>（🐲連撃の2撃目には耐えられない＝連撃が対策になる） ／
+      <span class="ab">倍返し</span>相手の攻撃でダメージを受けたあと生き残っていれば、<b>以後の自分の攻撃ダメージが2倍</b>（一旦食らってから倍にして返す。一撃で仕留めれば発動させない） ／
+      <span class="ab">罠外し</span>侵略・侵攻時、その土地の🃏伏せ札を<b>発動させずに取り除く</b>（罠師の報酬も出ない＝罠デッキへの対抗手）。<br>
+      アイテムでは<b>みがわり人形</b>（不屈を付与する保険）・<b>罠外しの鉤</b>（どのクリーチャーも罠外しに）・
+      <b>復讐鎧ヴェンデッタメイル</b>（受けたダメージを<b>100%そのまま反射</b>）が加わり、スペルでは
+      🧹<b>トラップスウィープ</b>（敵の伏せ札を公開して除去）・🛡️<b>見切りの構え</b>（次のバトルで不屈を付与）・
+      ⚖️<b>雪辱の契約</b>（逆転スペル: 次に支払う通行料の<b>2倍を奪い返す</b>＝高額地帯が狩り場に変わる）が使える。<br>
       <b>🎪 ウィークリールール</b>: 毎週月曜に切り替わる特殊ルール（通行料2倍・初期手札レジェンド保証など）。タイトルの「🎪 週替り」でON/OFF。
       ONで正規対戦に勝つと<b>ボーナスカード+${typeof WEEKLY_BONUS_CARDS !== "undefined" ? WEEKLY_BONUS_CARDS : 2}枚</b>（トレーニングには適用されない）。<br>
       <b>👥 情報窓（画面上部・3名分）</b>: 各プレイヤーの<b>順位・魔力・総資産（バー）・連鎖・関門・周回・山札</b>を

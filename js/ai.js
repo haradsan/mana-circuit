@@ -167,6 +167,13 @@ function aiChooseSpell(g, p) {
         CARD_BY_ID[x].type === "item" && CARD_BY_ID[x].cost >= 70)) return id;
     if (c.spell === "resonancecall" && ownedLands(g, p.id).filter(t =>
         t.creature && (t.creature.grown || 0) < 5).length >= 3) return id;
+    // ---------- 第三弾・追補「見切りと雪辱」（v30） ----------
+    // トラップスウィープ: 敵の伏せ札マーカーは全員に見える（中身は見ずに存在だけで判断）
+    if (c.spell === "trapsweep" && g.tiles.some(t => {
+        const tr = trapOf(g, t); return tr && tr.owner !== p.id; })) return id;
+    // 雪辱の契約: 劣勢時のみ。首位が高額地を持っている＝踏まされる公算が高いときに保険として結ぶ
+    if (c.spell === "mirrorpact" && isUnderdog(g, p) && !p.tollPayback &&
+        ownedLands(g, opponentOf(g, p).id).some(t => tollOf(g, t) >= 120)) return id;
   }
   return null;
 }

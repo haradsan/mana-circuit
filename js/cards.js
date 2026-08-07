@@ -79,6 +79,11 @@ const ABILITY_INFO = {
   artificer:  { name: "工匠", desc: "バトルで装備した自分のアイテムは使い切りにならず、バトル後に手札へ戻る（このクリーチャーが生き残った場合）" },
   trapper:    { name: "罠師", desc: "盤上にいる間、自分の🃏伏せ札が発動するたび +50G（罠師1体につき）。さらにカードを1枚引く（1発動につき1枚）" },
   rebel:      { name: "反骨", desc: "バトル時、自分の総資産が首位の70%未満なら ST+20/HP+20。劣勢でこそ燃える闘志" },
+  // ---------- 第三弾・追補「見切りと雪辱」の新能力（v30・原さん要望） ----------
+  // 足し算バフではない「受けの駆け引き」: 必殺の回避（不屈）／食らってから倍にして返す（倍返し）／必殺の解除（罠外し）
+  endure:   { name: "不屈", desc: "バトル中一度だけ、倒される一撃を受けてもHP1で踏みとどまる（🐲連撃の2撃目など、2度目の致命打には耐えられない）" },
+  payback:  { name: "倍返し", desc: "バトルで相手の攻撃によるダメージを受けたあと、生き残っていれば以後の自分の攻撃ダメージが2倍になる（一旦食らってから倍にして返す）" },
+  disarm:   { name: "罠外し", desc: "侵略・侵攻したとき、その土地の🃏伏せ札を発動させずに取り除く（罠は不発のまま捨札へ＝罠師の報酬も出ない）" },
 };
 
 // レア度: カードの希少度。card.rarity で個別指定、無ければコストとタイプから推定。
@@ -604,6 +609,30 @@ const CARD_DB = [
   // --- スペル: 🔧コンボ支援2種 ---
   { id: "reforge",       name: "リフォージ",       type: "spell", set: 3, cost: 60, spell: "reforge", rarity: "uncommon", icon: "🔨", desc: "自分の捨て札からアイテムを1枚選んで手札に戻す（使ったあの武具をもう一度）" },
   { id: "resonancecall", name: "レゾナンスコール", type: "spell", set: 3, cost: 90, spell: "resonancecall", rarity: "rare", icon: "✨", desc: "盤上の自軍クリーチャー全員の成長カウンタ+1（ST/最大HP+5・上限+25。HPも+5回復）。⚡共鳴持ちはこのスペル自体にも共鳴する" },
+  // ============================================================
+  // ⚡ 第三弾・追補「見切りと雪辱」（v30・15種）
+  // テーマ: 足し算バフではない「受けの駆け引き」——
+  //   🛡不屈＝必殺の一撃をHP1で見切る／💢倍返し＝一旦食らってから倍にして返す／🪝罠外し＝伏せ札という必殺の解除。
+  // 倍返し持ちは素のSTを同コスト帯より低く（被弾後は実質2倍で逆転する）、不屈持ちはHP寄りに設定
+  // ============================================================
+  // --- クリーチャー9種（火2/木2/地2/水2/無1） ---
+  { id: "emberguard",   name: "篝火番エンバーガード", type: "creature", element: "fire", set: 3, cost: 60,  st: 25, hp: 45, ab: ["endure"] },
+  { id: "paybackogre",  name: "倍返しのオーガ",       type: "creature", element: "fire", set: 3, cost: 90,  st: 40, hp: 50, ab: ["payback"], rarity: "uncommon" },
+  { id: "seekerfairy",  name: "シーカーフェアリー",   type: "creature", element: "wood", set: 3, cost: 55,  st: 25, hp: 35, ab: ["disarm"] },
+  { id: "vengeflora",   name: "復讐樹ヴェンジフローラ", type: "creature", element: "wood", set: 3, cost: 95, st: 30, hp: 65, ab: ["payback"], rarity: "uncommon" },
+  { id: "trapeater",    name: "トラップイーター",     type: "creature", element: "earth", set: 3, cost: 70,  st: 40, hp: 40, ab: ["disarm"] },
+  { id: "anvilgolem",   name: "アンヴィルゴーレム",   type: "creature", element: "earth", set: 3, cost: 100, st: 30, hp: 70, ab: ["endure"], rarity: "uncommon" },
+  { id: "pearlmaiden",  name: "真珠姫パールメイデン", type: "creature", element: "water", set: 3, cost: 75,  st: 30, hp: 45, ab: ["endure", "guard"], rarity: "uncommon" },
+  { id: "tideavenger",  name: "潮の復讐者タイドアヴェンジャー", type: "creature", element: "water", set: 3, cost: 90, st: 35, hp: 55, ab: ["payback"], rarity: "uncommon" },
+  { id: "vendettalord", name: "復讐公ヴェンデッタロード", type: "creature", element: "neutral", set: 3, cost: 135, st: 50, hp: 60, ab: ["payback", "endure"], rarity: "legendary" },
+  // --- アイテム3種 ---
+  { id: "migawaridoll", name: "みがわり人形",         type: "item", set: 3, cost: 60,  st: 0,  hp: 10, grant: ["endure"], rarity: "uncommon", desc: "HP+10・不屈を得る（倒される一撃を一度だけHP1で耐える身代わりの木像）" },
+  { id: "traphook",     name: "罠外しの鉤フック",     type: "item", set: 3, cost: 55,  st: 10, hp: 0,  grant: ["disarm"], rarity: "uncommon", desc: "ST+10・罠外しを得る（侵略・侵攻時、相手の🃏伏せ札を不発のまま取り除く）" },
+  { id: "vengemail",    name: "復讐鎧ヴェンデッタメイル", type: "item", set: 3, cost: 120, st: 0, hp: 25, reflect: 1.0, rarity: "rare", desc: "バトル時 HP+25・受けた攻撃ダメージの100%をそっくり相手に反射する（一旦食らって、同じ痛みを返す）" },
+  // --- スペル3種 ---
+  { id: "trapsweep",  name: "トラップスウィープ", type: "spell", set: 3, cost: 55, spell: "trapsweep", rarity: "uncommon", icon: "🧹", desc: "敵の🃏伏せ札1枚を選んで公開し、不発のまま取り除く（中身を暴いて無力化——罠師の報酬も出ない）" },
+  { id: "braceup",    name: "見切りの構え",       type: "spell", set: 3, cost: 50, spell: "braceup", noCpu: true, rarity: "uncommon", icon: "🛡️", desc: "次の自分のバトルで、自軍クリーチャーは不屈を得る（倒される一撃を一度だけHP1で耐える。侵略でも防衛でも）" },
+  { id: "mirrorpact", name: "雪辱の契約",         type: "spell", set: 3, cost: 75, spell: "mirrorpact", underdog: true, rarity: "rare", icon: "⚖️", desc: "【逆転: 総資産が首位の70%未満のときのみ】次に通行料を支払ったとき、その2倍を支払先から奪い返す（1回きり——高額地帯こそ狩り場に変わる）" },
 ];
 
 const CARD_BY_ID = Object.fromEntries(CARD_DB.map(c => [c.id, c]));
