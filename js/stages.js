@@ -21,6 +21,16 @@
 //   elementAt    : {"x,y": element} 個別指定（循環より優先）
 //   gatesNeeded  : 周回に必要な関門数（省略時3）
 //   rules        : state.js の DEFAULT_RULES への上書き
+//   look         : 盤面の見た目（v31）。ステージごとに「マス目の形」から変えて違いを一目で分かるようにする
+//                  { shape, gap, road, dash }
+//                    shape … 土地マスの形。ui.js の TILE_SHAPES のキー:
+//                            square(丸い四角) / brick(石畳・横長) / round(円) / hex(平頭六角) /
+//                            oct(八角) / diamond(菱形) / gem(尖頭六角＝結晶) / leaf(木の葉) / gear(歯車)
+//                            ※特別マス（城・関門・魔力・運命…）の形は全ステージ共通（ui.js TYPE_SHAPE）。
+//                              形そのものが「このマスは何か」の手がかりになるようにしてある
+//                    gap   … マス間の余白率（0.02〜0.30・既定0.10）。大きいほどマス目が小さく道が主役になる
+//                            ＝密集した都市/闘技場は小さく、広大な草原/星空は大きく
+//                    road  … 道の太さ（既定16） ／ dash … 道を流れる魔力の点線パターン（既定 "2 9"）
 "use strict";
 
 // ---------- 盤面ヘルパー ----------
@@ -120,6 +130,7 @@ const STAGES = [
     },
     elements: ["fire", "wood", "earth", "water"],
     theme: { glow: "#24402a", bg: "#121c13", path: "#1d2b20", dot: "#6f9a6f" },
+    look: { shape: "leaf", gap: 0.16, road: 15, dash: "2 9" }, // 草の葉のマス・広い草原なので道をよく見せる
     rules: { target: 3000, maxRounds: 32 },
   },
   {
@@ -136,6 +147,7 @@ const STAGES = [
     },
     elements: ["fire", "water", "wood", "earth", "fire"],
     theme: { glow: "#40231a", bg: "#1c1210", path: "#2e1c16", dot: "#a06a4a" },
+    look: { shape: "hex", gap: 0.06, road: 18, dash: "3 7" }, // 玄武岩の柱状節理＝六角を敷き詰めた峠道
     rules: { target: 3200, maxRounds: 34 },
   },
   {
@@ -155,6 +167,7 @@ const STAGES = [
     elementAt: { "1,3": "water", "2,3": "water", "4,3": "water", "5,3": "water" },
     elements: ["water", "fire", "wood", "earth", "water"],
     theme: { glow: "#1c2c4a", bg: "#0f1624", path: "#1a2338", dot: "#4a6a9a" },
+    look: { shape: "round", gap: 0.12, road: 17, dash: "1 6" }, // 水面の波紋のような円い浮島・水路はさらさら流れる
     hud: { left: "50%", top: "72%", width: "46%" },
     rules: { target: 3500, maxRounds: 38 },
   },
@@ -172,6 +185,7 @@ const STAGES = [
     },
     elements: ["wood", "fire", "water", "earth", "wood"],
     theme: { glow: "#263c1e", bg: "#131a10", path: "#1e2a18", dot: "#7a9a5a" },
+    look: { shape: "gem", gap: 0.14, road: 14, dash: "4 12" }, // 風に削られた尖った岩・道は細く長く伸びる
     hud: { left: "50%", top: "50%", width: "62%" },
     rules: { target: 3200, maxRounds: 36 },
   },
@@ -192,6 +206,7 @@ const STAGES = [
     elementAt: { "1,4": "earth", "3,4": "earth", "4,4": "earth" },
     elements: ["earth", "fire", "wood", "water", "earth"],
     theme: { glow: "#3a2e1e", bg: "#191410", path: "#291f15", dot: "#8a7a5a" },
+    look: { shape: "brick", gap: 0.08, road: 19, dash: "3 8" }, // 切り出した岩塊を積み上げた霊峰
     hud: { left: "50%", top: "29%", width: "50%" },
     rules: { target: 3400, maxRounds: 38, magicTileG: 300 },
   },
@@ -216,6 +231,7 @@ const STAGES = [
     gatesNeeded: 3,
     elements: ["fire", "wood", "earth", "water"],
     theme: { glow: "#33204a", bg: "#140f20", path: "#251a38", dot: "#8a6ab8" },
+    look: { shape: "oct", gap: 0.15, road: 13, dash: "1 5" }, // 万華鏡のような八角のマス・幻の細い道
     hud: { left: "24%", top: "76%", width: "42%" },
     rules: { target: 3000, maxRounds: 40 },
   },
@@ -232,6 +248,7 @@ const STAGES = [
     },
     elements: ["water", "fire", "wood", "earth", "water"],
     theme: { glow: "#403618", bg: "#19150c", path: "#2c2512", dot: "#b89a4a" },
+    look: { shape: "gem", gap: 0.07, road: 18, dash: "2 6" }, // 宝石のようなタイルが敷き詰まった市場
     rules: { target: 4200, maxRounds: 40, tollRate: 0.85, magicTileG: 250, gateBonus: 150 },
   },
   {
@@ -247,6 +264,7 @@ const STAGES = [
     gatesNeeded: 2,
     elements: ["earth", "fire", "water", "wood", "earth"],
     theme: { glow: "#40202a", bg: "#180f12", path: "#2c181e", dot: "#a05a6a" },
+    look: { shape: "round", gap: 0.05, road: 22, dash: "2 7" }, // 16マスの円形闘技場＝マスは大きく道は太い（逃げ場がない密度）
     rules: { target: 4000, maxRounds: 40, invaderSt: 10, landHpMult: 2 },
   },
   {
@@ -270,6 +288,7 @@ const STAGES = [
     },
     elements: ["water", "fire", "earth", "wood", "water"],
     theme: { glow: "#2c3140", bg: "#0f131c", path: "#1e2330", dot: "#7a86b0" },
+    look: { shape: "hex", gap: 0.10, road: 16, dash: "1 4" }, // 峡谷の岩柱・道には雷が細かく走る
     hud: { left: "27%", top: "30%", width: "38%" },
     rules: { target: 3200, maxRounds: 42 },
   },
@@ -292,6 +311,7 @@ const STAGES = [
     elementAt: { "4,1": "fire", "4,3": "fire", "4,5": "fire" },
     elements: ["fire", "water", "wood", "earth", "fire"],
     theme: { glow: "#401820", bg: "#140c10", path: "#2a141c", dot: "#904a5a" },
+    look: { shape: "brick", gap: 0.06, road: 20, dash: "3 9" }, // 城郭の石積み・回廊は太く重い
     hud: { left: "26%", top: "50%", width: "40%" },
     rules: { target: 4500, maxRounds: 45, cpuMagicBonus: 200 },
   },
@@ -329,6 +349,7 @@ const STAGES = [
     gatesNeeded: "all",
     elements: ["fire", "wood", "earth", "water"],
     theme: { glow: "#1e2440", bg: "#0d1120", path: "#181e33", dot: "#5a6ab0" },
+    look: { shape: "gem", gap: 0.18, road: 13, dash: "1 8" }, // 星が点々と散る夜空＝結晶のマスを大きく離して置く
     hud: { left: "50%", top: "43%", width: "32%" },
     rules: { target: 3200, maxRounds: 44 },
   },
@@ -355,6 +376,7 @@ const STAGES = [
     },
     elements: ["fire", "wood", "earth", "water"],
     theme: { glow: "#3a2a40", bg: "#160f20", path: "#291f36", dot: "#9a6ab8" },
+    look: { shape: "oct", gap: 0.10, road: 18, dash: "2 8" }, // 円卓を模した八角の席・三方から腕が伸びる
     hud: { left: "69%", top: "70%", width: "28%" },
     rules: { target: 3600, maxRounds: 46 },
   },
@@ -377,6 +399,7 @@ const STAGES = [
     },
     elements: ["wood", "earth", "fire", "water", "wood"],
     theme: { glow: "#3c3a1e", bg: "#171610", path: "#2a2816", dot: "#b0a45a" },
+    look: { shape: "leaf", gap: 0.18, road: 13, dash: "3 14" }, // 地平まで続く草原＝マスは小さく隊商路が長く走る
     hud: { left: "50%", top: "26%", width: "50%" },
     rules: { target: 3800, maxRounds: 48 },
   },
@@ -409,6 +432,7 @@ const STAGES = [
     },
     elements: ["earth", "water", "fire", "wood", "earth"],
     theme: { glow: "#3a3226", bg: "#151310", path: "#2a2418", dot: "#b08a4a" },
+    look: { shape: "gear", gap: 0.13, road: 17, dash: "2 5" }, // マス目そのものが歯車＝噛み合う機構都市（歯がぶつからないよう余白を広めに）
     hud: { left: "24%", top: "78%", width: "34%" },
     rules: { target: 4000, maxRounds: 50 },
   },
@@ -438,6 +462,7 @@ const STAGES = [
     gatesNeeded: "all",
     elements: ["fire", "wood", "earth", "water"],
     theme: { glow: "#403420", bg: "#181207", path: "#2e2412", dot: "#c8a44a" },
+    look: { shape: "hex", gap: 0.12, road: 16, dash: "2 10" }, // 神殿の六角の敷石
     hud: { left: "78%", top: "22%", width: "30%" },
     rules: { target: 4200, maxRounds: 50, cpuMagicBonus: 300 },
   },
@@ -466,6 +491,7 @@ const STAGES = [
     },
     elements: ["water", "fire", "earth", "wood", "water"],
     theme: { glow: "#2a2440", bg: "#100e1c", path: "#1e1a33", dot: "#8a7ab8" },
+    look: { shape: "square", gap: 0.09, road: 17, dash: "1 7" }, // 時を刻む升目＝最終決戦だけ端正な四角に戻る
     hud: { left: "24%", top: "24%", width: "34%" },
     rules: { target: 4800, maxRounds: 52, cpuMagicBonus: 400, magicTileG: 300 },
   },

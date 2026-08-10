@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>マナサーキット — 盤面プレビュー（v31）</title>
+<!--
+  盤面とマス目の見た目だけを並べて確認するためのページ（対戦はしない）。
+  ゲーム本体と同じ js を読み込み、renderBoard をそのまま呼んで描いているので、
+  ここで見えるものが実際の盤面と一致する。
+  スマホからも https://haradsan.github.io/mana-circuit/preview-board.html で開ける。
+-->
+<style>
+  body {
+    margin: 0; padding: 16px;
+    background: radial-gradient(ellipse at 50% 0%, #2a2440 0%, #100e1c 60%);
+    color: #e8e4f2; font-family: "Yu Gothic UI", "Hiragino Sans", sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .note { color: #a49ac9; font-size: 13px; line-height: 1.75; margin: 0 0 16px; max-width: 900px; }
+  .note b { color: #e8e4f2; }
+  .back { color: #9ad8ff; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+  .b { background: #00000044; border: 1px solid #3a3350; border-radius: 14px; padding: 12px; }
+  .b h2 { font-size: 15px; margin: 0 0 2px; }
+  .b p { font-size: 12px; color: #a49ac9; margin: 0 0 8px; }
+  .b svg { width: 100%; height: auto; display: block; }
+</style>
+</head>
+<body>
+<h1>✦ マナサーキット — 盤面とマス目のプレビュー（v31）</h1>
+<p class="note">
+  マス目の<b>形</b>・マス間の<b>余白</b>・道の<b>太さ</b>をステージごとに変えられるようにしました。
+  特別マス（🏰城・⛩️関門・💎魔力・🎰運命・🌋マグマ・💨疾風）の形は<b>全ステージ共通</b>なので、
+  形を見ればマスの種類が分かります。<br>
+  駒は「マントを羽織った術者の立像」に描き直しました。ここでは<b>3人ぶんを同じマスに重ねて</b>置いてあります
+  （重なっても全員見えること・盤面の端でも切れないことの確認用）。手番の駒は足元の魔法陣が回り、頭上に▼が出ます。<br>
+  <a class="back" href="index.html">← ゲームへ戻る</a>
+</p>
+<div class="grid" id="grid"></div>
+
+<!-- 本体と同じスクリプト（描画に必要なものだけ） -->
+<script src="js/sfx.js?v=31"></script>
+<script src="js/profile.js?v=31"></script>
+<script src="js/cards.js?v=31"></script>
+<script src="js/art.js?v=31"></script>
+<script src="js/stages.js?v=31"></script>
+<script src="js/chars.js?v=31"></script>
+<script src="js/weekly.js?v=31"></script>
+<script src="js/state.js?v=31"></script>
+<script src="js/battle.js?v=31"></script>
+<script src="js/ai.js?v=31"></script>
+<script src="js/ui.js?v=31"></script>
+<script>
+// 全16ステージを、実際の renderBoard で1枚ずつ描き出す。
+// renderBoard は #board へ書き込むので、作業用の svg を都度 #board に成り代わらせてから描き、
+// 出来上がった markup をカードへ移す。
+const SAMPLE_MOBS = ["undine", "flamewolf", "rockgolem", "dryad", "frostwolf", "kraken", "pegasus", "imp"];
+
+function makeBoardSVG(stageIdx) {
+  const stage = STAGES[stageIdx];
+  // newGame は collection.js / main.js に依存しない範囲で使える（state.js）
+  const g = newGame(stageIdx, { training: true, royale: true }); // 3人ぶんの駒を出して重なりを確認する
+  applyStageLook(stage);
+  // 見本として所有地・レベル・駐留クリーチャーを程よく散らす
+  const lands = g.tiles.filter(t => t.type === "LAND");
+  lands.forEach((t, i) => {
+    if (i % 3 === 0) {
+      const id = SAMPLE_MOBS[i % SAMPLE_MOBS.length];
+      t.owner = 0; t.level = (i % 5) + 1; t.creature = { cardId: id, hp: CARD_BY_ID[id].hp };
+    } else if (i % 4 === 0) {
+      const id = SAMPLE_MOBS[(i + 3) % SAMPLE_MOBS.length];
+      t.owner = 1; t.level = (i % 4) + 1; t.creature = { cardId: id, hp: 30 };
+    }
+  });
+  // 駒の重なりを見せるため、全員を同じマスに立たせる
+  g.players.forEach(p => { p.pos = lands[1].id; p.alive = true; });
+  g.current = 0;
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.id = "board";
+  document.body.appendChild(svg);          // renderBoard は getElementById("board") を見る
+  const prevG = window.G;
+  window.G = g;                            // UI.selectableTiles 等の参照先を合わせる
+  applyBoardViewBox(g);
+  renderBoard(g);
+  window.G = prevG;
+  svg.removeAttribute("id");
+  svg.remove();
+  return svg;
+}
+
+const grid = document.getElementById("grid");
+STAGES.forEach((stage, i) => {
+  const lk = stageLook(stage);
+  const box = document.createElement("div");
+  box.className = "b";
+  box.innerHTML = `<h2>${stage.icon} STAGE ${i + 1}　${stage.name}</h2>` +
+    `<p>マス目の形: <b>${lk.shape}</b>　／　マス間の余白: ${lk.gap}　／　道の太さ: ${lk.road}</p>`;
+  box.appendChild(makeBoardSVG(i));
+  grid.appendChild(box);
+});
+</script>
+</body>
+</html>

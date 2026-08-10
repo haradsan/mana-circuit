@@ -31,13 +31,13 @@ function hasElemAdvantage(attElem, defElem) { return ELEM_ADVANTAGE[attElem] ===
 //       magicatk=魔法攻撃(攻撃が魔法＝物理無効・反射を貫く。magicatk:true のアイテムでも付与できる)
 const ABILITY_INFO = {
   first:    { name: "先制", desc: "防衛時でも先に攻撃する" },
-  pierce:   { name: "貫通", desc: "土地のHPボーナスを無視する" },
+  pierce:   { name: "貫通", desc: "守り手が「自分と同じ属性の土地」で得るHPボーナス（土地レベル×10）を無視して殴る" },
   assault:  { name: "強襲", desc: "侵略時にST+20" },
   guard:    { name: "守護", desc: "防衛時にHP+20" },
-  lucky:    { name: "豪運", desc: "会心の一撃(ダメージ1.5倍)が出やすい(25%)" },
+  lucky:    { name: "豪運", desc: "会心の一撃（ダメージ1.5倍）の確率が 10%→25% に上がる" },
   capture:  { name: "捕縛", desc: "防衛して撃退すると、侵略してきた相手を次の1ターン拘束する" },
   immobile: { name: "不動", desc: "侵略・侵攻には出せない防御専用（そのぶんHPが高い）" },
-  spellproof: { name: "護法", desc: "敵の対象指定スペル（メテオ・バニッシュ・ガスト）の対象にならない" },
+  spellproof: { name: "護法", desc: "敵がクリーチャーを名指しで狙うスペル（メテオ・バニッシュ・ガスト・スナイプショット）の対象にならない" },
   double:   { name: "連撃", desc: "バトルで続けて2回攻撃する（1撃目で相手が倒れなければもう1撃）" },
   // v15: 物理/魔法の攻撃タイプを導入。「物理攻撃」＝魔法攻撃でない通常の攻撃すべて。
   physnull:    { name: "物理無効", desc: "物理攻撃（魔法攻撃以外）を無効化する＝ダメージ0。魔法攻撃は通る" },
@@ -47,7 +47,7 @@ const ABILITY_INFO = {
   mimic:       { name: "模倣", desc: "バトル時、相手クリーチャーの基本ST・基本HP・能力をそっくり写し取って戦う（属性は無のまま・装備や土地の加護はコピーしない）" },
   // ---------- 第二弾「時流の回路」の新能力（v19） ----------
   grow:     { name: "成長", desc: "自分のターン開始ごとに ST+5／最大HP+5（上限+25）。時間をかけるほど強くなる" },
-  pack:     { name: "群れ", desc: "盤面にいる自分の同属性クリーチャー1体につき ST+5（上限+30）。仲間が多いほど強い" },
+  pack:     { name: "群れ", desc: "盤面にいる自分の同属性クリーチャー1体につき ST+5（上限+30）。仲間が多いほど強い（⚪無属性は無属性どうしで数える）" },
   ranged:   { name: "遠隔", desc: "侵略・侵攻のバトルで相手の反撃を受けない（相手が先制でも）。撃ち逃げの一撃" },
   absorb:   { name: "吸収", desc: "与えたダメージの半分だけ自分のHPを回復する（そのバトル開始時のHPが上限）" },
   armor:    { name: "硬殻", desc: "受けるダメージを常に10軽減する（最低0）。手数の多い相手に強い" },
@@ -78,7 +78,7 @@ const ABILITY_INFO = {
   weaponlove: { name: "武芸", desc: "バトルでアイテム（二形・巻物も含む）を装備していると、さらに ST+15/HP+15。武具が手に馴染む達人" },
   artificer:  { name: "工匠", desc: "バトルで装備した自分のアイテムは使い切りにならず、バトル後に手札へ戻る（このクリーチャーが生き残った場合）" },
   trapper:    { name: "罠師", desc: "盤上にいる間、自分の🃏伏せ札が発動するたび +50G（罠師1体につき）。さらにカードを1枚引く（1発動につき1枚）" },
-  rebel:      { name: "反骨", desc: "バトル時、自分の総資産が首位の70%未満なら ST+20/HP+20。劣勢でこそ燃える闘志" },
+  rebel:      { name: "反骨", desc: "バトル時、自分の総資産が首位の80%未満なら ST+20/HP+20。劣勢でこそ燃える闘志" },
   // ---------- 第三弾・追補「見切りと雪辱」の新能力（v30・原さん要望） ----------
   // 足し算バフではない「受けの駆け引き」: 必殺の回避（不屈）／食らってから倍にして返す（倍返し）／必殺の解除（罠外し）
   endure:   { name: "不屈", desc: "バトル中一度だけ、倒される一撃を受けてもHP1で踏みとどまる（🐲連撃の2撃目など、2度目の致命打には耐えられない）" },
@@ -213,7 +213,7 @@ const CARD_DB = [
   //     そのぶんコスト効率がやや高く、全員レア以上でユニークな能力（護法/連撃/二重能力）を持つ ---
   { id: "gargoyle",     name: "ガーゴイル",       type: "creature", element: "neutral", cost: 85,  st: 35, hp: 55, ab: ["guard", "spellproof"], rarity: "rare" }, // v23: 60→85G（守護+護法＝スペル除去不能の壁が60Gは安すぎた）
   { id: "unicorn",      name: "ユニコーン",       type: "creature", element: "neutral", cost: 75,  st: 45, hp: 45, ab: ["first", "lucky"],      rarity: "rare" },
-  { id: "mithrilgolem", name: "ミスリルゴーレム", type: "creature", element: "neutral", cost: 95,  st: 50, hp: 70, ab: ["spellproof"],           rarity: "rare" },
+  { id: "mithrilgolem", name: "ミスリルゴーレム", type: "creature", element: "neutral", cost: 105, st: 50, hp: 70, ab: ["spellproof"],           rarity: "rare" }, // v31: 95→105（全406種の回帰でST/HP相場から17G安く、同帯のラーヴァゴーレム100G 50/60を完全に上回っていた）
   { id: "chimera",      name: "キメラ",           type: "creature", element: "neutral", cost: 115, st: 55, hp: 65, ab: ["double"],               rarity: "legendary" }, // v25: 45/60→55/65（110Gのアンフィスバエナ(55/50 連撃・レア)に排出率で劣るレジェンドが数値でも負けていた）
   // --- 無属性（v15追加）: 物理/魔法の攻撃タイプを軸にしたトリックスター。
   //     物理攻撃しか持たない相手には鉄壁だが、魔法攻撃（✨アイテム/クリーチャー）や除去スペルにはあっさり沈む
@@ -391,7 +391,7 @@ const CARD_DB = [
   { id: "joker",        name: "ジョーカー",       type: "creature", element: "neutral", set: 2, cost: 70,  st: 35, hp: 40, ab: ["lucky", "lastward"], rarity: "rare" }, // v23: 85G 35/35は弱すぎた→70G 35/40（切り札らしい博打枠に）
   { id: "gremlin",      name: "グレムリン",       type: "creature", element: "neutral", set: 2, cost: 65,  st: 30, hp: 40, ab: ["dispel"], rarity: "rare" }, // v23: 85→65G（看破の内蔵価値+小柄な身体に見合う値段へ）
   { id: "livingarmor",  name: "リビングアーマー", type: "creature", element: "neutral", set: 2, cost: 90,  st: 40, hp: 60, ab: ["armor"], rarity: "rare" },
-  { id: "pegasus",      name: "ペガサス",         type: "creature", element: "neutral", set: 2, cost: 90,  st: 50, hp: 45, ab: ["first", "fly"], rarity: "rare" },
+  { id: "pegasus",      name: "ペガサス",         type: "creature", element: "neutral", set: 2, cost: 100, st: 50, hp: 45, ab: ["first", "fly"], rarity: "rare" }, // v31: 90→100（クロノラビット70G 35/30と同能力で+15/+15なのに+20Gしか高くなく、相場より18G安かった）
   { id: "nightmare",    name: "ナイトメア",       type: "creature", element: "neutral", set: 2, cost: 95,  st: 45, hp: 40, ab: ["magicatk", "first"], rarity: "rare" }, // v23: スフィンクス(95G magicatk+guard)に劣後→夜襲の先制で攻め型に差別化
   { id: "etherdrake",   name: "エーテルドレイク", type: "creature", element: "neutral", set: 2, cost: 110, st: 55, hp: 50, ab: ["magicatk", "spellproof"], rarity: "rare" },
   { id: "mirrorknight", name: "鏡騎士ミラーナイト", type: "creature", element: "neutral", set: 2, cost: 120, st: 40, hp: 55, ab: ["physreflect"], rarity: "legendary" },
@@ -576,7 +576,7 @@ const CARD_DB = [
   { id: "echoleviath",  name: "深淵竜エコーリヴァイア", type: "creature", element: "water", set: 3, cost: 150, st: 65, hp: 70, ab: ["resonance", "pierce"], rarity: "legendary" },
   // --- クリーチャー: 無（2） ---
   { id: "facelessduelist", name: "フェイスレスデュエリスト", type: "creature", element: "neutral", set: 3, cost: 110, st: 45, hp: 50, ab: ["weaponlove", "artificer"], rarity: "rare" },
-  { id: "paradoxwisp",  name: "パラドクスウィスプ", type: "creature", element: "neutral", set: 3, cost: 130, st: 40, hp: 40, ab: ["resonance", "spellproof", "magicatk"], rarity: "legendary" },
+  { id: "paradoxwisp",  name: "パラドクスウィスプ", type: "creature", element: "neutral", set: 3, cost: 115, st: 40, hp: 40, ab: ["resonance", "spellproof", "magicatk"], rarity: "legendary" }, // v31: 130→115（能力3つとも小粒で40/40は130Gの働きに届かず、全406種の回帰で唯一の明確な割高カードだった）
   // --- アイテム（10） ---
   { id: "resonanceedge",  name: "レゾナンスエッジ",   type: "item", set: 3, cost: 70, st: 15, hp: 0,  resonantSt: 8, rarity: "rare", desc: "ST+15。装備者の能力1つにつき さらにST+8（上限+32）＝多芸な使い手ほど鋭く共鳴する剣" },
   { id: "resonanceaegis", name: "レゾナンスイージス", type: "item", set: 3, cost: 70, st: 0,  hp: 15, resonantHp: 8, rarity: "rare", desc: "HP+15。装備者の能力1つにつき さらにHP+8（上限+32）＝多芸な使い手ほど固く共鳴する盾" },
@@ -585,7 +585,7 @@ const CARD_DB = [
   { id: "wardrum",        name: "軍鼓ウォードラム",   type: "item", set: 3, cost: 60, st: 10, hp: 0,  grant: ["assault"], rarity: "uncommon", desc: "ST+10・強襲を得る（侵略時さらにST+20＝攻めの太鼓）" },
   { id: "guardbell",      name: "ガーディアンベル",   type: "item", set: 3, cost: 65, st: 0,  hp: 20, grant: ["capture"], rarity: "uncommon", desc: "HP+20・捕縛を得る（防衛で撃退した侵略者を1ターン拘束する守りの鐘）" },
   { id: "chargerod",      name: "チャージロッド",     type: "item", set: 3, cost: 75, st: 10, hp: 0,  magicatk: true, grant: ["lucky"], rarity: "uncommon", desc: "ST+10・攻撃が魔法になり、豪運（会心率25%）を得る（雷を溜めて撃ち出す杖）" },
-  { id: "rebelplate",     name: "反骨の胸当て",       type: "item", set: 3, cost: 60, st: 0,  hp: 25, grant: ["rebel"], rarity: "uncommon", desc: "HP+25・反骨を得る（総資産が首位の70%未満ならST+20/HP+20）" },
+  { id: "rebelplate",     name: "反骨の胸当て",       type: "item", set: 3, cost: 60, st: 0,  hp: 25, grant: ["rebel"], rarity: "uncommon", desc: "HP+25・反骨を得る（総資産が首位の80%未満ならST+20/HP+20）" },
   { id: "grandbanner",    name: "大戦旗グランドバナー", type: "item", set: 3, cost: 85, st: 20, hp: 20, rarity: "rare", desc: "バトル時 ST+20 / HP+20（掲げる者に力と守りを）" },
   { id: "trickdagger",    name: "トリックダガー",     type: "item", set: 3, cost: 65, st: 15, hp: 10, trapSynergy: 20, rarity: "rare", desc: "ST+15/HP+10。防衛時、この土地に自分の🃏伏せ札があれば さらにST+20/HP+20（罠と連携する暗器）" },
   // --- スペル: 🃏伏せ札（トラップ）7種 ---
@@ -598,10 +598,10 @@ const CARD_DB = [
   { id: "trap_toll",   name: "二重徴収",         type: "spell", set: 3, cost: 60, spell: "settrap", trap: "stop", rarity: "uncommon", icon: "💰", desc: "【伏せ札】自分の土地に設置。敵が停止した時に発動——このマスの通行料が2倍になる" },
   { id: "trap_sleep",  name: "スリープミスト",   type: "spell", set: 3, cost: 75, spell: "settrap", trap: "stop", rarity: "rare", icon: "💤", desc: "【伏せ札】自分の土地に設置。敵が停止した時に発動——眠り霧でその敵は次のターン1回休み" },
   { id: "trap_gate",   name: "リターンゲート",   type: "spell", set: 3, cost: 90, spell: "settrap", trap: "stop", rarity: "rare", icon: "🌀", desc: "【伏せ札】自分の土地に設置。敵が停止した時に発動——通行料を取らずに、その敵を城へ強制送還する（周回はつかない）" },
-  // --- スペル: ⚒️逆転3種（underdog＝自分の総資産が首位の70%未満のときのみ使える） ---
-  { id: "snipe",      name: "スナイプショット", type: "spell", set: 3, cost: 80,  spell: "snipe", underdog: true, rarity: "uncommon", icon: "🎯", desc: "【逆転: 総資産が首位の70%未満のときのみ】首位のクリーチャー1体に50ダメージ（護法・結界は対象外）" },
-  { id: "resistance", name: "レジスタンス",     type: "spell", set: 3, cost: 90,  spell: "resistance", underdog: true, rarity: "rare", icon: "🔥", desc: "【逆転: 総資産が首位の70%未満のときのみ】首位の全土地を2ラウンドの間、通行料半減にする" },
-  { id: "uprising",   name: "アップライジング", type: "spell", set: 3, cost: 120, spell: "uprising", underdog: true, rarity: "rare", icon: "⚒️", desc: "【逆転: 総資産が首位の70%未満のときのみ】首位のLv3以上の土地1つをLv-2する（蜃気楼・結界は対象外）" },
+  // --- スペル: ⚒️逆転3種（underdog＝自分の総資産が首位の80%未満のときのみ使える） ---
+  { id: "snipe",      name: "スナイプショット", type: "spell", set: 3, cost: 80,  spell: "snipe", underdog: true, rarity: "uncommon", icon: "🎯", desc: "【逆転: 総資産が首位の80%未満のときのみ】首位のクリーチャー1体に50ダメージ（護法・結界は対象外）" },
+  { id: "resistance", name: "レジスタンス",     type: "spell", set: 3, cost: 90,  spell: "resistance", underdog: true, rarity: "rare", icon: "🔥", desc: "【逆転: 総資産が首位の80%未満のときのみ】首位の全土地を2ラウンドの間、通行料半減にする" },
+  { id: "uprising",   name: "アップライジング", type: "spell", set: 3, cost: 120, spell: "uprising", underdog: true, rarity: "rare", icon: "⚒️", desc: "【逆転: 総資産が首位の80%未満のときのみ】首位のLv3以上の土地1つをLv-2する（蜃気楼・結界は対象外）" },
   // --- スペル: ⚔️決戦3種（climax＝決戦の刻のみ使える） ---
   { id: "laststand",  name: "ラストスタンド",   type: "spell", set: 3, cost: 70,  spell: "laststand", climax: true, noCpu: true, rarity: "uncommon", icon: "⚔️", desc: "【決戦の刻のみ】次の自分のバトルで ST+30（防衛ならさらにHP+30）。攻めにも守りにも使える切り札" },
   { id: "warchest",   name: "軍資金調達",       type: "spell", set: 3, cost: 100, spell: "warchest", climax: true, rarity: "uncommon", icon: "💰", desc: "【決戦の刻のみ】自分の土地1つにつき +35G（決戦の総力戦へ向けた資金集め）" },
@@ -632,10 +632,86 @@ const CARD_DB = [
   // --- スペル3種 ---
   { id: "trapsweep",  name: "トラップスウィープ", type: "spell", set: 3, cost: 55, spell: "trapsweep", rarity: "uncommon", icon: "🧹", desc: "敵の🃏伏せ札1枚を選んで公開し、不発のまま取り除く（中身を暴いて無力化——罠師の報酬も出ない）" },
   { id: "braceup",    name: "見切りの構え",       type: "spell", set: 3, cost: 50, spell: "braceup", noCpu: true, rarity: "uncommon", icon: "🛡️", desc: "次の自分のバトルで、自軍クリーチャーは不屈を得る（倒される一撃を一度だけHP1で耐える。侵略でも防衛でも）" },
-  { id: "mirrorpact", name: "雪辱の契約",         type: "spell", set: 3, cost: 75, spell: "mirrorpact", underdog: true, rarity: "rare", icon: "⚖️", desc: "【逆転: 総資産が首位の70%未満のときのみ】次に通行料を支払ったとき、その2倍を支払先から奪い返す（1回きり——高額地帯こそ狩り場に変わる）" },
+  { id: "mirrorpact", name: "雪辱の契約",         type: "spell", set: 3, cost: 75, spell: "mirrorpact", underdog: true, rarity: "rare", icon: "⚖️", desc: "【逆転: 総資産が首位の80%未満のときのみ】次に通行料を支払ったとき、その2倍を支払先から奪い返す（1回きり——高額地帯こそ狩り場に変わる）" },
 ];
 
 const CARD_BY_ID = Object.fromEntries(CARD_DB.map(c => [c.id, c]));
+
+// ============================================================
+// 🤝 絆（bond・v31・原さん要望「味方に当該のクリーチャーが配置されている場合〇〇となる」）
+// ------------------------------------------------------------
+// 「相方が自分の領地に駐留しているとき」だけ働く条件つきの効果。
+// 効果は戦闘バフに限らず、移動（ダイスの出目）・侵攻（射程）・ターンごとの収入や回復・
+// 通行料まで広げてある（原さんの指定どおり）。組み合わせは名前や生態から連想できるものにした。
+//
+// カードの行に bond を直接書くと「誰と誰が組むのか」が一覧できないので、ここに表としてまとめ、
+// 読み込み時に CARD_DB へ流し込む。相方idの打ち間違い・相方が実在しない設定はここで検出する。
+//
+// 種類（kind）と効果値: state.js のヘッダ参照
+//   battle {st,hp} / grant {grant:[能力]} / income {gold} / heal {hp} / dice {plus} / march {} / toll {mult}
+// ============================================================
+const BOND_DEFS = [
+  // --- 戦闘の絆 ---
+  { id: "flamewolf", with: ["frostwolf"], name: "氷炎の狼", kind: "battle", st: 15,
+    desc: "フロストウルフが自領にいると、背中を預けて狩る——バトルで ST+15" },
+  { id: "frostwolf", with: ["flamewolf"], name: "氷炎の狼", kind: "battle", st: 15,
+    desc: "フレイムウルフが自領にいると、背中を預けて狩る——バトルで ST+15" },
+  { id: "mermaid", with: ["sirene"], name: "海歌の絆", kind: "battle", st: 20,
+    desc: "セイレーンが自領にいると、その歌に奮い立つ——バトルで ST+20" },
+  { id: "elvenhunter", with: ["forestarcher"], name: "連弓の絆", kind: "battle", st: 15,
+    desc: "フォレストアーチャーが自領にいると、矢を継いで射かける——バトルで ST+15" },
+  { id: "dryad", with: ["worldtree"], name: "世界樹の守人", kind: "battle", hp: 25,
+    desc: "ワールドツリーが自領にいると、その根が守る——バトルで HP+25" },
+  { id: "rampartgolem", with: ["fortress"], name: "城塞の絆", kind: "battle", hp: 25,
+    desc: "大砦が自領にいると、砦を背に崩れない——バトルで HP+25" },
+  { id: "livingblade", with: ["livingshield"], name: "双生の武具", kind: "battle", st: 15, hp: 15,
+    desc: "リビングシールドが自領にいると、対になって真価を出す——バトルで ST+15/HP+15" },
+  { id: "livingshield", with: ["livingblade"], name: "双生の武具", kind: "battle", st: 15, hp: 15,
+    desc: "リビングブレードが自領にいると、対になって真価を出す——バトルで ST+15/HP+15" },
+  // --- 能力を得る絆 ---
+  { id: "firebaby", with: ["phoenix"], name: "不死鳥の加護", kind: "grant", grant: ["rebirth"],
+    desc: "フェニックスが自領にいると、雛は灰から蘇る——🔁転生を得る（倒されても手札に戻る）" },
+  { id: "sirene", with: ["mermaid"], name: "海歌の絆", kind: "grant", grant: ["first"],
+    desc: "マーメイドナイトが自領にいると、騎士が前に出る——⚡先制を得る" },
+  { id: "dwarfguard", with: ["runesmith"], name: "鍛冶場の絆", kind: "grant", grant: ["weaponlove"],
+    desc: "ルーンスミスが自領にいると、名工の武具が手に馴染む——⚔武芸を得る（装備時さらにST/HP+15）" },
+  { id: "tideavenger", with: ["vendettalord"], name: "復讐の盟約", kind: "grant", grant: ["endure"],
+    desc: "復讐公ヴェンデッタロードが自領にいると、意地でも倒れない——🛡不屈を得る" },
+  // --- 収入・回復の絆（ターンごとの出来事） ---
+  { id: "honeybee", with: ["alraune"], name: "蜜と花の絆", kind: "income", gold: 30,
+    desc: "アルラウネが自領にいると、蜜が実る——自分のターン開始ごとに +30G" },
+  { id: "molminer", with: ["miningtower"], name: "坑道の絆", kind: "income", gold: 25,
+    desc: "採掘櫓が自領にいると、坑道が奥まで伸びる——自分のターン開始ごとに +25G" },
+  { id: "oceanpriestess", with: ["nereid"], name: "潮の祈り", kind: "heal", hp: 15,
+    desc: "水霊ネレイドが自領にいると、潮が傷を洗う——自分のターン開始ごとに自軍全員 HP+15" },
+  // --- 移動・侵攻の絆 ---
+  { id: "pegasus", with: ["unicorn"], name: "幻獣騎の絆", kind: "dice", plus: 1,
+    desc: "ユニコーンが自領にいると、駿馬が脚を揃える——自分のダイスの出目 +1" },
+  { id: "unicorn", with: ["pegasus"], name: "幻獣騎の絆", kind: "dice", plus: 1,
+    desc: "ペガサスが自領にいると、駿馬が脚を揃える——自分のダイスの出目 +1" },
+  { id: "blazesoldier", with: ["signaltower"], name: "進軍の狼煙", kind: "march",
+    desc: "狼煙台が自領にいると、合図一つで遠くまで駆ける——侵攻が2マス先まで届く" },
+  { id: "leafdragon", with: ["greendragon"], name: "双竜の絆", kind: "march",
+    desc: "グリーンドラゴンが自領にいると、翼を並べて舞い上がる——侵攻が2マス先まで届く" },
+  { id: "chronorabbit", with: ["clockbeetle"], name: "刻の歯車", kind: "march",
+    desc: "クロックワークビートルが自領にいると、時を飛び越える——侵攻が2マス先まで届く" },
+  // --- 通行料の絆 ---
+  { id: "kraken", with: ["lighthouse"], name: "灯火の漁場", kind: "toll", mult: 1.4,
+    desc: "灯台が自領にいると、光に誘われた船が触腕に落ちる——この土地の通行料 ×1.4" },
+];
+// CARD_DB へ流し込み（定義の不備はここで必ず気づけるようにコンソールへ出す）
+BOND_DEFS.forEach(b => {
+  const c = CARD_BY_ID[b.id];
+  if (!c) { console.error(`[cards] 絆の設定先カードが無い: ${b.id}`); return; }
+  const missing = b.with.filter(w => !CARD_BY_ID[w]);
+  if (missing.length) { console.error(`[cards] ${b.id} の相方カードが無い: ${missing.join(",")}`); return; }
+  const { id, ...rest } = b;
+  c.bond = rest;
+});
+// 相方の名前を並べた文字列（カード表示・ヘルプ用）
+function bondPartnerNames(card) {
+  return (card && card.bond) ? card.bond.with.map(w => CARD_BY_ID[w] ? CARD_BY_ID[w].name : w).join("・") : "";
+}
 
 // ---------- 二形（hybrid・v25） ----------
 // 「武具としても使えるクリーチャー」を、バトルのアイテム処理へ渡せる形に変換する。
@@ -681,6 +757,27 @@ function buildDeck(biasElement = null, maxCost = Infinity) {
   // CPU/おまかせデッキには入れない（構築デッキでは使える）
   main.forEach(e => pickType(c => c.type === "creature" && !c.structure && c.element === e, 6));
   sub.forEach(e => pickType(c => c.type === "creature" && !c.structure && c.element === e, 3));
+  // 🤝絆（v31）: ランダム構築のままだと「対になる2枚が同じデッキに入る」確率がほぼ無く、
+  // 絆が盤面に一度も現れない。絆持ちを引き当てたときは、その相方をクリーチャー枠と1枚入れ替えて
+  // 差し込む（デッキの枚数・属性バランスは変えない）。相方が施設・無属性・高コスト帯の場合は見送る。
+  const creatureSlots = deck.length; // ここまではクリーチャーだけが入っている
+  for (let i = 0; i < creatureSlots; i++) {
+    const c = CARD_BY_ID[deck[i]];
+    if (!c.bond) continue;
+    // 相方が🏛建造物（狼煙台・採掘櫓・灯台・大砦）でも差し込む。建造物は通常 CPU デッキから
+    // 外しているが、絆の相方としては「置く意味がはっきりある1枚」なので例外扱いにする
+    // （これを弾くと、進軍の狼煙・坑道の絆・城塞の絆・灯火の漁場の4組が CPU の盤面に一生現れない）。
+    // 無属性はレア枠の設計方針どおり自動デッキには入れない
+    const partners = c.bond.with
+      .map(w => CARD_BY_ID[w])
+      .filter(pc => pc && pc.type === "creature" &&
+        LAND_ELEMENTS.includes(pc.element) && pc.cost <= maxCost && !deck.includes(pc.id));
+    if (!partners.length) continue;
+    // 別のスロット（絆持ち本人以外）を1つ選んで相方に差し替える
+    const slot = Math.floor(Math.random() * creatureSlots);
+    if (slot === i) continue;
+    deck[slot] = partners[Math.floor(Math.random() * partners.length)].id;
+  }
   pickType(c => c.type === "spell" && !c.noCpu, 6);
   pickType(c => c.type === "item", 6);
   return shuffle(deck);

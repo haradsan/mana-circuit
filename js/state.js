@@ -40,7 +40,14 @@ const LAND_VALUE  = [100, 240, 480, 900, 1600]; // レベル1〜5の土地価値
 const MAX_LAND_LEVEL = LAND_VALUE.length;       // 土地レベルの上限（=5）
 const SELL_RATE   = 0.7;   // 強制売却の換金率
 const HIGHSELL_RATE = 1.3; // 💱高値売却スペルの換金率（v25: 1.0→1.3。売り時を作る一手として実入りを引き上げ）
-const COMEBACK_RATIO = 0.7; // 総資産が相手の7割未満なら劣勢（周回ボーナス1.5倍）
+// 🔥劣勢（COMEBACK_RATIO）: 総資産が首位の何割を下回ったら「劣勢」とみなすか。
+// v31: 0.7 → 0.8 に緩和（原さん指摘「そのような機会が発生し得ないものがある」への対応）。
+//   CPU vs CPU の実測で、両者の総資産比の中央値は 0.75〜0.83・0.7を割るのは全ラウンドの13〜38%しかなく、
+//   ⚒逆転スペル4種と🔥反骨は「持っていても使う機会が来ないカード」になっていた。
+//   0.8 なら「首位から2割以上離されたら劣勢」＝説明も一言で済み、競った試合でも終盤に現実的に届く。
+//   この1つの定義を 逆転スペル／反骨／決戦の刻のスペル割引／周回の逆転ボーナス の全部で共有する
+//   （＝ゲーム中の「劣勢」はどこで出てきても同じ意味）。
+const COMEBACK_RATIO = 0.8;
 
 // クリーチャー侵攻（march）
 // v25: 侵攻をもっと気軽に選べる手にするため行軍費を引き下げ（下限30→20・率0.4→0.25）。
@@ -138,8 +145,9 @@ function trapperCount(g, playerId) {
     !creatureNulled(g, t.creature) && CARD_BY_ID[t.creature.cardId].ab.includes("trapper")).length;
 }
 
-// ---------- ⚔️ 決戦の刻・劣勢判定（v29） ----------
-// 劣勢＝自分の総資産が首位（自分以外で最大）の70%未満。反骨・逆転スペル・決戦のスペル割引が共有する唯一の判定
+// ---------- ⚔️ 決戦の刻・劣勢判定（v29 / v31で基準を緩和） ----------
+// 劣勢＝自分の総資産が首位（自分以外で最大）の COMEBACK_RATIO（80%）未満。
+// 反骨・逆転スペル・決戦のスペル割引・周回の逆転ボーナスが共有する唯一の判定
 function isUnderdog(g, p) {
   const others = g.players.filter(q => q.id !== p.id);
   if (others.length === 0) return false;
@@ -196,6 +204,59 @@ function cheerCount(g, tile) {
     t.creature && !creatureNulled(g, t.creature) &&
     CARD_BY_ID[t.creature.cardId].ab.includes("cheer")).length;
   return Math.min(CHEER_MAX, n);
+}
+
+// ============================================================
+// 🤝 絆（bond・v31・原さん要望）
+// ------------------------------------------------------------
+// 「味方に “その相方” が配置されているとき、〇〇となる」条件つきの能力。
+// カード側は次の形で持つ（cards.js）:
+//   bond: { with: ["相方のcardId", ...], name: "◯◯の絆", kind: <種類>, ...効果値, desc: "説明" }
+// 条件: 相方が**自分の領地に駐留している**こと（無力化の霧を受けている相方は数えない）。
+//       絆を持つ本人が盤上にいる必要はない種類もある（battle/grant は手札から侵略しても乗る＝
+//       「後方に相方が控えている」という理解）。
+// 種類（kind）— 戦闘バフに限らず、移動・侵攻・ターンごとの出来事まで及ぶのが v31 の狙い:
+//   battle : バトルで ST/HP 補正（侵略・侵攻・防衛のいずれでも）
+//   grant  : バトル中だけ能力を1つ得る（先制・不屈など）
+//   income : 自分のターン開始時に魔力 +gold
+//   heal   : 自分のターン開始時に自軍クリーチャー全員を +hp 回復
+//   dice   : ダイスの出目 +plus（移動が伸びる）
+//   march  : 侵攻（march）で2マス先まで届く（🕊飛翔と同じ射程）
+//   toll   : この絆を持つクリーチャーが守る土地の通行料 ×mult
+// ============================================================
+const BOND_KIND_LABEL = {
+  battle: "戦闘", grant: "能力", income: "収入", heal: "回復", dice: "移動", march: "侵攻", toll: "通行料",
+};
+// 相方が駐留している自分の土地（見つからなければ null）。excludeTileId は「自分自身のマス」を除くため
+function bondPartnerTile(g, playerId, card, excludeTileId = null) {
+  if (!g || !card || !card.bond || playerId === null || playerId === undefined) return null;
+  const want = card.bond.with;
+  return g.tiles.find(t => t.type === "LAND" && t.owner === playerId && t.creature &&
+    t.id !== excludeTileId && want.includes(t.creature.cardId) && !creatureNulled(g, t.creature)) || null;
+}
+// 絆が成立していれば bond 定義を返す（成立していなければ null）
+function bondActiveFor(g, playerId, card, excludeTileId = null) {
+  return bondPartnerTile(g, playerId, card, excludeTileId) ? card.bond : null;
+}
+// プレイヤーの盤上のクリーチャーのうち、指定種類の絆が成立しているものを列挙
+// （ターン開始の収入・回復や、ダイス補正のようにプレイヤー単位で効く絆を集めるのに使う）。
+// **同じ名前の絆は1回だけ数える**: 幻獣騎の絆のように「両方のカードが互いを相方に指定している」対では
+// 2体とも条件を満たすため、素直に足すと効果が二重取りになる（実測で出目+1のはずが+2になっていた）。
+// 絆は「その1組」で1つ、という数え方に統一する。
+function activeBondsOf(g, playerId, kind) {
+  if (!g) return [];
+  const out = [], seen = new Set();
+  g.tiles.forEach(t => {
+    if (t.type !== "LAND" || t.owner !== playerId || !t.creature) return;
+    if (creatureNulled(g, t.creature)) return;
+    const c = CARD_BY_ID[t.creature.cardId];
+    if (!c || !c.bond || c.bond.kind !== kind) return;
+    if (seen.has(c.bond.name)) return;
+    if (!bondPartnerTile(g, playerId, c, t.id)) return;
+    seen.add(c.bond.name);
+    out.push({ tile: t, card: c, bond: c.bond });
+  });
+  return out;
 }
 
 // ---------- 土地レベルの増減（v25: 築城/焦土/破城が共有する唯一の入口） ----------
@@ -293,7 +354,12 @@ function marchTargets(g, p, srcTile) {
   const d1 = neighborsOf(g, srcTile);
   const out = new Map();
   d1.filter(ok).forEach(t => out.set(t.id, t));
-  if (srcTile.creature && CARD_BY_ID[srcTile.creature.cardId].ab.includes("fly")) {
+  // 🕊飛翔、または 🤝侵攻の絆（相方が盤上にいると2マス先まで届く・v31）で射程が伸びる
+  const srcCard = srcTile.creature ? CARD_BY_ID[srcTile.creature.cardId] : null;
+  const marchBond = srcCard && !creatureNulled(g, srcTile.creature) &&
+    bondActiveFor(g, p.id, srcCard, srcTile.id);
+  if (srcTile.creature && (CARD_BY_ID[srcTile.creature.cardId].ab.includes("fly") ||
+      (marchBond && marchBond.kind === "march"))) {
     const d1Ids = new Set(d1.map(t => t.id));
     d1.forEach(n => neighborsOf(g, n).forEach(t => {
       if (t.id === srcTile.id || d1Ids.has(t.id) || out.has(t.id)) return;
@@ -575,6 +641,11 @@ function tollOf(g, tile) {
   let toll = LAND_VALUE[tile.level - 1] * RULES.tollRate * chainMult(chain);
   // 商魂（merchant・v19）: 駐留クリーチャー（交易市場など）がいる土地は通行料1.3倍
   if (tile.creature && CARD_BY_ID[tile.creature.cardId].ab.includes("merchant")) toll *= 1.3;
+  // 🤝通行料の絆（v31）: 相方が盤上にいる間、この土地の通行料が上がる
+  if (tile.creature && !creatureNulled(g, tile.creature)) {
+    const bd = bondActiveFor(g, tile.owner, CARD_BY_ID[tile.creature.cardId], tile.id);
+    if (bd && bd.kind === "toll") toll *= bd.mult;
+  }
   // カースランド（v20）: 呪われた土地は通行料半減（2R）
   if (landCursed(g, tile)) toll *= 0.5;
   // 魔力嵐（v20）: 2Rの間すべての通行料1.5倍
@@ -605,7 +676,9 @@ function ownedLands(g, playerId) {
 // v22: 基本値200→350・土地係数25→40（約1.6〜1.75倍）。周回プレイの見返りを強化
 function lapBonus(g, p) {
   const base = RULES.lapBase + ownedLands(g, p.id).length * 40;
-  const comeback = assetsOf(g, p) < assetsOf(g, opponentOf(g, p)) * COMEBACK_RATIO;
+  // v31: 判定を isUnderdog に統一（＝ゲーム中の「劣勢」の意味を1つに。
+  //      三つ巴でも「自分以外の首位」と比べる正しい判定になる）
+  const comeback = isUnderdog(g, p);
   const festival = ownedLands(g, p.id).some(t =>
     t.creature && CARD_BY_ID[t.creature.cardId].ab.includes("festival"));
   let gold = comeback ? Math.floor(base * 1.5) : base;

@@ -397,6 +397,21 @@ body.hand-min #win-hand .win-head { margin-bottom: 0; }
 }
 @keyframes reachBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 
+/* 🔥劣勢チップ（v31）: 総資産が首位の80%未満＝⚒逆転スペル・🔥反骨・周回1.5倍・スペル25%OFFが効く状態。
+   「条件のあるカードがいつ使えるのか分からない」への対応で、状態そのものを情報窓に出す */
+.p-under {
+  display: inline-block;
+  flex: none;
+  font-size: 10.5px;
+  color: #fff2e0;
+  background: linear-gradient(180deg, #b8442a, #7a2414);
+  border: 1px solid #ff8a5a;
+  border-radius: 8px;
+  padding: 0 5px;
+}
+/* ⚔決戦の刻に入るとヘッダーの対戦情報が金色に灯る */
+#round-info.climax { color: #ffd76a; text-shadow: 0 0 8px rgba(255, 190, 80, 0.45); }
+
 /* 現状順位（standingsOf・総資産順）のメダルチップ */
 .p-rank {
   flex: none;
@@ -577,6 +592,17 @@ body.hand-min #win-hand .win-head { margin-bottom: 0; }
   font-size: 10.5px;
   margin-right: 3px;
   margin-top: 3px;
+}
+/* 🤝絆（v31）: 相方が自領にいるときだけ働く条件つき効果。成立していれば .lit で金色に灯る */
+.ab.bond { background: #2a3a4a; color: #9ad8ff; }
+.ab.bond.lit {
+  background: linear-gradient(180deg, #ffe9a0, #d9a94e);
+  color: #241a05; font-weight: bold;
+  box-shadow: 0 0 8px #ffd76a88;
+}
+.cd-bond-kind {
+  margin-left: 6px; font-size: 10px; font-weight: normal;
+  background: #2a3a4a; color: #9ad8ff; border-radius: 4px; padding: 0 5px;
 }
 /* 魔力の光沢（ゆっくり流れる斜めのきらめき） */
 .c-shine {
@@ -935,6 +961,23 @@ body.hand-min #win-hand .win-head { margin-bottom: 0; }
 }
 .c-ribbon.rib-adv { background: #1e3a24; border: 1px solid #57c26a; color: #8ee0a0; }
 .c-ribbon.rib-dis { background: #3a1e1e; border: 1px solid #e05537; color: #ff9a8a; }
+
+/* ---------- 使用条件つきカードの帯（v31） ----------
+   ⚒逆転（劣勢のときだけ）／⚔決戦（決戦の刻だけ）のカードは、条件を説明文の中に埋めるだけでは
+   「いつ使えるのか分からない」ままだった。手札の上に帯を出し、条件を満たしていれば光らせる。 */
+.c-gate {
+  position: absolute; left: 0; right: 0; top: 46px; z-index: 3;
+  text-align: center; font-size: 9.5px; font-weight: bold; letter-spacing: 0.5px;
+  padding: 1px 0; pointer-events: none;
+}
+.c-gate.on  { background: linear-gradient(90deg, #7a5a0088, #ffd76a, #7a5a0088); color: #241a05; }
+.c-gate.off { background: #0b0812cc; color: #8d86a3; }
+.card.gate-on  { border-color: #ffd76a; box-shadow: 0 3px 10px #0007, 0 0 14px #ffd76a66; }
+.card.gate-off .c-art { filter: grayscale(0.55) brightness(0.72); }
+/* カード詳細ポップアップの「いま使えるか」 */
+.cd-gate { display: inline-block; margin-top: 3px; font-weight: bold; }
+.cd-gate.on  { color: #ffd76a; }
+.cd-gate.off { color: #8d86a3; }
 #battle-log {
   background: #17131f;
   border: 1px solid var(--border);

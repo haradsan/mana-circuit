@@ -31,11 +31,10 @@ async function startGame(stageIdx, opts = {}) {
     RULES.maxRounds = Math.min(RULES.maxRounds, 24);
   }
   AI_PROFILE = resolveAIProfile(G.stage.ai); // ステージ既定の実効プロファイル（各CPUは p.aiProfile を優先）
-  const w = Math.max(...G.tiles.map(t => t.x)) + 1;
-  const h = Math.max(...G.tiles.map(t => t.y)) + 1;
-  const svg = document.getElementById("board");
-  svg.setAttribute("viewBox", `0 0 ${w * 100} ${h * 100}`);
-  svg.style.aspectRatio = `${w} / ${h}`;
+  // v31: マス目の形・マス間の余白・道の描き方をステージごとに切り替え、
+  //      viewBox には駒がはみ出すぶんの余白（BOARD_PAD）を確保する（端のマスの駒が切れないように）
+  applyStageLook(G.stage);
+  applyBoardViewBox(G);
   // ステージのテーマカラーで背景を染める（盤面ごとの空気を変える。タイトルへ戻るとき解除）
   const th = G.stage.theme;
   document.body.style.background = th
@@ -407,6 +406,13 @@ async function playTurn(p) {
     log(`🍃 追い風！ ${p.name}の出目+${p.diceBonus}＝${dice}`);
     p.diceBonus = null;
   }
+  // 🤝移動の絆（v31）: 相方が盤上に揃っている間、出目が伸びる（毎ターン効く常設の絆）
+  const diceBonds = activeBondsOf(G, p.id, "dice");
+  if (diceBonds.length) {
+    const plus = diceBonds.reduce((s, b) => s + (b.bond.plus || 0), 0);
+    dice += plus;
+    log(`🤝 ${[...new Set(diceBonds.map(b => b.bond.name))].join("・")}！ ${p.name}の出目+${plus}＝${dice}`);
+  }
   // 🟤泥沼（v20）: 次の移動は出目半分（切り上げ）
   if (p.mudded) {
     dice = Math.ceil(dice / 2);
@@ -485,6 +491,24 @@ function turnStartTick(p) {
     if (t.owner === p.id) veinGain += 20;
   });
   if (veinGain > 0) { p.magic += veinGain; SFX.coin(); log(`💎 魔力鉱脈から${p.name}に+${veinGain}G`); }
+  // 🤝絆（v31）: 「相方が盤上にいる間だけ」働く、ターンごとの絆
+  //   income＝収入の絆（蜜と花・坑道など） ／ heal＝回復の絆（潮の祈りなど）
+  let bondGold = 0;
+  const bondNames = [];
+  activeBondsOf(G, p.id, "income").forEach(b => { bondGold += b.bond.gold || 0; bondNames.push(b.bond.name); });
+  if (bondGold > 0) {
+    p.magic += bondGold; SFX.coin();
+    log(`🤝 ${[...new Set(bondNames)].join("・")}——${p.name}に+${bondGold}G`, "", { toast: true });
+  }
+  const bondHealed = [];
+  activeBondsOf(G, p.id, "heal").forEach(b => {
+    ownedLands(G, p.id).forEach(t => {
+      if (!t.creature || !isWounded(t.creature)) return;
+      t.creature.hp = Math.min(maxHpOf(t.creature), currentHp(t.creature) + (b.bond.hp || 0));
+      bondHealed.push(CARD_BY_ID[t.creature.cardId].name);
+    });
+  });
+  if (bondHealed.length) log(`🤝 絆の祈りが${[...new Set(bondHealed)].join("・")}のHPを癒した`);
   // 🌸春の芽吹き（v20）: 2Rの間、自軍クリーチャーをターン開始時に+15回復
   if (activeFx(G, "bud", p.id)) {
     const budHealed = [];
@@ -497,17 +521,23 @@ function turnStartTick(p) {
   }
 }
 
-// ⚔️ 決戦の刻（v29）: ①誰かが凱旋リーチ ②ラウンドが上限の75%——どちらか早い方で発動し、
+// ⚔️ 決戦の刻: ①誰かが目標資産の8割に到達 ②ラウンドが上限の60%——どちらか早い方で発動し、
 // 以後ゲーム終了まで継続。全員ドロー+1／劣勢者スペル25%OFF／決戦スペル解禁。BGMもボス曲へ。
+// v31: 条件を緩めた（原さん指摘「そのような機会が発生し得ないものがある」への対応）。
+//   v30は「①総資産が目標に到達（＝凱旋リーチ） ②ラウンド上限の75%」。CPU vs CPU の実測では
+//   発動が S1=17R/32R、S7=31R/40R で、決戦スペル3種が使えるのは試合の終盤2〜3割だけだった。
+//   ①を「目標の8割」に、②を「上限の60%」に前倒しして、どの試合でも終盤4割は必ず決戦の刻になる。
+const CLIMAX_ASSET_RATIO = 0.8;   // 目標資産のこの割合に誰かが届いたら決戦の刻
+const CLIMAX_ROUND_RATIO = 0.6;   // ラウンドが上限のこの割合に達したら決戦の刻
 function checkClimax() {
   if (!G || G.over || G.climax || G.training) return;
-  const reach = G.players.some(q => assetsOf(G, q) >= RULES.target);
-  const lateRound = G.round >= Math.ceil(RULES.maxRounds * 0.75);
+  const reach = G.players.some(q => assetsOf(G, q) >= RULES.target * CLIMAX_ASSET_RATIO);
+  const lateRound = G.round >= Math.ceil(RULES.maxRounds * CLIMAX_ROUND_RATIO);
   if (!reach && !lateRound) return;
   G.climax = true;
   SFX.spell();
-  log(`⚔⚔⚔ 決戦の刻！ ${reach ? "凱旋リーチの出現" : "残りラウンドわずか"}——ここからは全員ドロー+1枚、` +
-    `劣勢者（首位の70%未満）はスペル25%OFF、⚔️決戦スペルが解禁される！`, "warn");
+  log(`⚔⚔⚔ 決戦の刻！ ${reach ? "目標資産の8割に迫る者が現れた" : "後半戦に突入"}——ここからは全員ドロー+1枚、` +
+    `劣勢者（首位の80%未満）はスペル25%OFF、⚔️決戦スペルが解禁される！`, "warn");
   if (typeof BGM !== "undefined" && BGM.setTrack && BGM.track !== "boss") BGM.setTrack("boss");
   renderAll(G);
 }
@@ -725,9 +755,9 @@ async function castSpellEffect(p, cardId) {
     if (!p.isCPU) log(`🌙 静寂のとばり——対象を指定するスペルは今は使えない`, "warn");
     return false;
   }
-  // ⚒️逆転スペル（v29）: 自分の総資産が首位の70%未満のときのみ
+  // ⚒️逆転スペル（v29）: 自分の総資産が首位の80%未満のときのみ
   if (c.underdog && !isUnderdog(G, p)) {
-    if (!p.isCPU) log(`⚒️ ${c.name}は劣勢（総資産が首位の70%未満）のときにしか使えない`, "warn");
+    if (!p.isCPU) log(`⚒️ ${c.name}は劣勢（総資産が首位の80%未満）のときにしか使えない`, "warn");
     return false;
   }
   // ⚔️決戦スペル（v29）: 決戦の刻のみ
@@ -3159,6 +3189,14 @@ function showTileInfo(tile) {
       if (c.ab.length) {
         parts.push(c.ab.map(a => `🔖 <b>${ABILITY_INFO[a].name}</b>：${ABILITY_INFO[a].desc}`).join("<br>"));
       }
+      // 🤝絆（v31）: 相方が盤上にいるかどうかで効果が変わるので、この土地でいま成立しているかを出す
+      if (c.bond) {
+        const partner = bondPartnerTile(G, tile.owner, c, tile.id);
+        parts.push(`🤝 <b>絆「${esc(c.bond.name)}」</b>：${esc(c.bond.desc)}<br>` +
+          (partner
+            ? `　→ <b style="color:#8ee0a0">成立中</b>（相方 ${esc(CARD_BY_ID[partner.creature.cardId].name)} が ${tileName(partner)} に駐留）`
+            : `　→ <span style="color:#8d86a3">未成立</span>（相方 ${esc(bondPartnerNames(c))} を自分の領地に配置すると発動）`));
+      }
       cards = [{ card: c }];
     }
     const ov = overlayOf(G, tile);
@@ -3432,16 +3470,17 @@ function showHelp() {
       <span class="ab">武芸</span>アイテム装備でさらにST+15/HP+15 ／
       <span class="ab">工匠</span>装備したアイテムがバトル後に手札へ戻る ／
       <span class="ab">罠師</span>自分の伏せ札が発動するたび+50G＆1ドロー ／
-      <span class="ab">反骨</span>総資産が首位の70%未満ならST+20/HP+20。<br>
+      <span class="ab">反骨</span>総資産が首位の80%未満ならST+20/HP+20。<br>
       🃏<b>伏せ札（トラップ）</b>: スペル枠で<b>自分の土地に裏向きで設置</b>する新型スペル（1つの土地に1枚）。
       相手には「何かが伏せてある」ことしか見えない。<b>侵略された時</b>に発動するもの（🕳️落とし穴＝侵略者ST-25、
       ⚡カウンターボルト＝バトル前に30ダメージ、🗡️伏兵＝防衛ST+25）と、<b>敵が停止した時</b>に発動するもの
       （🧲60G強奪、💰通行料2倍、💤1回休み、🌀城へ強制送還）がある。土地を失うと不発のまま捨札へ。<br>
-      ⚔️<b>決戦の刻</b>: <b>誰かが凱旋リーチ</b>するか<b>ラウンドが上限の75%</b>に達すると発動し、以後ゲーム終了まで続く
-      （トレーニング以外）。全員<b>ドロー+1枚</b>／劣勢者（総資産が首位の70%未満）は<b>スペルコスト25%OFF</b>／
-      <b>⚔️決戦スペル</b>（ラストスタンド・軍資金調達・ジャッジメント）が解禁される。BGMもボス曲に変わる。<br>
-      ⚒️<b>逆転スペル</b>（スナイプショット・レジスタンス・アップライジング）は<b>劣勢のときにしか使えない</b>強力な牙——
-      首位が独走するほど、追う側の手札が輝く。<br>
+      ⚔️<b>決戦の刻</b>: <b>誰かが目標資産の8割</b>に届くか<b>ラウンドが上限の6割</b>に達すると発動し、以後ゲーム終了まで続く
+      （トレーニング以外）。全員<b>ドロー+1枚</b>／劣勢者（総資産が首位の80%未満）は<b>スペルコスト25%OFF</b>／
+      <b>⚔️決戦スペル</b>（ラストスタンド・軍資金調達・ジャッジメント）が解禁される。BGMもボス曲に変わる。
+      発動するとヘッダーに<b>⚔決戦の刻</b>が点り、手札の決戦カードの帯が光る。<br>
+      ⚒️<b>逆転スペル</b>（スナイプショット・レジスタンス・アップライジング・雪辱の契約）は<b>劣勢のときにしか使えない</b>強力な牙——
+      首位が独走するほど、追う側の手札が輝く。<b>🔥劣勢</b>は情報窓に表示されるので、いつ使えるかは一目で分かる。<br>
       <b>⚡ 第三弾・追補「見切りと雪辱」（v30・15種）</b>: 数値の足し引きではない<b>「受けの駆け引き」</b>の拡張。新能力——
       <span class="ab">不屈</span>バトル中一度だけ、倒される一撃を<b>HP1で耐える</b>（🐲連撃の2撃目には耐えられない＝連撃が対策になる） ／
       <span class="ab">倍返し</span>相手の攻撃でダメージを受けたあと生き残っていれば、<b>以後の自分の攻撃ダメージが2倍</b>（一旦食らってから倍にして返す。一撃で仕留めれば発動させない） ／
@@ -3450,6 +3489,16 @@ function showHelp() {
       <b>復讐鎧ヴェンデッタメイル</b>（受けたダメージを<b>100%そのまま反射</b>）が加わり、スペルでは
       🧹<b>トラップスウィープ</b>（敵の伏せ札を公開して除去）・🛡️<b>見切りの構え</b>（次のバトルで不屈を付与）・
       ⚖️<b>雪辱の契約</b>（逆転スペル: 次に支払う通行料の<b>2倍を奪い返す</b>＝高額地帯が狩り場に変わる）が使える。<br>
+      <b>🤝 絆（v31・${typeof BOND_DEFS !== "undefined" ? BOND_DEFS.length : 0}組）</b>: 一部のクリーチャーには<b>相方</b>がいる。
+      <b>相方が自分の領地に駐留している間だけ</b>、そのクリーチャーは本来の力を出す。カードの絆タグ（🤝）は
+      <b>成立していると金色に灯る</b>ので、いま効いているかは手札を見れば分かる（🔍マス情報・カード詳細にも出る）。
+      効果は戦闘の強化にとどまらない——<br>
+      　・<b>戦闘</b>: 🐺氷炎の狼（フレイムウルフ⇔フロストウルフ）でST+15、🌳世界樹の守人（ドリアード＋ワールドツリー）でHP+25 など<br>
+      　・<b>能力を得る</b>: 🔥不死鳥の加護（火の子トカゲ＋フェニックス）で<b>転生</b>、⚒鍛冶場の絆（ドワーフガード＋ルーンスミス）で<b>武芸</b> など<br>
+      　・<b>ターンごとの実り</b>: 🍯蜜と花の絆（ハニービー＋アルラウネ）で毎ターン<b>+30G</b>、🌊潮の祈り（オーシャンプリーステス＋ネレイド）で毎ターン<b>自軍全員HP+15</b><br>
+      　・<b>移動・侵攻</b>: 🦄幻獣騎の絆（ペガサス⇔ユニコーン）で<b>ダイスの出目+1</b>、🐉双竜の絆（森竜＋グリーンドラゴン）で<b>侵攻が2マス先まで届く</b><br>
+      　・<b>通行料</b>: 🐙灯火の漁場（クラーケン＋灯台）でその土地の<b>通行料×1.4</b><br>
+      相方は「自分の領地にいる」ことが条件（🌫無力化の霧を受けた相方は数えない）。デッキに2枚とも入れておく価値のある、組み合わせて遊ぶための仕掛け。<br>
       <b>🎪 ウィークリールール</b>: 毎週月曜に切り替わる特殊ルール（通行料2倍・初期手札レジェンド保証など）。タイトルの「🎪 週替り」でON/OFF。
       ONで正規対戦に勝つと<b>ボーナスカード+${typeof WEEKLY_BONUS_CARDS !== "undefined" ? WEEKLY_BONUS_CARDS : 2}枚</b>（トレーニングには適用されない）。<br>
       <b>👥 情報窓（画面上部・3名分）</b>: 各プレイヤーの<b>順位・魔力・総資産（バー）・連鎖・関門・周回・山札</b>を
@@ -3502,7 +3551,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   // 盤面のマスをクリックして情報を確認（駐留クリーチャーの能力・実効防衛値など）。
   // 決定待ちのダイアログ中・領地選択中（光っているマスを選ぶモード）は開かない
   document.getElementById("board").addEventListener("click", e => {
-    if (!G || !canOpenExtraDialog() || UI.selectableTiles) return;
+    // v31: 🧭方向選択中（盤面のマスで行き先を選んでいる最中）もマス情報は開かない
+    if (!G || !canOpenExtraDialog() || UI.selectableTiles || UI.dirChoice) return;
     const gEl = e.target.closest && e.target.closest(".tile");
     if (!gEl) return;
     showTileInfo(G.tiles[Number(gEl.dataset.tile)]);

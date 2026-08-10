@@ -374,12 +374,22 @@ function aiChooseSummon(g, p, tile) {
   const budget = p.magic - aiProf(p).reserve;
   const candidates = aiHandCards(p).filter(c => c.type === "creature" && c.cost <= budget);
   if (candidates.length === 0) return null;
-  // 属性一致 > 連鎖が伸びる属性 > 安い、で採点
+  // 属性一致 > 連鎖が伸びる属性 > 🤝絆が成立する > 安い、で採点
   const score = c => {
     let s = 0;
     if (c.element === tile.element) s += 100 + chainCount(g, p.id, tile.element) * 30;
     s += (c.st + c.hp) / 10;
     s -= c.cost / 10;
+    // 🤝絆（v31）: 相方がすでに自領にいるなら、その1体を置くだけで絆が成立する＝高く評価する。
+    // 逆に「これから相方を呼ぶ側」も少しだけ加点（次に相方を引いたとき繋がる布石）
+    if (c.bond) {
+      if (bondPartnerTile(g, p.id, c, null)) s += 70;
+      else if (aiHandCards(p).some(h => c.bond.with.includes(h.id))) s += 20;
+    }
+    // 盤上に「相方待ち」のクリーチャーがいて、この1体がその相方なら成立させられる
+    const completes = g.tiles.some(t => t.type === "LAND" && t.owner === p.id && t.creature &&
+      CARD_BY_ID[t.creature.cardId].bond && CARD_BY_ID[t.creature.cardId].bond.with.includes(c.id));
+    if (completes) s += 70;
     return s;
   };
   candidates.sort((a, b) => score(b) - score(a));

@@ -5,6 +5,9 @@
 
 const UI = {};
 UI.selectableTiles = null; // 盤面で選択候補として光らせるマスidの Set（領地・クリーチャー選択中）
+// 🧭方向選択中の状態（v31）: { fromId, ids:Set }。null でなければ盤面で行き先のマスを選んでいる最中。
+// この間は🔍マス情報を開かない（main.jsの盤面クリックがチェックする）
+UI.dirChoice = null;
 // 決定待ちのダイアログ数。「👁 盤面を確認」でオーバーレイを一時的に閉じている間も 1 のまま。
 // これが 0 でないときにヘルプ/捨札/マス情報など別のダイアログを開くと、保留中のダイアログが
 // 上書きされて Promise が永遠に解決されず進行が止まる（実際に起きたフリーズバグ）ため、開く側は必ず確認する。
@@ -20,14 +23,170 @@ function setSelectableTiles(ids) { UI.selectableTiles = ids instanceof Set ? ids
 function clearSelectableTiles() { UI.selectableTiles = null; }
 const PLAYER_COLORS = ["#4da3ff", "#ff5b5b", "#7ed957"]; // 🔵自分 / 🔴相手1 / 🟢相手2（三つ巴）
 const P_ICONS = ["🔵", "🔴", "🟢"];   // パネル・ログ・ダイアログで使うプレイヤー印
-const P_MINI  = ["🔹", "🔸", "💚"];   // ルートプレビューで土地の所有者を示す小印
-const CELL = 100, TILE = 90;
-// 盤面上の駒の位置（同じマスに複数人が重なっても見分けられるよう左右＋中央にずらす）
-const TOKEN_OFFSETS = [
-  { dx: 20, dy: -8 },        // P0: 左上
-  { dx: TILE - 20, dy: -8 }, // P1: 右上
-  { dx: TILE / 2, dy: -16 }, // P2: 中央やや上（三つ巴）
-];
+const P_MINI  = ["🔹", "🔸", "💚"];   // 一覧・説明文で土地の所有者を示す小印
+// ============================================================
+// 盤面の寸法とマス目の形（v31・原さん要望「四角でなくて良い／レイアウトを柔軟に／ステージの違いを明確に」）
+// ------------------------------------------------------------
+// v30までは「1マス=100px間隔・90px角の丸い四角」で全ステージ共通だった。
+// v31では ①マス目の形 ②マス間の余白 ③道の太さ・流れ ④背景の紋章 をステージごとに変えられる。
+//   CELL   … マスの中心どうしの間隔（座標系の基準。全ステージ共通で不変）
+//   TILE   … マス目の描画サイズ（ステージの look.gap で決まる。余白が広いほど道が主役になる）
+//   BOARD_PAD … viewBox の余白。盤面の外へはみ出す駒・オーラが切れないようにするための帯（v31）
+// これらは applyStageLook(stage) が対戦開始時に書き換える。盤面の寸法を使う処理は必ずここを見ること。
+// ============================================================
+const CELL = 100;
+const BOARD_PAD = 38;
+let TILE = 90;                      // マス目の描画サイズ
+let TILE_SHAPE = "square";          // 土地マスの形（ステージ指定）
+let ROAD_W = 16;                    // マナの回路（道）の太さ
+let ROAD_DASH = "2 9";              // 道を流れる魔力の点線パターン
+const STAGE_LOOK_DEFAULT = { shape: "square", gap: 0.10, road: 16, dash: "2 9" };
+function stageLook(stage) { return { ...STAGE_LOOK_DEFAULT, ...((stage && stage.look) || {}) }; }
+function applyStageLook(stage) {
+  const lk = stageLook(stage);
+  TILE = Math.round(CELL * (1 - Math.max(0.02, Math.min(0.3, lk.gap))));
+  if (!TILE_SHAPES[lk.shape]) console.error(`[ui] 未知のマス目形 "${lk.shape}"（stages.js の look.shape）— square で代用`);
+  TILE_SHAPE = TILE_SHAPES[lk.shape] ? lk.shape : "square";
+  ROAD_W = lk.road;
+  ROAD_DASH = lk.dash;
+}
+// 盤面SVGの表示領域。マスの外周にBOARD_PADの余白を取る＝端のマスに立つ駒が切れない（v31）
+function applyBoardViewBox(g) {
+  const svg = document.getElementById("board");
+  if (!svg || !g || !g.tiles.length) return;
+  const w = (Math.max(...g.tiles.map(t => t.x)) + 1) * CELL;
+  const h = (Math.max(...g.tiles.map(t => t.y)) + 1) * CELL;
+  svg.setAttribute("viewBox", `${-BOARD_PAD} ${-BOARD_PAD} ${w + BOARD_PAD * 2} ${h + BOARD_PAD * 2}`);
+  svg.style.aspectRatio = `${w + BOARD_PAD * 2} / ${h + BOARD_PAD * 2}`;
+}
+
+// ---------- マス目の形（パス生成） ----------
+// 各形は「中心(cx,cy)と一辺S」から SVG の d 文字列を返す。
+// content … 中身（属性チップ・レベル・クリーチャー・通行料）を枠内に収めるための縮小率。
+//            円や菱形は内接する四角が小さいので中身を少し縮める（＝どの形でも同じ情報が同じ並びで読める）
+const _n = v => Math.round(v * 10) / 10;
+function _rrD(cx, cy, w, h, r) {
+  const x = cx - w / 2, y = cy - h / 2;
+  return `M${_n(x + r)},${_n(y)} h${_n(w - 2 * r)} a${_n(r)},${_n(r)} 0 0 1 ${_n(r)},${_n(r)}` +
+    ` v${_n(h - 2 * r)} a${_n(r)},${_n(r)} 0 0 1 ${_n(-r)},${_n(r)} h${_n(-(w - 2 * r))}` +
+    ` a${_n(r)},${_n(r)} 0 0 1 ${_n(-r)},${_n(-r)} v${_n(-(h - 2 * r))} a${_n(r)},${_n(r)} 0 0 1 ${_n(r)},${_n(-r)} z`;
+}
+function _circD(cx, cy, r) { return `M${_n(cx - r)},${_n(cy)} a${_n(r)},${_n(r)} 0 1 0 ${_n(2 * r)},0 a${_n(r)},${_n(r)} 0 1 0 ${_n(-2 * r)},0 z`; }
+function _polyD(pts) { return "M" + pts.map(p => `${_n(p[0])},${_n(p[1])}`).join(" L") + " Z"; }
+function _regPts(cx, cy, r, n, rot = 0) {
+  const pts = [];
+  for (let i = 0; i < n; i++) { const a = rot + i * 2 * Math.PI / n; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); }
+  return pts;
+}
+// 形は「見た目の個性」と「中身の入る面積」の両立が要る。とがった形（正菱形・尖頭六角・木の葉の
+// ような紡錘形）は面積は同じでも“情報の入る内接長方形”が極端に小さく、文字が枠から飛び出す。
+// そこで土地マス用は内接面積の大きい形だけを採用し、個性は decor（内側の飾り線）で出している。
+// decor … 形の内側に薄く描く飾り（面取りの稜線・歯車の軸・葉脈など）。中身の読みやすさは損なわない
+const TILE_SHAPES = {
+  // --- 土地マス用（ステージが選ぶ） ---
+  square:  { content: 1.00, d: (cx, cy, S) => _rrD(cx, cy, S, S, S * 0.13) },                     // 丸い四角（従来）
+  brick:   { content: 1.00, d: (cx, cy, S) => _rrD(cx, cy, S * 1.02, S * 0.92, S * 0.05),         // 切り出した石畳（横長）＋目地
+    decor: (cx, cy, S) => `<path d="M${_n(cx - S * 0.5)},${_n(cy - S * 0.28)} h${_n(S)}" stroke="#fff" stroke-opacity="0.08" stroke-width="1.5"/>` },
+  round:   { content: 0.96, d: (cx, cy, S) => _circD(cx, cy, S / 2),                              // 円（水面・闘技場）＋内輪
+    decor: (cx, cy, S) => `<circle cx="${_n(cx)}" cy="${_n(cy)}" r="${_n(S * 0.42)}" fill="none" stroke="#fff" stroke-opacity="0.07" stroke-width="1.5"/>` },
+  hex:     { content: 0.90, d: (cx, cy, S) => _polyD(_regPts(cx, cy, S / 2, 6, 0)) },             // 平頭六角（柱状節理）
+  oct:     { content: 0.93, d: (cx, cy, S) => _polyD(_regPts(cx, cy, S / 2 * 1.04, 8, Math.PI / 8)) }, // 正八角（円卓・幻影）
+  gem:     { content: 1.00, d: (cx, cy, S) => {                                                    // 面取りした宝石（市場・星辰）
+    const h = S / 2, c = S * 0.22;
+    return _polyD([[cx - h + c, cy - h], [cx + h - c, cy - h], [cx + h, cy - h + c], [cx + h, cy + h - c],
+      [cx + h - c, cy + h], [cx - h + c, cy + h], [cx - h, cy + h - c], [cx - h, cy - h + c]]);
+  }, decor: (cx, cy, S) => {                                                                       // 四隅の面から中心へ走る稜線＝宝石のファセット
+    const h = S / 2, c = S * 0.22, t = S * 0.3;
+    return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) =>
+      `<path d="M${_n(cx + sx * (h - c))},${_n(cy + sy * h)} L${_n(cx + sx * t)},${_n(cy + sy * t)} L${_n(cx + sx * h)},${_n(cy + sy * (h - c))}" ` +
+      `fill="none" stroke="#fff" stroke-opacity="0.09" stroke-width="1.2"/>`).join("");
+  } },
+  leaf:    { content: 0.96, d: (cx, cy, S) => {                                                    // 木の葉（左上と右下だけ大きく丸める）
+    const h = S / 2, R = S * 0.45, r = S * 0.10;
+    return `M${_n(cx - h + R)},${_n(cy - h)} L${_n(cx + h - r)},${_n(cy - h)} A${_n(r)},${_n(r)} 0 0 1 ${_n(cx + h)},${_n(cy - h + r)}` +
+      ` L${_n(cx + h)},${_n(cy + h - R)} A${_n(R)},${_n(R)} 0 0 1 ${_n(cx + h - R)},${_n(cy + h)}` +
+      ` L${_n(cx - h + r)},${_n(cy + h)} A${_n(r)},${_n(r)} 0 0 1 ${_n(cx - h)},${_n(cy + h - r)}` +
+      ` L${_n(cx - h)},${_n(cy - h + R)} A${_n(R)},${_n(R)} 0 0 1 ${_n(cx - h + R)},${_n(cy - h)} Z`;
+  }, decor: (cx, cy, S) => {                                                                        // 葉脈（尖った角どうしを結ぶ）
+    const h = S / 2;
+    return `<path d="M${_n(cx + h * 0.72)},${_n(cy - h * 0.72)} L${_n(cx - h * 0.72)},${_n(cy + h * 0.72)}" stroke="#fff" stroke-opacity="0.08" stroke-width="1.5"/>`;
+  } },
+  gear:    { content: 0.85, d: (cx, cy, S) => {                                                    // 歯車（機構都市）
+    const ro = S * 0.54, ri = S * 0.44, teeth = 8, step = 2 * Math.PI / teeth, pts = [];
+    for (let i = 0; i < teeth; i++) {
+      const a = i * step;
+      pts.push([cx + ri * Math.cos(a), cy + ri * Math.sin(a)]);
+      pts.push([cx + ro * Math.cos(a + step * 0.16), cy + ro * Math.sin(a + step * 0.16)]);
+      pts.push([cx + ro * Math.cos(a + step * 0.34), cy + ro * Math.sin(a + step * 0.34)]);
+      pts.push([cx + ri * Math.cos(a + step * 0.5), cy + ri * Math.sin(a + step * 0.5)]);
+    }
+    return _polyD(pts);
+  }, decor: (cx, cy, S) => `<circle cx="${_n(cx)}" cy="${_n(cy)}" r="${_n(S * 0.4)}" fill="none" stroke="#fff" stroke-opacity="0.09" stroke-width="1.5"/>` },
+  diamond: { content: 0.66, d: (cx, cy, S) => _polyD([[cx, cy - S / 2], [cx + S / 2, cy], [cx, cy + S / 2], [cx - S / 2, cy]]) }, // 菱形（💎魔力マス専用＝中身はアイコンと名前だけ）
+  // --- 特別マス用（全ステージ共通の形＝「形を見ればマスの種類が分かる」ようにするため固定） ---
+  castle:  { content: 0.94, d: (cx, cy, S) => {                                                    // 🏰城＝胸壁つきの砦
+    const h = S / 2, m = S * 0.15, top = cy - h;
+    const pts = [[cx - h, top + m], [cx - h, top], [cx - h + m, top], [cx - h + m, top + m * 0.6],
+      [cx - m * 0.5, top + m * 0.6], [cx - m * 0.5, top], [cx + m * 0.5, top], [cx + m * 0.5, top + m * 0.6],
+      [cx + h - m, top + m * 0.6], [cx + h - m, top], [cx + h, top], [cx + h, top + m],
+      [cx + h * 0.86, cy + h], [cx - h * 0.86, cy + h]];
+    return _polyD(pts);
+  } },
+  arch:    { content: 0.92, d: (cx, cy, S) => {                                                    // ⛩️関門＝門型
+    const h = S / 2;
+    return `M${_n(cx - h)},${_n(cy + h)} L${_n(cx - h)},${_n(cy - h * 0.2)}` +
+      ` A${_n(h)},${_n(h * 0.86)} 0 0 1 ${_n(cx + h)},${_n(cy - h * 0.2)} L${_n(cx + h)},${_n(cy + h)} Z`;
+  } },
+  blob:    { content: 0.90, d: (cx, cy, S) => {                                                    // 🌋マグマ＝ごつごつした溶岩溜まり
+    const r = S / 2, k = [1, 0.82, 0.98, 0.8, 1, 0.84, 0.96, 0.8, 1, 0.86];
+    return _polyD(k.map((m, i) => {
+      const a = i * 2 * Math.PI / k.length - Math.PI / 2;
+      return [cx + r * m * Math.cos(a), cy + r * m * Math.sin(a)];
+    }));
+  } },
+};
+// マスの種類ごとの形。LAND だけステージ指定（TILE_SHAPE）を使い、他は全ステージ共通＝
+// 形そのものが「このマスは何か」の手がかりになる（原さん要望「マス目の違いを明確に」）
+const TYPE_SHAPE = {
+  CASTLE: "castle", GATE: "arch", MAGIC: "diamond", WARP: "round",
+  SPRING: "round", FORTUNE: "oct", BOOST: "gem", MAGMA: "blob", CARD: "brick",
+};
+function shapeOfTile(tile) { return tile.type === "LAND" ? TILE_SHAPE : (TYPE_SHAPE[tile.type] || "square"); }
+// 形の内側に描く飾り（面取りの稜線・歯車の軸・葉脈など）。無い形は空文字
+function tileDecorSVG(tile, cx, cy, size) {
+  const sh = TILE_SHAPES[shapeOfTile(tile)];
+  return (sh && sh.decor) ? sh.decor(cx, cy, size === undefined ? TILE : size) : "";
+}
+// マス1つぶんの外形パス（size 省略時は TILE）
+function tileShapeD(tile, cx, cy, size) {
+  const sh = TILE_SHAPES[shapeOfTile(tile)] || TILE_SHAPES.square;
+  return sh.d(cx, cy, size === undefined ? TILE : size);
+}
+// 文字列のおおよその描画幅（全角=1em / 半角=0.56em）。マス目に収まるかの判定に使う
+function approxTextW(s, fontSize) {
+  let w = 0;
+  for (const ch of String(s)) w += /[\x20-\xff]/.test(ch) ? 0.56 : 1.0;
+  return w * fontSize;
+}
+// maxW を超えるときだけ textLength で詰める属性を返す（岩帝テラガイアのような
+// 「長い名前・4桁HP」の極端なカードでもマス目から文字がはみ出さないようにするため）
+function fitTextAttr(s, fontSize, maxW) {
+  return approxTextW(s, fontSize) > maxW ? ` textLength="${_n(maxW)}" lengthAdjust="spacingAndGlyphs"` : "";
+}
+function tileContentScale(tile) {
+  const sh = TILE_SHAPES[shapeOfTile(tile)] || TILE_SHAPES.square;
+  return sh.content;
+}
+
+// 盤面上の駒の位置（同じマスに複数人が重なっても全員見えるよう、マスの上辺にずらして並べる）。
+// v31: 駒を大きく描き直したので重なり方も見直した（マス目の情報は駒の下に隠れてよい＝
+// 隠れた情報は🔍マス情報で確認できる、という原さんの整理に従う）
+function tokenOffsets(n) {
+  const S = TILE;
+  if (n <= 1) return [{ dx: S * 0.5, dy: S * 0.10 }];
+  if (n === 2) return [{ dx: S * 0.27, dy: S * 0.14 }, { dx: S * 0.73, dy: S * 0.14 }];
+  return [{ dx: S * 0.20, dy: S * 0.20 }, { dx: S * 0.80, dy: S * 0.20 }, { dx: S * 0.5, dy: S * -0.04 }];
+}
 
 // 演出速度の倍率。トレーニングでは小さくして時短にする（startGameで設定）
 let GAME_SPEED = 1;
@@ -45,154 +204,252 @@ function elemNote(card, tile) {
 }
 
 // ---------- 盤面 ----------
-function tilePx(tile) { return { x: tile.x * CELL + 5, y: tile.y * CELL + 5 }; }
+// タイルの左上座標（マス目はセルの中央に置く＝TILEの大小に関わらず道の中心と揃う）
+function tilePx(tile) { const m = (CELL - TILE) / 2; return { x: tile.x * CELL + m, y: tile.y * CELL + m }; }
+// タイルの中心座標（v31: 中身は全て中心からの相対配置で描く＝どんな形でも同じ並びで読める）
+function tileCenter(tile) { return { cx: tile.x * CELL + CELL / 2, cy: tile.y * CELL + CELL / 2 }; }
+
+// ステージの背景紋章（v31）: 盤面の下に薄く敷く「その土地らしさ」。
+// ステージのアイコンを大きく透かし、テーマ色の光を落とし、外周に額縁を描く。
+// 盤面を見た瞬間に「前と違うステージだ」と分かるようにするためのレイヤー（マスの視認性は落とさない濃度）
+function boardBackdropSVG(g) {
+  const w = (Math.max(...g.tiles.map(t => t.x)) + 1) * CELL;
+  const h = (Math.max(...g.tiles.map(t => t.y)) + 1) * CELL;
+  const th = g.stage.theme || {};
+  const glow = th.glow || "#2a2440", dot = th.dot || "#5c5480";
+  const P = BOARD_PAD - 6;
+  let s = `<g class="board-bg" pointer-events="none">`;
+  s += `<rect x="${-P}" y="${-P}" width="${w + P * 2}" height="${h + P * 2}" rx="26" fill="${glow}" opacity="0.18"/>`;
+  s += `<rect x="${-P}" y="${-P}" width="${w + P * 2}" height="${h + P * 2}" rx="26" fill="none" stroke="${dot}" stroke-width="2" opacity="0.42"/>`;
+  s += `<rect x="${-P + 7}" y="${-P + 7}" width="${w + P * 2 - 14}" height="${h + P * 2 - 14}" rx="20" fill="none" stroke="${dot}" stroke-width="1" opacity="0.2" stroke-dasharray="10 8"/>`;
+  // 中央に巨大な紋章（ステージアイコン）。マスの背後なので濃度は最小限
+  s += `<text x="${w / 2}" y="${h / 2 + Math.min(w, h) * 0.14}" font-size="${Math.min(w, h) * 0.42}" text-anchor="middle" opacity="0.05">${g.stage.icon}</text>`;
+  // 上の余白にステージ名の銘板（どのステージを遊んでいるか盤面だけで分かる）
+  s += `<text x="${-P + 10}" y="${-P + 22}" font-size="20" fill="${dot}" opacity="0.75" font-weight="bold">${esc(g.stage.icon + " STAGE " + (g.stageIdx + 1) + "　" + g.stage.name)}</text>`;
+  s += `</g>`;
+  return s;
+}
 
 function renderBoard(g) {
   const svg = document.getElementById("board");
-  let html = "";
-  // マナの回路（マスをつなぐ道）: タイルの下層に描く。外周の太い道＋中央を流れる魔力の点線。
-  // 色はステージのテーマ（stage.theme）で変わり、盤面ごとの雰囲気を出す
+  let html = boardBackdropSVG(g);
+  // マナの回路（マスをつなぐ道）: タイルの下層に描く。太い道＋中央を流れる魔力の点線。
+  // 色・太さ・流れの粒はステージ（theme / look）で変わり、盤面ごとの雰囲気を出す
   const th = g.stage.theme || {};
   const pathCol = th.path || "#241e33", dotCol = th.dot || "#5c5480";
   g.tiles.forEach(tile => {
-    const c1 = tilePx(tile);
+    const a = tileCenter(tile);
     tile.next.forEach(nid => {
-      const c2 = tilePx(g.tiles[nid]);
-      const [x1, y1, x2, y2] = [c1.x + TILE / 2, c1.y + TILE / 2, c2.x + TILE / 2, c2.y + TILE / 2];
-      html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${pathCol}" stroke-width="16" stroke-linecap="round"/>`;
-      html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${dotCol}" stroke-width="2.5" stroke-dasharray="2 9" stroke-linecap="round" opacity="0.9"/>`;
+      const b = tileCenter(g.tiles[nid]);
+      html += `<line x1="${a.cx}" y1="${a.cy}" x2="${b.cx}" y2="${b.cy}" stroke="${pathCol}" stroke-width="${ROAD_W}" stroke-linecap="round"/>`;
+      html += `<line x1="${a.cx}" y1="${a.cy}" x2="${b.cx}" y2="${b.cy}" stroke="${dotCol}" stroke-width="2.5" stroke-dasharray="${ROAD_DASH}" stroke-linecap="round" opacity="0.9"/>`;
     });
   });
-  g.tiles.forEach(tile => {
-    const { x, y } = tilePx(tile);
-    const isLand = tile.type === "LAND";
-    const fill = isLand ? `url(#tg-${tile.element})`
-      : tile.type === "CASTLE" ? "url(#tg-castle)"
-      : tile.type === "MAGMA" ? "#5a2418"
-      : "url(#tg-special)";
-    const stroke = tile.owner !== null ? PLAYER_COLORS[tile.owner]
-      : tile.type === "CASTLE" ? "#c9a755" : "#5a5470";
-    const sw = tile.owner !== null ? 4 : tile.type === "CASTLE" ? 2.5 : 1.5;
-    html += `<g class="tile" data-tile="${tile.id}">`;
-    // 所有地はプレイヤー色のオーラで一目で分かるように
+  g.tiles.forEach(tile => { html += tileSVG(g, tile); });
+  // プレイヤー駒はいちばん最後＝常に最前面（マス目の情報が駒の下に隠れるのは許容。
+  // 隠れた情報は🔍マス情報で確認できる、という原さんの整理に従う）
+  html += tokensSVG(g);
+  svg.innerHTML = html;
+}
+
+// マス1つぶんの描画（v31: 外形は形状パス・中身は中心からの相対配置）
+function tileSVG(g, tile) {
+  const { cx, cy } = tileCenter(tile);
+  const S = TILE, u = S / 90;              // u＝基準サイズ(90)からの倍率。中身の座標・文字サイズに掛ける
+  const isLand = tile.type === "LAND";
+  const shapeD = (size) => tileShapeD(tile, cx, cy, size);
+  const fill = isLand ? `url(#tg-${tile.element})`
+    : tile.type === "CASTLE" ? "url(#tg-castle)"
+    : tile.type === "MAGMA" ? "#5a2418"
+    : "url(#tg-special)";
+  const stroke = tile.owner !== null ? PLAYER_COLORS[tile.owner]
+    : tile.type === "CASTLE" ? "#c9a755" : "#5a5470";
+  const sw = tile.owner !== null ? 4 : tile.type === "CASTLE" ? 2.5 : 1.5;
+  let html = `<g class="tile" data-tile="${tile.id}">`;
+  // 所有地はプレイヤー色のオーラで一目で分かるように（マス目と同じ形で一回り大きく）
+  if (tile.owner !== null) {
+    html += `<path d="${shapeD(S + 7)}" fill="none" stroke="${PLAYER_COLORS[tile.owner]}" stroke-width="7" opacity="0.22"/>`;
+  }
+  html += `<path class="tshape" d="${shapeD(S)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>`;
+  // 内側のハイライト線（マス目の立体感。外形と同じ形で少し内側に）＋形ごとの飾り（稜線・葉脈・歯車の軸）
+  html += `<path d="${shapeD(S - 6)}" fill="none" stroke="#fff" stroke-opacity="${tile.type === "CASTLE" ? 0.12 : 0.06}" stroke-width="1" stroke-linejoin="round"/>`;
+  html += tileDecorSVG(tile, cx, cy, S);
+
+  // ---- 中身 ----
+  // v31: マス目が四角とは限らなくなったので、中身は「中央に積む横帯」に組み替えた。
+  //   1段目 [属性チップ] #番号 Lv3   … 上ほど幅を使わない＝六角・円・結晶でも角が飛び出さない
+  //   2段目 ●●●○○（レベルのピップ）
+  //   3段目 (属性バッジ) クリーチャー名
+  //   4段目 ST・HP
+  //   5段目 通行料
+  // 角に置いていた要素（属性チップ・Lv・#番号）を1段目へ集約したのがv30からの変更点。
+  // さらに形ごとの content 率で中心方向へ縮め、どの形でも枠内に収める。
+  const k = tileContentScale(tile);
+  let inner = "";
+  if (isLand) {
+    inner += `<rect x="${_n(cx - 28 * u)}" y="${_n(cy - 37 * u)}" width="${_n(22 * u)}" height="${_n(18 * u)}" rx="${_n(5.5 * u)}" fill="${ELEMENTS[tile.element].color}cc"/>`;
+    inner += `<text x="${_n(cx - 17 * u)}" y="${_n(cy - 24 * u)}" font-size="${_n(13 * u)}" text-anchor="middle">${ELEMENTS[tile.element].icon}</text>`;
+    inner += `<text x="${_n(cx)}" y="${_n(cy - 25 * u)}" font-size="${_n(9.5 * u)}" fill="#9a92b5" text-anchor="middle">#${tile.id}</text>`;
+    inner += `<text x="${_n(cx + 29 * u)}" y="${_n(cy - 24 * u)}" font-size="${_n(13 * u)}" fill="#cfc9e0" text-anchor="end" font-weight="bold">Lv${tile.level}</text>`;
+    const PIP_N = LAND_VALUE.length, pipGap = 8.6 * u, pipR = 3.2 * u;
+    const pipStartX = cx - (PIP_N - 1) * pipGap / 2, pipY = cy - 11 * u;
+    for (let lv = 1; lv <= PIP_N; lv++) {
+      const on = lv <= tile.level;
+      inner += `<circle cx="${_n(pipStartX + (lv - 1) * pipGap)}" cy="${_n(pipY)}" r="${_n(pipR)}" fill="${on ? "#ffd76a" : "#453f5c"}"${on ? ' stroke="#8a6a12" stroke-width="0.6"' : ""}/>`;
+    }
+    if (tile.creature) {
+      const c = CARD_BY_ID[tile.creature.cardId];
+      const ce = ELEMENTS[c.element];
+      const cur = tile.creature.hp ?? c.hp;
+      const wounded = cur < c.hp;
+      const hpStr = wounded ? `${cur}/${c.hp}` : `${c.hp}`;
+      const hpFill = wounded ? "#ff8a6a" : "#ffe08a"; // 傷ついていれば赤み
+      // クリーチャーの属性は「丸いバッジ」（＝土地チップの角丸と形で区別）
+      inner += `<circle cx="${_n(cx - 24 * u)}" cy="${_n(cy + 3 * u)}" r="${_n(9.5 * u)}" fill="${ce.color}" stroke="#fff" stroke-width="${_n(1.4 * u)}"/>`;
+      inner += `<text x="${_n(cx - 24 * u)}" y="${_n(cy + 7 * u)}" font-size="${_n(11 * u)}" text-anchor="middle">${ce.icon}</text>`;
+      // 名前・ST/HPは長さが読めない（岩帝テラガイア＝長い名前／HP148/155＝7桁）ので、
+      // 幅が上限を超えるときだけ textLength で詰める＝どんなカードでもマス目からはみ出さない
+      const nm = c.name.slice(0, 5);
+      inner += `<text x="${_n(cx + 7 * u)}" y="${_n(cy + 7 * u)}" font-size="${_n(11.5 * u)}" fill="#fff" text-anchor="middle" font-weight="bold"${fitTextAttr(nm, 11.5 * u, 48 * u)}>${esc(nm)}</text>`;
+      const stHp = `ST${c.st} HP${hpStr}`;
+      inner += `<text x="${_n(cx)}" y="${_n(cy + 24 * u)}" text-anchor="middle"${fitTextAttr(stHp, 15 * u, 58 * u)}>` +
+        `<tspan font-size="${_n(11.5 * u)}" fill="#c9c2da">ST${c.st}</tspan>` +
+        `<tspan font-size="${_n(16 * u)}" font-weight="bold" fill="${hpFill}"> HP${hpStr}</tspan></text>`;
+    }
     if (tile.owner !== null) {
-      html += `<rect x="${x - 3}" y="${y - 3}" width="${TILE + 6}" height="${TILE + 6}" rx="13" fill="none" stroke="${PLAYER_COLORS[tile.owner]}" stroke-width="7" opacity="0.22"/>`;
+      inner += `<text x="${_n(cx)}" y="${_n(cy + 37 * u)}" font-size="${_n(12.5 * u)}" fill="${PLAYER_COLORS[tile.owner]}" text-anchor="middle" font-weight="bold">${tollOf(g, tile)}G</text>`;
     }
-    html += `<rect x="${x}" y="${y}" width="${TILE}" height="${TILE}" rx="10" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
-    // 内側のハイライト線（タイルの立体感）
-    html += `<rect x="${x + 2.5}" y="${y + 2.5}" width="${TILE - 5}" height="${TILE - 5}" rx="8" fill="none" stroke="#fff" stroke-opacity="${tile.type === "CASTLE" ? 0.12 : 0.06}" stroke-width="1"/>`;
-    if (isLand) {
-      // 土地の属性は「左上コーナーの角丸チップ」で表示（＝土地の属性だと分かる位置）
-      html += `<rect x="${x + 4}" y="${y + 4}" width="26" height="22" rx="6" fill="${ELEMENTS[tile.element].color}cc"/>`;
-      html += `<text x="${x + 17}" y="${y + 20}" font-size="15" text-anchor="middle">${ELEMENTS[tile.element].icon}</text>`;
-      html += `<text x="${x + TILE - 7}" y="${y + 20}" font-size="14" fill="#cfc9e0" text-anchor="end" font-weight="bold">Lv${tile.level}</text>`;
-      // レベルを数字だけでなく「5段階のピップ・メーター」でも表示（一目で強さが分かるように）
-      const PIP_N = LAND_VALUE.length, pipGap = 9, pipR = 3.4;
-      const pipStartX = x + TILE / 2 - (PIP_N - 1) * pipGap / 2, pipY = y + 31;
-      for (let lv = 1; lv <= PIP_N; lv++) {
-        const px = pipStartX + (lv - 1) * pipGap;
-        const on = lv <= tile.level;
-        html += `<circle cx="${px}" cy="${pipY}" r="${pipR}" fill="${on ? "#ffd76a" : "#453f5c"}"${on ? ' stroke="#8a6a12" stroke-width="0.6"' : ""}/>`;
-      }
-      if (tile.creature) {
-        const c = CARD_BY_ID[tile.creature.cardId];
-        const ce = ELEMENTS[c.element];
-        const cur = tile.creature.hp ?? c.hp;
-        const wounded = cur < c.hp;
-        const hpStr = wounded ? `${cur}/${c.hp}` : `${c.hp}`;
-        const hpFill = wounded ? "#ff8a6a" : "#ffe08a"; // 傷ついていれば赤み
-        const cx = x + TILE / 2;
-        // クリーチャーの属性は「丸いバッジ」で表示（＝コマ＝クリーチャーの属性。土地チップと形で区別）
-        html += `<circle cx="${x + 15}" cy="${y + 46}" r="11" fill="${ce.color}" stroke="#fff" stroke-width="1.5"/>`;
-        html += `<text x="${x + 15}" y="${y + 50}" font-size="12" text-anchor="middle">${ce.icon}</text>`;
-        html += `<text x="${cx + 9}" y="${y + 44}" font-size="12" fill="#fff" text-anchor="middle" font-weight="bold">${esc(c.name.slice(0, 5))}</text>`;
-        // ST（小）＋ HP（大きく・読みやすく）
-        html += `<text x="${cx}" y="${y + 66}" text-anchor="middle">` +
-          `<tspan font-size="12" fill="#c9c2da">ST${c.st}</tspan>` +
-          `<tspan font-size="17" font-weight="bold" fill="${hpFill}"> HP${hpStr}</tspan></text>`;
-      }
-      if (tile.owner !== null) {
-        const toll = tollOf(g, tile);
-        html += `<text x="${x + TILE / 2}" y="${y + TILE - 5}" font-size="13" fill="${PLAYER_COLORS[tile.owner]}" text-anchor="middle" font-weight="bold">${toll}G</text>`;
-      }
-    } else {
-      // 魔力マスは宝石がきらめき、城は少し大きな紋章で特別感を出す
-      const iconSize = tile.type === "CASTLE" ? 34 : 30;
-      html += `<text x="${x + TILE / 2}" y="${y + 46}" font-size="${iconSize}" text-anchor="middle">${TILE_ICONS[tile.type]}</text>`;
-      if (tile.type === "MAGIC") {
-        html += `<text x="${x + TILE - 16}" y="${y + 22}" font-size="11" text-anchor="middle">✨<animate attributeName="opacity" values="1;0.2;1" dur="1.8s" repeatCount="indefinite"/></text>`;
-      }
-      if (tile.type === "CASTLE") {
-        html += `<path d="M${x + TILE / 2 - 16} ${y + 12} h32" stroke="#ffd76a" stroke-width="1.5" opacity="0.7"/>`;
-      }
-      html += `<text x="${x + TILE / 2}" y="${y + 70}" font-size="12" fill="#b8b2cc" text-anchor="middle">${TILE_LABELS[tile.type]}</text>`;
+  } else {
+    // 特別マスは大きな紋章＋名前。形そのものも種類ごとに違う（TYPE_SHAPE）
+    const iconSize = (tile.type === "CASTLE" ? 32 : 28) * u;
+    inner += `<text x="${_n(cx)}" y="${_n(cy - 25 * u)}" font-size="${_n(9.5 * u)}" fill="#9a92b5" text-anchor="middle">#${tile.id}</text>`;
+    inner += `<text x="${_n(cx)}" y="${_n(cy + 6 * u)}" font-size="${_n(iconSize)}" text-anchor="middle">${TILE_ICONS[tile.type]}</text>`;
+    if (tile.type === "MAGIC") {
+      inner += `<text x="${_n(cx + 20 * u)}" y="${_n(cy - 20 * u)}" font-size="${_n(10 * u)}" text-anchor="middle">✨<animate attributeName="opacity" values="1;0.2;1" dur="1.8s" repeatCount="indefinite"/></text>`;
     }
-    // 盤面エフェクト（🛡️結界/🕸️罠/🚧バリケード）のバッジ
-    const ov = overlayOf(g, tile);
-    if (ov) {
-      const ovIcon = ov.kind === "sanctuary" ? "🛡️" : ov.kind === "snare" ? "🕸️" : ov.kind === "block" ? "🚧" : "✨";
-      const ovColor = ov.kind === "sanctuary" ? "#8ecbff" : ov.kind === "snare" ? "#c9a0ff" : ov.kind === "block" ? "#ffb84d" : "#ddd";
-      html += `<rect x="${x}" y="${y}" width="${TILE}" height="${TILE}" rx="10" fill="none" stroke="${ovColor}" stroke-width="3" stroke-dasharray="7 5" opacity="0.9"/>`;
-      html += `<text x="${x + TILE / 2}" y="${y + 16}" font-size="15" text-anchor="middle">${ovIcon}</text>`;
-    }
-    // 🃏 伏せ札（v29）: 「何かが伏せてある」ことは全員に見える（中身は所有者のみ＝マス情報で確認）。
-    // 誰の仕掛けかは札の縁の色で分かる。ゆっくり明滅して不穏さを演出
-    if (tile.trap && tile.owner === tile.trap.owner) {
-      const tx = x + TILE - 15, ty = y + 6;
-      html += `<g opacity="0.95"><animate attributeName="opacity" values="0.95;0.55;0.95" dur="2.4s" repeatCount="indefinite"/>` +
-        `<rect x="${tx}" y="${ty}" width="11" height="15" rx="2" fill="#2a2140" stroke="${PLAYER_COLORS[tile.trap.owner]}" stroke-width="1.6"/>` +
-        `<text x="${tx + 5.5}" y="${ty + 11.5}" font-size="9" text-anchor="middle" fill="#d9a6ff">?</text></g>`;
-    }
-    // 矢印表示（v23・自由移動）:
-    //  ・➡一方通行マス＝唯一の出口を赤金の大矢印で明示（特別マスであることが一目で分かるように）
-    //  ・三叉路以上（隣接3方向以上）の合流マス＝出られる方向を小矢印で示す
-    //  ※通常のマスは全方向に進めるため矢印は描かない（盤面のノイズになる）
-    const arrow = (nt, fill, big) => {
-      const dx = Math.sign(nt.x - tile.x), dy = Math.sign(nt.y - tile.y);
-      const cx2 = x + TILE / 2 + dx * (TILE / 2 - 2);
-      const cy2 = y + TILE / 2 + dy * (TILE / 2 - 2);
-      const L = big ? 1.45 : 1; // 一方通行の矢印はひとまわり大きい
-      const tipX = cx2 + dx * 7 * L, tipY = cy2 + dy * 7 * L;
-      const b1X = cx2 - dx * 4 * L - dy * 6 * L, b1Y = cy2 - dy * 4 * L - dx * 6 * L;
-      const b2X = cx2 - dx * 4 * L + dy * 6 * L, b2Y = cy2 - dy * 4 * L + dx * 6 * L;
-      return `<polygon points="${tipX},${tipY} ${b1X},${b1Y} ${b2X},${b2Y}" fill="${fill}" opacity="0.95"${big ? `><animate attributeName="opacity" values="1;0.45;1" dur="1.6s" repeatCount="indefinite"/></polygon>` : "/>"}`;
-    };
-    if (tile.onewayTo != null) {
-      html += arrow(g.tiles[tile.onewayTo], "#ff9a3d", true);
-    } else {
-      const neigh = neighborsOf(g, tile).filter(t => !(t.onewayTo != null && t.onewayTo === tile.id));
-      if (neigh.length > 2) neigh.forEach(nt => { html += arrow(nt, "#ffd76a", false); });
-    }
-    // マスの通し番号（常時表示）。領地・クリーチャー選択の選択肢と盤面を対応づけるための目印
-    html += `<text x="${x + 6}" y="${y + TILE - 6}" font-size="10" fill="#9a92b5" text-anchor="start">#${tile.id}</text>`;
-    // 選択対象マスの強調（スペル対象／領地売却／侵攻先など）。盤面から直接クリックして選べる
-    if (UI.selectableTiles && UI.selectableTiles.has(tile.id)) {
-      html += `<rect x="${x - 2}" y="${y - 2}" width="${TILE + 4}" height="${TILE + 4}" rx="12" fill="none" stroke="#ffe066" stroke-width="5"><animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite"/></rect>`;
-      html += `<rect x="${x + TILE / 2 - 19}" y="${y + TILE / 2 - 15}" width="38" height="28" rx="8" fill="#ffe066" opacity="0.96"/>`;
-      html += `<text x="${x + TILE / 2}" y="${y + TILE / 2 + 6}" font-size="18" fill="#1a1526" text-anchor="middle" font-weight="bold">#${tile.id}</text>`;
-    }
-    html += `</g>`;
-  });
-  // プレイヤー駒（宝珠風・手番プレイヤーの駒は光が脈動する）
+    inner += `<text x="${_n(cx)}" y="${_n(cy + 28 * u)}" font-size="${_n(11.5 * u)}" fill="#b8b2cc" text-anchor="middle">${TILE_LABELS[tile.type]}</text>`;
+  }
+  html += k === 1 ? inner
+    : `<g transform="translate(${_n(cx * (1 - k))} ${_n(cy * (1 - k))}) scale(${k})">${inner}</g>`;
+
+  // ---- 枠に重ねる標識（形に沿わせるので縮小しない） ----
+  // 盤面エフェクト（🛡️結界/🕸️罠/🚧バリケード）
+  const ov = overlayOf(g, tile);
+  if (ov) {
+    const ovIcon = ov.kind === "sanctuary" ? "🛡️" : ov.kind === "snare" ? "🕸️" : ov.kind === "block" ? "🚧" : "✨";
+    const ovColor = ov.kind === "sanctuary" ? "#8ecbff" : ov.kind === "snare" ? "#c9a0ff" : ov.kind === "block" ? "#ffb84d" : "#ddd";
+    html += `<path d="${shapeD(S)}" fill="none" stroke="${ovColor}" stroke-width="3" stroke-dasharray="7 5" opacity="0.9" stroke-linejoin="round"/>`;
+    html += `<text x="${cx}" y="${cy - 28 * u}" font-size="${15 * u}" text-anchor="middle">${ovIcon}</text>`;
+  }
+  // 🃏 伏せ札（v29）: 「何かが伏せてある」ことは全員に見える（中身は所有者のみ＝マス情報で確認）
+  if (tile.trap && tile.owner === tile.trap.owner) {
+    const tx = cx + 28 * u, ty = cy - 37 * u;
+    html += `<g opacity="0.95"><animate attributeName="opacity" values="0.95;0.55;0.95" dur="2.4s" repeatCount="indefinite"/>` +
+      `<rect x="${tx}" y="${ty}" width="${11 * u}" height="${15 * u}" rx="2" fill="#2a2140" stroke="${PLAYER_COLORS[tile.trap.owner]}" stroke-width="1.6"/>` +
+      `<text x="${tx + 5.5 * u}" y="${ty + 11.5 * u}" font-size="${9 * u}" text-anchor="middle" fill="#d9a6ff">?</text></g>`;
+  }
+  // 矢印表示（v23）: ➡一方通行マスの唯一の出口／三叉路以上の合流マスの行き先
+  const arrow = (nt, fill2, big) => {
+    const dx = Math.sign(nt.x - tile.x), dy = Math.sign(nt.y - tile.y);
+    const ax = cx + dx * (S / 2 - 2), ay = cy + dy * (S / 2 - 2);
+    const L = (big ? 1.45 : 1) * u;
+    return `<polygon points="${_n(ax + dx * 7 * L)},${_n(ay + dy * 7 * L)} ` +
+      `${_n(ax - dx * 4 * L - dy * 6 * L)},${_n(ay - dy * 4 * L - dx * 6 * L)} ` +
+      `${_n(ax - dx * 4 * L + dy * 6 * L)},${_n(ay - dy * 4 * L + dx * 6 * L)}" fill="${fill2}" opacity="0.95"` +
+      (big ? `><animate attributeName="opacity" values="1;0.45;1" dur="1.6s" repeatCount="indefinite"/></polygon>` : "/>");
+  };
+  if (tile.onewayTo != null) {
+    html += arrow(g.tiles[tile.onewayTo], "#ff9a3d", true);
+  } else {
+    const neigh = neighborsOf(g, tile).filter(t => !(t.onewayTo != null && t.onewayTo === tile.id));
+    if (neigh.length > 2) neigh.forEach(nt => { html += arrow(nt, "#ffd76a", false); });
+  }
+  // 選択対象マスの強調（スペル対象／領地売却／侵攻先など）。盤面から直接クリックして選べる
+  if (UI.selectableTiles && UI.selectableTiles.has(tile.id)) {
+    html += `<path d="${shapeD(S + 5)}" fill="none" stroke="#ffe066" stroke-width="5" stroke-linejoin="round">` +
+      `<animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite"/></path>`;
+    html += `<rect x="${cx - 19}" y="${cy - 15}" width="38" height="28" rx="8" fill="#ffe066" opacity="0.96"/>`;
+    html += `<text x="${cx}" y="${cy + 6}" font-size="18" fill="#1a1526" text-anchor="middle" font-weight="bold">#${tile.id}</text>`;
+  }
+  // 🧭 進む方向の候補（v31）: 移動中に選べる行き先を大きな矢印＋光る枠で示す（ダイアログは出さない）
+  if (UI.dirChoice && UI.dirChoice.ids.has(tile.id)) {
+    html += dirCandidateSVG(g, tile);
+  }
+  html += `</g>`;
+  return html;
+}
+
+// ============================================================
+// プレイヤー駒（v31・原さん要望「駒のディテールを上げる・見切れたり見えなくなったりしない」）
+// ------------------------------------------------------------
+// v30までは半径13の宝珠（円＋文字）で、①端のマスでは viewBox の外にはみ出して切れる
+// ②同じマスに複数人が乗ると重なって数が分からない、という問題があった。
+// v31では「マントを羽織った術者の立像」として描き直し、
+//   ・BOARD_PAD の余白を viewBox に確保（端のマスでも切れない）
+//   ・駒は必ず最後に描く＝どのマスの情報より前面
+//   ・同じマスの人数に応じて自動で並べ直す（tokenOffsets）＋足元に接地シャドウ
+//   ・手番の駒は足元の魔法陣が回り、頭上に▼マーカー——「今どれが自分か」が一目で分かる
+// 駒の下にマス目の情報が隠れるのは許容（🔍マス情報でいつでも確認できるため）。
+// ============================================================
+function tokensSVG(g) {
+  // 同じマスに立つプレイヤーごとにまとめ、人数に応じて配置をずらす
+  const byTile = new Map();
   g.players.forEach(p => {
     if (!p.alive) return;
-    const { x, y } = tilePx(g.tiles[p.pos]);
-    const off = TOKEN_OFFSETS[p.id] || TOKEN_OFFSETS[0];
-    const cx = x + off.dx, cy = y + off.dy;
-    const active = g.current === p.id && !g.over;
-    html += `<g class="token">`;
-    if (active) {
-      html += `<circle cx="${cx}" cy="${cy}" r="16" fill="none" stroke="${PLAYER_COLORS[p.id]}" stroke-width="2.5" opacity="0.6">` +
-        `<animate attributeName="r" values="14;19;14" dur="1.5s" repeatCount="indefinite"/>` +
-        `<animate attributeName="opacity" values="0.7;0.15;0.7" dur="1.5s" repeatCount="indefinite"/></circle>`;
-    }
-    html += `<circle cx="${cx}" cy="${cy + 1.5}" r="13" fill="#000" opacity="0.35"/>`;
-    html += `<circle cx="${cx}" cy="${cy}" r="13" fill="url(#tokP${p.id})" stroke="#fff" stroke-width="2"/>`;
-    html += `<ellipse cx="${cx - 4}" cy="${cy - 5}" rx="4.5" ry="3" fill="#fff" opacity="0.45"/>`;
-    html += `<text x="${cx}" y="${cy + 5}" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold" style="text-shadow:0 1px 2px #000">${(g.hotseat || g.players.length > 2) ? p.id + 1 : (p.id === 0 ? "P" : "C")}</text>`;
-    html += `</g>`;
+    if (!byTile.has(p.pos)) byTile.set(p.pos, []);
+    byTile.get(p.pos).push(p);
   });
-  svg.innerHTML = html;
+  let html = "";
+  byTile.forEach((list, pos) => {
+    const { x, y } = tilePx(g.tiles[pos]);
+    const offs = tokenOffsets(list.length);
+    list.forEach((p, i) => {
+      const o = offs[i] || offs[offs.length - 1];
+      html += playerTokenSVG(g, p, x + o.dx, y + o.dy);
+    });
+  });
+  return html;
+}
+
+// 駒1体ぶん。(cx, cy) は駒の「足元」の座標＝立像の底面
+function playerTokenSVG(g, p, cx, cy) {
+  const col = PLAYER_COLORS[p.id];
+  const active = g.current === p.id && !g.over;
+  const R = TILE * 0.30;                     // 駒の基準サイズ（マス目に対する比率で決める＝どの盤面でも同じ見え方）
+  const label = (g.hotseat || g.players.length > 2) ? String(p.id + 1) : (p.id === 0 ? "P" : "C");
+  const headY = cy - R * 1.72;               // 頭の中心
+  const bodyTop = cy - R * 1.30;
+  let s = `<g class="token" data-token="${p.id}">`;
+  // 足元: 接地シャドウ＋手番なら回る魔法陣（「自分の番」を盤面だけで伝える）
+  s += `<ellipse cx="${_n(cx)}" cy="${_n(cy + R * 0.10)}" rx="${_n(R * 0.86)}" ry="${_n(R * 0.32)}" fill="#000" opacity="0.42"/>`;
+  if (active) {
+    s += `<g opacity="0.9"><animateTransform attributeName="transform" type="rotate" from="0 ${_n(cx)} ${_n(cy)}" to="360 ${_n(cx)} ${_n(cy)}" dur="6s" repeatCount="indefinite"/>` +
+      `<ellipse cx="${_n(cx)}" cy="${_n(cy)}" rx="${_n(R * 1.12)}" ry="${_n(R * 0.42)}" fill="none" stroke="${col}" stroke-width="${_n(R * 0.14)}" stroke-dasharray="${_n(R * 0.5)} ${_n(R * 0.34)}"/></g>`;
+    s += `<ellipse cx="${_n(cx)}" cy="${_n(cy)}" rx="${_n(R * 0.9)}" ry="${_n(R * 0.34)}" fill="none" stroke="${col}" stroke-width="1.5" opacity="0.55">` +
+      `<animate attributeName="rx" values="${_n(R * 0.8)};${_n(R * 1.3)};${_n(R * 0.8)}" dur="1.6s" repeatCount="indefinite"/>` +
+      `<animate attributeName="opacity" values="0.65;0.1;0.65" dur="1.6s" repeatCount="indefinite"/></ellipse>`;
+  }
+  // マント（裾広がりの三角＋肩のライン）＝立ち姿のシルエット
+  s += `<path d="M${_n(cx)},${_n(bodyTop)} C${_n(cx + R * 0.62)},${_n(bodyTop + R * 0.5)} ${_n(cx + R * 0.9)},${_n(cy - R * 0.32)} ${_n(cx + R * 0.86)},${_n(cy)}` +
+    ` L${_n(cx - R * 0.86)},${_n(cy)} C${_n(cx - R * 0.9)},${_n(cy - R * 0.32)} ${_n(cx - R * 0.62)},${_n(bodyTop + R * 0.5)} ${_n(cx)},${_n(bodyTop)} Z"` +
+    ` fill="url(#tokP${p.id})" stroke="#0d0a16" stroke-width="${_n(R * 0.13)}" stroke-linejoin="round"/>`;
+  // マントの合わせ目（縦の陰）と裾の縁取り
+  s += `<path d="M${_n(cx)},${_n(bodyTop + R * 0.18)} L${_n(cx)},${_n(cy - R * 0.06)}" stroke="#0d0a16" stroke-width="${_n(R * 0.1)}" opacity="0.45"/>`;
+  s += `<path d="M${_n(cx - R * 0.84)},${_n(cy - R * 0.02)} L${_n(cx + R * 0.84)},${_n(cy - R * 0.02)}" stroke="#fff" stroke-width="${_n(R * 0.09)}" opacity="0.35"/>`;
+  // 頭（フード）＋顔の影＝「人が立っている」と分かる最小限のディテール
+  s += `<circle cx="${_n(cx)}" cy="${_n(headY)}" r="${_n(R * 0.52)}" fill="url(#tokP${p.id})" stroke="#0d0a16" stroke-width="${_n(R * 0.12)}"/>`;
+  s += `<path d="M${_n(cx - R * 0.4)},${_n(headY + R * 0.1)} A${_n(R * 0.42)},${_n(R * 0.42)} 0 0 0 ${_n(cx + R * 0.4)},${_n(headY + R * 0.1)} Z" fill="#0d0a16" opacity="0.55"/>`;
+  s += `<ellipse cx="${_n(cx - R * 0.18)}" cy="${_n(headY - R * 0.2)}" rx="${_n(R * 0.16)}" ry="${_n(R * 0.11)}" fill="#fff" opacity="0.5"/>`;
+  // 胸元の紋章＝プレイヤー識別（P / C / 1 2 3）。駒が小さくても誰の駒か読める
+  s += `<circle cx="${_n(cx)}" cy="${_n(cy - R * 0.62)}" r="${_n(R * 0.36)}" fill="#120e1f" stroke="${col}" stroke-width="${_n(R * 0.12)}"/>`;
+  s += `<text x="${_n(cx)}" y="${_n(cy - R * 0.62 + R * 0.24)}" font-size="${_n(R * 0.62)}" fill="#fff" text-anchor="middle" font-weight="bold">${label}</text>`;
+  // 手番の駒は頭上に▼（真上から見ても迷わない目印）
+  if (active) {
+    s += `<polygon points="${_n(cx - R * 0.34)},${_n(headY - R * 1.12)} ${_n(cx + R * 0.34)},${_n(headY - R * 1.12)} ${_n(cx)},${_n(headY - R * 0.66)}" fill="${col}" stroke="#0d0a16" stroke-width="${_n(R * 0.08)}">` +
+      `<animateTransform attributeName="transform" type="translate" values="0 0; 0 ${_n(-R * 0.22)}; 0 0" dur="1.2s" repeatCount="indefinite"/></polygon>`;
+  }
+  s += `</g>`;
+  return s;
 }
 
 // ---------- 現状順位（standings） ----------
@@ -245,6 +502,7 @@ function renderPanels(g) {
       .map(c => `${ELEMENTS[c.e].icon}${c.n}`).join("") || "－";
     const gates = "●".repeat(Math.min(p.gates.size, needed)) + "○".repeat(Math.max(0, needed - p.gates.size));
     const reached = assets >= RULES.target; // 目標達成＝城へ凱旋すれば勝ち（⚑リーチ表示）
+    const under = isUnderdog(g, p);         // v31: 🔥劣勢＝逆転スペル・反骨・スペル割引が効く状態
     el.style.setProperty("--pc", PLAYER_COLORS[p.id]); // 左端の色帯＝プレイヤー色
     el.classList.toggle("active", g.current === p.id && !g.over);
     el.classList.toggle("dead", !p.alive);
@@ -259,6 +517,7 @@ function renderPanels(g) {
         <span class="p-rank r${me.rank}" title="総資産で決まる現在の順位（ラウンド上限の資産勝負もこの順位）">${rankMedal(me.rank)}${me.rank}</span>
         ${face}<span class="ps-name" style="color:${PLAYER_COLORS[p.id]}">${esc(p.name)}</span>
         ${reached ? `<span class="p-reach" title="目標資産に到達！ 城へ凱旋すれば勝利">⚑凱旋</span>` : ""}
+        ${under ? `<span class="p-under" title="劣勢（総資産が首位の${Math.round(COMEBACK_RATIO * 100)}%未満）＝⚒逆転スペルが使える／🔥反骨がST+20/HP+20／周回ボーナス1.5倍${g.climax ? "／スペル25%OFF" : ""}">🔥劣勢</span>` : ""}
       </div>
       <div class="ps-mid">
         <span class="ps-magic" title="手持ちの魔力">💎${p.magic}G</span>
@@ -283,7 +542,9 @@ function renderPanels(g) {
     `${g.stage.icon} STAGE ${g.stageIdx + 1}｜ラウンド ${Math.min(g.round, RULES.maxRounds)} / ${RULES.maxRounds}｜${mode}` +
     (ml && !g.training && loadMatchLength() !== "normal" ? `｜${ml.icon}${ml.label}` : "") +
     (g.weekly ? `｜🎪 ${g.weekly.name}` : "") +
+    (g.climax ? `｜⚔決戦の刻` : "") + // v31: 決戦スペルが解禁されていることを常に見える場所に出す
     `｜🥇 ${leader}`;
+  document.getElementById("round-info").classList.toggle("climax", !!g.climax);
 }
 
 // ---------- プレイヤー詳細ポップアップ（v27） ----------
@@ -340,6 +601,35 @@ function showPlayerDetail(pid) {
   pop.onclick = () => pop.classList.remove("show");
 }
 
+// ---------- 条件つきカードの「いま使えるか」（v31） ----------
+// ⚒逆転スペル（card.underdog）＝自分が劣勢のときだけ／⚔決戦スペル（card.climax）＝決戦の刻だけ、という
+// 使用条件は v30 までカードの説明文の中にしか無く、「そもそも条件が来ないカード」に見えていた（原さん指摘）。
+// v31 では条件を緩めたうえで、手札・カード詳細に「⚒逆転 いま使える／まだ」の帯を出して状態を見せる。
+// 戻り値: null（条件なし）／ { icon, label, ok, why }
+function conditionGate(g, p, card) {
+  if (!card || !g || !p) return null;
+  if (card.underdog) {
+    const ok = isUnderdog(g, p);
+    return { icon: "⚒", label: "逆転", ok,
+      why: ok ? "劣勢のいま使える" : `総資産が首位の${Math.round(COMEBACK_RATIO * 100)}%未満のときだけ使える` };
+  }
+  if (card.climax) {
+    const ok = !!g.climax;
+    return { icon: "⚔", label: "決戦", ok,
+      why: ok ? "決戦の刻——いま使える" : "決戦の刻（目標資産の8割到達 or ラウンド上限の6割）になると使える" };
+  }
+  return null;
+}
+
+// 🤝絆が「いま成立しているか」（対戦中の自分の盤面で相方が駐留しているか）。
+// アルバム・デッキ構築など対戦外では常に false（点灯なし）
+function bondLit(card) {
+  if (!card || !card.bond) return false;
+  if (typeof G === "undefined" || !G || G.over || !G.players) return false;
+  const me = G.hotseat ? G.current : 0;
+  return !!bondPartnerTile(G, me, card, null);
+}
+
 // ---------- 手札 ----------
 function cardHTML(c, opts = {}) {
   const typeCls = c.type === "creature" ? `el-${c.element}` : c.type;
@@ -348,16 +638,24 @@ function cardHTML(c, opts = {}) {
   if (opts.disabled) cls.push("disabled");
   if (opts.selectable) cls.push("selectable");
   if (opts.fixed) cls.push("fixed"); // フリップ演出用の固定サイズ（表裏のサイズを一致させる）
-  const abil = (c.ab || []).map(a => `<span class="ab">${ABILITY_INFO[a].name}</span>`).join("");
+  const abil = (c.ab || []).map(a => `<span class="ab">${ABILITY_INFO[a].name}</span>`).join("")
+    // 🤝絆（v31）: 相方が盤上にいるときだけ働く効果。対戦中は成立していれば光らせる
+    + (c.bond ? `<span class="ab bond${bondLit(c) ? " lit" : ""}" title="🤝${esc(c.bond.name)}（相方: ${esc(bondPartnerNames(c))}）&#10;${esc(c.bond.desc)}">🤝${esc(c.bond.name)}</span>` : "");
   const body = c.type === "creature"
     ? `<div class="c-stats"><span class="c-st">ST ${c.st}</span><span class="c-hp">HP ${c.hp}</span></div><div class="c-ab">${abil}</div>`
     : `<div class="c-desc">${esc(c.desc)}</div>`;
   const elemIcon = c.type === "creature" ? ELEMENTS[c.element].icon
     : c.type === "item" ? (c.st > 0 ? "⚔️" : "🛡️") : "✨";
   const rm = RARITY_META[rar];
+  // v31: 使用条件つきのカードは「⚒逆転／⚔決戦」の帯を出し、いま使えるなら光らせる
+  const gate = opts.gate;
+  if (gate) cls.push(gate.ok ? "gate-on" : "gate-off");
+  const gateHtml = gate
+    ? `<span class="c-gate ${gate.ok ? "on" : "off"}" title="${esc(gate.why)}">${gate.icon}${gate.label}${gate.ok ? "" : "…"}</span>`
+    : "";
   // 額縁＋アート窓＋コスト宝珠＋魔力の光沢（.c-shine）で「魔力の込められたカード」を表現
   return `<div class="${cls.join(" ")}" data-card="${c.id}" title="${esc(c.type === 'spell' ? c.desc : (c.ab || []).map(a => ABILITY_INFO[a].name + ': ' + ABILITY_INFO[a].desc).join(' / '))}">
-    <div class="c-art">${typeof cardArtSVG === "function" ? cardArtSVG(c) : ""}</div>
+    <div class="c-art">${typeof cardArtSVG === "function" ? cardArtSVG(c) : ""}</div>${gateHtml}
     <span class="c-cost" title="コスト ${c.cost}G">${c.cost}</span>
     <span class="c-rarity" style="color:${rm.color}" title="${rm.label}">${rm.stars}</span>
     <span class="c-elem" title="${c.type === "creature" ? ELEMENTS[c.element].name + "属性" : c.type === "item" ? "アイテム" : "スペル"}">${elemIcon}</span>
@@ -416,6 +714,15 @@ function showCardDetail(cardId) {
     }
   }
   if (c.type === "item") info += row("補正", `${c.st ? `ST+${c.st} ` : ""}${c.hp ? `HP+${c.hp}` : ""}` || "—");
+  // v31: 使用条件つきのカードは条件と「対戦中ならいま満たしているか」を明記する
+  if (c.underdog || c.climax) {
+    const g2 = (typeof G !== "undefined" && G && !G.over) ? G : null;
+    const gate = g2 ? conditionGate(g2, g2.players[0], c) : null;
+    const base = c.underdog
+      ? `⚒ <b>逆転</b>: 自分の総資産が<b>首位の${Math.round(COMEBACK_RATIO * 100)}%未満</b>のときだけ使える`
+      : `⚔ <b>決戦</b>: <b>決戦の刻</b>（誰かが目標資産の8割に到達 or ラウンドが上限の6割）だけ使える`;
+    info += row("使用条件", base + (gate ? `<br><span class="cd-gate ${gate.ok ? "on" : "off"}">${gate.ok ? "✅ いま使える" : "⏳ いまは条件を満たしていない"}</span>` : ""));
+  }
   // v25: 二形（hybrid）＝武具として装備したときの補正も併記する
   if (c.asItem) info += row("武具として", `${c.asItem.st ? `⚔ ST+${c.asItem.st} ` : ""}${c.asItem.hp ? `🛡 HP+${c.asItem.hp}` : ""}（装備すると使い切り）`);
   // 特性（能力）は名前だけでなく説明文まで表示（今回の要望の中心）
@@ -423,6 +730,16 @@ function showCardDetail(cardId) {
     ? `<div class="cd-abs"><div class="cd-abs-t">🔖 特性</div>` +
       c.ab.map(a => `<div class="cd-ab"><b class="ab">${ABILITY_INFO[a].name}</b><span>${esc(ABILITY_INFO[a].desc)}</span></div>`).join("") + `</div>`
     : "";
+  // 🤝絆（v31）: 相方と効果、対戦中なら「いま成立しているか」まで見せる
+  const bondHtml = c.bond ? (() => {
+    const lit = bondLit(c);
+    return `<div class="cd-abs"><div class="cd-abs-t">🤝 絆「${esc(c.bond.name)}」<span class="cd-bond-kind">${BOND_KIND_LABEL[c.bond.kind] || ""}</span></div>` +
+      `<div class="cd-ab"><b class="ab">相方</b><span>${esc(bondPartnerNames(c))}<b>が自分の領地に駐留している間</b>だけ働く</span></div>` +
+      `<div class="cd-ab"><b class="ab">効果</b><span>${esc(c.bond.desc)}</span></div>` +
+      (typeof G !== "undefined" && G && !G.over
+        ? `<div class="cd-gate ${lit ? "on" : "off"}">${lit ? "✅ いま成立している" : "⏳ 相方がまだ盤上にいない"}</div>` : "") +
+      `</div>`;
+  })() : "";
   const descHtml = c.desc ? `<div class="cd-abs"><div class="cd-abs-t">✨ 効果</div><div class="cd-desc">${esc(c.desc)}</div></div>` : "";
   pop.innerHTML = `<div class="cd-box">
       <button class="cd-close" title="閉じる">✖</button>
@@ -430,7 +747,7 @@ function showCardDetail(cardId) {
         <div class="cd-card">${cardHTML(c)}</div>
         <div class="cd-info">
           <div class="cd-name">${esc(c.name)}</div>
-          ${info}${abHtml}${descHtml}
+          ${info}${abHtml}${bondHtml}${descHtml}
         </div>
       </div>
       <div class="cd-hint">クリックで閉じる</div>
@@ -460,7 +777,9 @@ function renderHand(g) {
     // 手番交代画面の間は伏せて、次のプレイヤーの手札が前のプレイヤーに見えないようにする
     el.innerHTML = p.hand.map(() => `<div class="card facedown" title="交代中は伏せられています">${CARD_BACK_HTML}</div>`).join("");
   } else {
-    el.innerHTML = p.hand.map(id => cardHTML(CARD_BY_ID[id])).join("");
+    // v31: 条件つきカード（⚒逆転＝劣勢のみ／⚔決戦＝決戦の刻のみ）は、
+    //      いま使えるかどうかを手札の上で見せる（原さん要望「分かりやすく設定し直す」）
+    el.innerHTML = p.hand.map(id => cardHTML(CARD_BY_ID[id], { gate: conditionGate(g, p, CARD_BY_ID[id]) })).join("");
   }
   document.getElementById("hand-count").textContent =
     (g.hotseat ? `${p.name}の` : "") + `手札 ${p.hand.length}/${HAND_LIMIT}`;
@@ -1312,49 +1631,96 @@ async function playVictoryFx(title, sub, opts = {}) {
   })();
 }
 
-// ---------- 分かれ道の選択（人間用） ----------
-function dirArrow(from, to) {
-  const dx = Math.sign(to.x - from.x), dy = Math.sign(to.y - from.y);
-  if (dx > 0) return "➡";
-  if (dx < 0) return "⬅";
-  return dy > 0 ? "⬇" : "⬆";
+// ============================================================
+// 分かれ道の選択（v31・原さん要望「方向指示は盤面上・マス目で方向だけを選択する。細かい表示は不要」）
+// ------------------------------------------------------------
+// v30までは「行き先ごとにルートプレビュー（この先6マスのアイコン列）を並べたダイアログ」を出していた。
+// 情報は多いが、①盤面がダイアログで隠れる ②結局どっちへ曲がるかを見たいだけ、という問題があった。
+// v31では ダイアログを一切出さず、進めるマスを盤面上で光らせ＋進入方向の大矢印を描いて、
+// そのマスを直接タップ（クリック）して選ぶ。残りマス数だけは上部のメッセージ欄に出す。
+// ============================================================
+
+// 行き先候補マスに重ねる標識（tileSVG から呼ばれる）。光る枠＋進入方向の大矢印だけの最小構成
+function dirCandidateSVG(g, tile) {
+  const from = g.tiles[UI.dirChoice.fromId];
+  const a = tileCenter(from), b = tileCenter(tile);
+  const S = TILE, u = S / 90;
+  let vx = b.cx - a.cx, vy = b.cy - a.cy;
+  const len = Math.hypot(vx, vy) || 1;
+  vx /= len; vy /= len;
+  const px = -vy, py = vx;                       // 進行方向に直交する軸（矢じりの幅方向）
+  // 矢印は「来た側の縁」に置く＝マスの中身（属性・クリーチャー）を隠さない
+  const ox = b.cx - vx * S * 0.40, oy = b.cy - vy * S * 0.40;
+  const H = 15 * u, W = 12 * u;
+  const pts = [[ox + vx * H, oy + vy * H],
+    [ox - vx * H * 0.5 + px * W, oy - vy * H * 0.5 + py * W],
+    [ox - vx * H * 0.5 - px * W, oy - vy * H * 0.5 - py * W]];
+  let s = `<path d="${tileShapeD(tile, b.cx, b.cy, S + 6)}" fill="none" stroke="#7ef0ff" stroke-width="6" stroke-linejoin="round">` +
+    `<animate attributeName="opacity" values="1;0.3;1" dur="0.9s" repeatCount="indefinite"/></path>`;
+  s += `<g><animateTransform attributeName="transform" type="translate" values="0 0;${_n(vx * 5 * u)} ${_n(vy * 5 * u)};0 0" dur="1.1s" repeatCount="indefinite"/>` +
+    `<polygon points="${pts.map(q => `${_n(q[0])},${_n(q[1])}`).join(" ")}" fill="#7ef0ff" stroke="#06323d" stroke-width="${_n(1.8 * u)}" stroke-linejoin="round"/></g>`;
+  return s;
 }
 
-// startId から既定ルート（方向つき移動の近似＝背後のマスへ戻らない最初の候補）で進んだ場合の
-// マスアイコン列（【】=止まる予定のマス）。fromId は startId へ入る直前のマス（Uターン除外用）
-function routePreview(g, startId, steps, fromId = null) {
-  const icons = [];
-  const shown = Math.min(steps, 6);
-  let prev = fromId, cur = startId;
-  for (let s = 0; s < shown; s++) {
-    const t = g.tiles[cur];
-    let ic = t.type === "LAND" ? ELEMENTS[t.element].icon : TILE_ICONS[t.type];
-    if (t.type === "LAND" && t.owner !== null) ic += P_MINI[t.owner] || "🔸";
-    icons.push(s === steps - 1 ? `【${ic}】` : ic);
-    const nxt = moveOptions(g, t, prev)[0];
-    prev = cur;
-    cur = nxt.id;
-  }
-  return icons.join(" ") + (steps > shown ? " …" : "");
+// 盤面のスクロール位置を指定マスに合わせる（拡大中でも選択対象が画面外にならないように）
+function scrollBoardTo(tile) {
+  const wrap = document.getElementById("board-wrap");
+  const svg = document.getElementById("board");
+  if (!wrap || !svg || !tile) return;
+  const rect = svg.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const totalW = (Math.max(...G.tiles.map(t => t.x)) + 1) * CELL + BOARD_PAD * 2;
+  const totalH = (Math.max(...G.tiles.map(t => t.y)) + 1) * CELL + BOARD_PAD * 2;
+  const { cx, cy } = tileCenter(tile);
+  const px = (cx + BOARD_PAD) / totalW * rect.width;
+  const py = (cy + BOARD_PAD) / totalH * rect.height;
+  wrap.scrollTo({ left: px - wrap.clientWidth / 2, top: py - wrap.clientHeight / 2, behavior: "smooth" });
 }
 
 // v24（方向つき移動）: 進める方向＝moveOptions（隣接から背後＝prevIdを除いたもの）。
-// 通常は逆走できないため、このダイアログが出るのは分岐・交差か、方向未確定（🧭出発時）のときだけ
-async function humanChooseDirection(p, tile, stepsLeft, prevId = null) {
-  const legend = G.hotseat ? "🔹=🔵1P 🔸=🔴2P"
-    : G.players.length > 2 ? `🔹=自分 🔸=${esc(G.players[1].name)} 💚=${esc(G.players[2].name)}`
-    : "🔹=自分 🔸=敵";
+// 通常は逆走できないため、選択が発生するのは分岐・交差か、方向未確定（🧭出発時）のときだけ。
+// v31: ダイアログではなく盤面のマスをクリックして決める
+function humanChooseDirection(p, tile, stepsLeft, prevId = null) {
   const opts = moveOptions(G, tile, prevId);
-  const res = await showDialog({
-    title: prevId === null ? "🧭 進む方向" : "🔀 分かれ道",
-    body: `残り${stepsLeft}マス。行く手を選んでください（背後には戻れません。【】=止まる予定のマス、${legend}の土地）`,
-    peek: true,
-    buttons: opts.map(nt => ({
-      label: `${dirArrow(tile, nt)} ${routePreview(G, nt.id, stepsLeft, tile.id)}`,
-      value: String(nt.id),
-    })),
+  if (opts.length <= 1) return Promise.resolve(opts[0].id);
+  return new Promise(resolve => {
+    closePassiveDialog(); // 🔍マス情報などが開いていたら畳む（盤面を素通しで見せる）
+    const svg = document.getElementById("board");
+    const msgEl = document.getElementById("message");
+    const prevMsg = msgEl ? msgEl.innerHTML : "";
+    UI.dirChoice = { fromId: tile.id, ids: new Set(opts.map(t => t.id)) };
+    setMessage(`🧭 <b>進む方向を選んでください</b>（残り ${stepsLeft} マス）— 光っているマスをタップ`);
+    scrollBoardTo(tile);
+    renderBoard(G);
+    const finish = id => {
+      svg.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKey);
+      UI.dirChoice = null;
+      if (msgEl) msgEl.innerHTML = prevMsg;
+      renderBoard(G);
+      if (typeof SFX !== "undefined" && SFX.step) SFX.step();
+      resolve(id);
+    };
+    const onClick = e => {
+      const gEl = e.target.closest && e.target.closest(".tile");
+      if (!gEl) return;
+      const id = Number(gEl.dataset.tile);
+      if (UI.dirChoice && UI.dirChoice.ids.has(id)) finish(id);
+    };
+    // 矢印キー / WASD でも選べる（「方向だけを選ぶ」操作に素直に対応する）
+    const KEY_DIR = {
+      ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+      w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0],
+    };
+    const onKey = e => {
+      const dir = KEY_DIR[e.key] || KEY_DIR[String(e.key).toLowerCase()];
+      if (!dir) return;
+      const hit = opts.find(t => Math.sign(t.x - tile.x) === dir[0] && Math.sign(t.y - tile.y) === dir[1]);
+      if (hit) { e.preventDefault(); finish(hit.id); }
+    };
+    svg.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKey);
   });
-  return Number(res.action);
 }
 
 // ダイスの目を選ぶ（ホーリーワード用）
