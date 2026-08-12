@@ -14,6 +14,12 @@ const BLIGHT_DEF_HP   = 30;   // 🔥焦土（v25）の防衛時HP補正（代�
 const WEAPONLOVE_BONUS = 15;  // ⚔武芸（v29）: アイテム装備時の ST/HP 補正
 const REBEL_BONUS      = 20;  // 🔥反骨（v29）: 劣勢（総資産が首位の80%未満）時の ST/HP 補正
 const RESONANT_ITEM_MAX = 32; // ⚡共鳴武具（v29）: 能力数スケールの上限
+// ⚖ 相乗の上限（v32・原さん要望「特性・コンボ・相性での絶対的なチートが出ないように」）:
+// 「条件を満たすと乗る」相乗系の補正——群れ・応援・絆・武芸・反骨・共鳴武具・連携——は
+// 足し合わせて ST+60 / HP+60 まで。個々の能力は今までどおり働き、通常の1〜2種の組み合わせには
+// 届かない値＝「全部盛りで一撃500」のような重ね掛けデッキだけを止める安全弁。
+// 土地の援護（landSupportSt・自前の上限40あり）や装備・成長・強襲など単発の補正は対象外。
+const SYNERGY_CAP = 60;
 
 // 成長（grow）の段階（0〜5）。creature = tile.creature（{cardId, hp, grown}）
 function grownOf(creature) { return Math.min(5, (creature && creature.grown) || 0); }
@@ -154,14 +160,28 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   attSt += attPack + attCheer + attBondSt;
   defSt += defPack + support + defCheer + defBondSt;
 
+  // ⚖ 相乗の上限（v32）: 相乗系ST補正の合計が SYNERGY_CAP を超えた分は削る（📊の式にも「⚖上限」で出す）
+  const attStOver = Math.max(0, (attPack + attCheer + attBondSt + attWeapon + attRebel + attResoSt) - SYNERGY_CAP);
+  const defStOver = Math.max(0, (defPack + defCheer + defBondSt + defWeapon + defRebel + defResoSt + defTrick) - SYNERGY_CAP);
+  attSt -= attStOver;
+  defSt -= defStOver;
+  if (attStOver) log.push(`⚖ 相乗の上限！ ${attCard.name}の重ね掛けST補正は+${SYNERGY_CAP}まで（-${attStOver}）`);
+  if (defStOver) log.push(`⚖ 相乗の上限！ ${defCard.name}の重ね掛けST補正は+${SYNERGY_CAP}まで（-${defStOver}）`);
+
   const defBonus = attAb.has("pierce") ? 0 : landHpBonus(tile, defCard);
   const guardBonus = defAb.has("guard") ? 20 : 0;
   // 🔥焦土（blight・v25）: 守りは固い（防衛時HP+30）が、この土地でのバトル後にレベルが1下がる（main.jsが処理）
   const blightHp = defAb.has("blight") ? BLIGHT_DEF_HP : 0;
   const defWindHp = opts.defHpBonus || 0; // 護りの風（v20）
   if (defWindHp) log.push(`🌬️ 護りの風！ ${defCard.name}のHP+${defWindHp}`);
-  const attExtra = (attItemEff ? attItemEff.hp : 0) + attCheer + attWeapon + attRebel + attResoHp + attBondHp;
-  const defExtra = (defItemEff ? defItemEff.hp : 0) + defBonus + guardBonus + defWindHp + defCheer + blightHp + defWeapon + defRebel + defResoHp + defTrick + defBondHp;
+  // ⚖ 相乗の上限（v32）: HP側も同じグループ（応援・武芸・反骨・共鳴・連携・絆）の合計を SYNERGY_CAP まで。
+  // 土地の加護・守護・焦土・護りの風・装備のHPは単発の補正なので対象外
+  const attHpOver = Math.max(0, (attCheer + attWeapon + attRebel + attResoHp + attBondHp) - SYNERGY_CAP);
+  const defHpOver = Math.max(0, (defCheer + defWeapon + defRebel + defResoHp + defTrick + defBondHp) - SYNERGY_CAP);
+  if (attHpOver) log.push(`⚖ 相乗の上限！ ${attCard.name}の重ね掛けHP補正は+${SYNERGY_CAP}まで（-${attHpOver}）`);
+  if (defHpOver) log.push(`⚖ 相乗の上限！ ${defCard.name}の重ね掛けHP補正は+${SYNERGY_CAP}まで（-${defHpOver}）`);
+  const attExtra = (attItemEff ? attItemEff.hp : 0) + attCheer + attWeapon + attRebel + attResoHp + attBondHp - attHpOver;
+  const defExtra = (defItemEff ? defItemEff.hp : 0) + defBonus + guardBonus + defWindHp + defCheer + blightHp + defWeapon + defRebel + defResoHp + defTrick + defBondHp - defHpOver;
   // 決死の覚悟（v20）: 会心率の底上げ（豪運と重複時は高い方）
   const attCritRate = Math.max(attAb.has("lucky") ? CRIT_RATE_LUCKY : CRIT_RATE, opts.attCritRate || 0);
   const defCritRate = Math.max(defAb.has("lucky") ? CRIT_RATE_LUCKY : CRIT_RATE, opts.defCritRate || 0);
@@ -271,17 +291,17 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
     const terms = parts.filter(([, v]) => v).map(([lbl, v]) => `${v > 0 ? "+" : ""}${v}(${lbl})`);
     return terms.length ? `${total} ＝ ${base} ${terms.join(" ")}` : `${total}`;
   };
-  const attHpParts = [["成長", attGrown * GROW_STEP], ["装備", attItemEff ? attItemEff.hp : 0], ["応援", attCheer], ["武芸", attWeapon], ["反骨", attRebel], ["共鳴", attResoHp], ["絆", attBondHp], ["罠", -(opts.attPreDmg || 0)]];
+  const attHpParts = [["成長", attGrown * GROW_STEP], ["装備", attItemEff ? attItemEff.hp : 0], ["応援", attCheer], ["武芸", attWeapon], ["反骨", attRebel], ["共鳴", attResoHp], ["絆", attBondHp], ["⚖上限", -attHpOver], ["罠", -(opts.attPreDmg || 0)]];
   if (attScroll > 0) {
     log.push(`📊【式】侵略 ${attCard.name}: ST ${attSt}（📜巻物固定） ／ HP ${bd(attHp, attCard.hp, attHpParts)}`);
   } else {
-    log.push(`📊【式】侵略 ${attCard.name}: ST ${bd(attSt, attCard.st, [["装備", attItemEff ? attItemEff.st : 0], ["強襲", attAb.has("assault") ? 20 : 0], ["属性", advAtt ? ELEM_ADV_ST : 0], ["成長", attGrown * GROW_STEP], ["群れ", attPack], ["応援", attCheer], ["闘技場", RULES.invaderSt], ["罠", attTrapSt], ["武芸", attWeapon], ["反骨", attRebel], ["共鳴", attResoSt], ["絆", attBondSt]])} ／ HP ${bd(attHp, attCard.hp, attHpParts)}`);
+    log.push(`📊【式】侵略 ${attCard.name}: ST ${bd(attSt, attCard.st, [["装備", attItemEff ? attItemEff.st : 0], ["強襲", attAb.has("assault") ? 20 : 0], ["属性", advAtt ? ELEM_ADV_ST : 0], ["成長", attGrown * GROW_STEP], ["群れ", attPack], ["応援", attCheer], ["闘技場", RULES.invaderSt], ["罠", attTrapSt], ["武芸", attWeapon], ["反骨", attRebel], ["共鳴", attResoSt], ["絆", attBondSt], ["⚖上限", -attStOver]])} ／ HP ${bd(attHp, attCard.hp, attHpParts)}`);
   }
-  const defHpParts = [["装備", defItemEff ? defItemEff.hp : 0], ["土地の加護", defBonus], ["守護", guardBonus], ["焦土", blightHp], ["応援", defCheer], ["護りの風", defWindHp], ["武芸", defWeapon], ["反骨", defRebel], ["共鳴", defResoHp], ["連携", defTrick], ["絆", defBondHp]];
+  const defHpParts = [["装備", defItemEff ? defItemEff.hp : 0], ["土地の加護", defBonus], ["守護", guardBonus], ["焦土", blightHp], ["応援", defCheer], ["護りの風", defWindHp], ["武芸", defWeapon], ["反骨", defRebel], ["共鳴", defResoHp], ["連携", defTrick], ["絆", defBondHp], ["⚖上限", -defHpOver]];
   if (defScroll > 0) {
     log.push(`📊【式】防衛 ${defCard.name}: ST ${defSt}（📜巻物固定） ／ HP ${bd(defHp, defBaseHp, defHpParts)}`);
   } else {
-    log.push(`📊【式】防衛 ${defCard.name}: ST ${bd(defSt, defCard.st, [["装備", defItemEff ? defItemEff.st : 0], ["属性", advDef ? ELEM_ADV_ST : 0], ["成長", defGrown * GROW_STEP], ["群れ", defPack], ["援護", support], ["応援", defCheer], ["罠", defTrapSt], ["武芸", defWeapon], ["反骨", defRebel], ["共鳴", defResoSt], ["連携", defTrick], ["絆", defBondSt]])} ／ HP ${bd(defHp, defBaseHp, defHpParts)}`);
+    log.push(`📊【式】防衛 ${defCard.name}: ST ${bd(defSt, defCard.st, [["装備", defItemEff ? defItemEff.st : 0], ["属性", advDef ? ELEM_ADV_ST : 0], ["成長", defGrown * GROW_STEP], ["群れ", defPack], ["援護", support], ["応援", defCheer], ["罠", defTrapSt], ["武芸", defWeapon], ["反骨", defRebel], ["共鳴", defResoSt], ["連携", defTrick], ["絆", defBondSt], ["⚖上限", -defStOver]])} ／ HP ${bd(defHp, defBaseHp, defHpParts)}`);
   }
   // 侵略は「一撃で相手の実効HPを削り切れば占領」。硬殻は一撃ごとに-10されるためここで織り込む。
   const attBlocked = !attMagic && (defAb.has("physnull") || defAb.has("physreflect")); // 侵略の攻撃が通らない

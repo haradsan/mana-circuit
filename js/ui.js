@@ -538,11 +538,14 @@ function renderPanels(g) {
   // ヘッダーにも首位だけ出す（パネルを全部閉じていても「今だれが勝っているか」は分かるように）
   const tied = rows.length > 1 && rows[1].rank === 1;
   const leader = tied ? "同率首位" : g.players[rows[0].id].name;
+  // 🗺盤面イベント（v32）: 発生中はヘッダーに常時表示（2Rで消えるので「いま何が効いているか」をここで示す）
+  const bev = (typeof boardEventActive === "function") ? boardEventActive(g) : null;
   document.getElementById("round-info").textContent =
     `${g.stage.icon} STAGE ${g.stageIdx + 1}｜ラウンド ${Math.min(g.round, RULES.maxRounds)} / ${RULES.maxRounds}｜${mode}` +
     (ml && !g.training && loadMatchLength() !== "normal" ? `｜${ml.icon}${ml.label}` : "") +
     (g.weekly ? `｜🎪 ${g.weekly.name}` : "") +
     (g.climax ? `｜⚔決戦の刻` : "") + // v31: 決戦スペルが解禁されていることを常に見える場所に出す
+    (bev ? `｜${bev.label}` : "") +
     `｜🥇 ${leader}`;
   document.getElementById("round-info").classList.toggle("climax", !!g.climax);
 }

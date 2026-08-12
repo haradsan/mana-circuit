@@ -188,6 +188,109 @@ function deckValidity(deck) {
   return { ok: errors.length === 0, errors, creatures };
 }
 
+// ---------- カード検索（v32・原さん要望「特性や相方で検索してデッキを組みやすく」） ----------
+// デッキ構築・シールド戦のプールを絞り込むフィルタ。状態は { q, type, elem, ab, bond, pair }。
+//   q    : テキスト検索（名前・特性名・絆名・相方名・説明文に当たる）＝「フェニックス」で相方の火の子トカゲも出る
+//   type / elem / ab : タイプ・属性・特性のプルダウン
+//   bond : 🤝絆を持つカードと「その相方」だけを表示
+//   pair : 絆カードの🤝をクリックしたとき＝その組（本人＋相方）だけを表示 { name, ids }
+const cardFilterDefault = () => ({ q: "", type: "all", elem: "all", ab: "all", bond: false, pair: null });
+
+// カード1枚ぶんの検索対象テキスト（初回に組み立ててキャッシュ）
+function cardSearchText(c) {
+  if (!c._search) {
+    const parts = [c.name, c.desc || "", (c.ab || []).map(a => ABILITY_INFO[a].name).join(" ")];
+    if (c.grant) parts.push(c.grant.map(a => ABILITY_INFO[a].name).join(" ")); // アイテムの付与能力
+    if (c.bond) parts.push("絆", c.bond.name, bondPartnerNames(c), c.bond.desc || "");
+    c._search = parts.join(" ").toLowerCase();
+  }
+  return c._search;
+}
+// 「誰かの相方」に指定されているカードid（🤝絆フィルタで相方側も出すため）
+let _bondPartnerIds = null;
+function isBondPartner(c) {
+  if (!_bondPartnerIds) {
+    _bondPartnerIds = new Set();
+    CARD_DB.forEach(x => { if (x.bond) x.bond.with.forEach(w => _bondPartnerIds.add(w)); });
+  }
+  return _bondPartnerIds.has(c.id);
+}
+// 特性プルダウンの選択肢（実際にどれかのカードが持つ特性だけ・ABILITY_INFOの定義順）
+let _abilityOptions = null;
+function abilityFilterOptions() {
+  if (!_abilityOptions) {
+    const used = new Set();
+    CARD_DB.forEach(c => {
+      (c.ab || []).forEach(a => used.add(a));
+      (c.grant || []).forEach(a => used.add(a));
+      if (c.bond && c.bond.grant) c.bond.grant.forEach(a => used.add(a));
+    });
+    _abilityOptions = Object.keys(ABILITY_INFO).filter(k => used.has(k))
+      .map(k => ({ key: k, name: ABILITY_INFO[k].name }));
+  }
+  return _abilityOptions;
+}
+function cardMatchesFilter(c, f) {
+  if (f.pair && !f.pair.ids.includes(c.id)) return false;
+  if (f.type !== "all" && c.type !== f.type) return false;
+  if (f.elem !== "all" && (c.type !== "creature" || c.element !== f.elem)) return false;
+  if (f.ab !== "all") {
+    // 特性は「素の能力」だけでなく、アイテムの付与（grant）・絆で得る能力も対象
+    const abs = new Set([...(c.ab || []), ...(c.grant || []), ...((c.bond && c.bond.grant) || [])]);
+    if (!abs.has(f.ab)) return false;
+  }
+  if (f.bond && !c.bond && !isBondPartner(c)) return false;
+  const q = (f.q || "").trim().toLowerCase();
+  if (q && !cardSearchText(c).includes(q)) return false;
+  return true;
+}
+// フィルタバーのHTML（デッキ構築・シールド戦で共用）
+function cardFilterBarHTML(f) {
+  const opt = (v, label, cur) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${label}</option>`;
+  return `<div class="pool-filter">
+    <input id="pf-q" type="search" placeholder="🔎 名前・特性・相方で検索" value="${esc(f.q)}" autocomplete="off">
+    <select id="pf-type" title="タイプで絞り込み">${opt("all", "全タイプ", f.type)}${opt("creature", "クリーチャー", f.type)}${opt("item", "アイテム", f.type)}${opt("spell", "スペル", f.type)}</select>
+    <select id="pf-elem" title="属性で絞り込み">${opt("all", "全属性", f.elem)}${Object.keys(ELEMENTS).map(e => opt(e, `${ELEMENTS[e].icon}${ELEMENTS[e].name}`, f.elem)).join("")}</select>
+    <select id="pf-ab" title="特性で絞り込み（アイテムの付与・絆で得る能力も対象）">${opt("all", "特性: すべて", f.ab)}${abilityFilterOptions().map(a => opt(a.key, a.name, f.ab)).join("")}</select>
+    <label class="pf-bondlabel" title="🤝絆を持つカードと、その相方だけを表示"><input type="checkbox" id="pf-bond" ${f.bond ? "checked" : ""}>🤝絆</label>
+    <span id="pf-pairchip"></span>
+  </div>`;
+}
+// フィルタバーの配線。値が変わるたび updatePool()（＝プール側だけ再描画）を呼ぶ。
+// テキスト入力のたびにダイアログ全体を作り直すとフォーカスが失われるため、プールだけを差し替える設計
+function wireCardFilterBar(box, f, updatePool) {
+  const q = box.querySelector("#pf-q");
+  q.addEventListener("input", () => { f.q = q.value; updatePool(); });
+  [["type", "#pf-type"], ["elem", "#pf-elem"], ["ab", "#pf-ab"]].forEach(([key, sel]) => {
+    const el = box.querySelector(sel);
+    el.addEventListener("change", () => { f[key] = el.value; updatePool(); });
+  });
+  const bond = box.querySelector("#pf-bond");
+  bond.addEventListener("change", () => { f.bond = bond.checked; updatePool(); });
+}
+// 🤝ペア表示チップ（絆カードの🤝クリックで「その組だけ」を表示中の目印。✕で解除）
+function renderPairChip(box, f, updatePool) {
+  const chip = box.querySelector("#pf-pairchip");
+  if (!chip) return;
+  chip.innerHTML = f.pair ? `<button class="btn small pf-pair" title="クリックで解除">🤝 ${esc(f.pair.name)} ✕</button>` : "";
+  const btn = chip.querySelector(".pf-pair");
+  if (btn) btn.addEventListener("click", () => { f.pair = null; updatePool(); });
+}
+// プール行の🤝タグ（絆持ちカードに出す）。クリックでその組（本人＋相方）だけを表示
+function bondTagHTML(c) {
+  if (!c.bond) return "";
+  return `<span class="pi-bond" data-bondpair="${c.id}"
+    title="🤝絆「${esc(c.bond.name)}」相方: ${esc(bondPartnerNames(c))} — クリックで組を表示">🤝</span>`;
+}
+function wireBondTags(scope, f, updatePool) {
+  scope.querySelectorAll("[data-bondpair]").forEach(el => el.addEventListener("click", e => {
+    e.stopPropagation();
+    const c = CARD_BY_ID[el.dataset.bondpair];
+    f.pair = { name: c.bond.name, ids: [c.id, ...c.bond.with] };
+    updatePool();
+  }));
+}
+
 // ---------- 表示ヘルパー ----------
 function cardIconOf(c) {
   return c.icon || (c.type === "creature" ? ELEMENTS[c.element].icon : c.type === "item" ? (c.st > 0 ? "⚔️" : "🛡️") : "✨");
@@ -278,6 +381,16 @@ function showDeckBuilder() {
     let slot = activeDeckSlot();
     let deck = (deckInSlot(slot) || []).filter(id => CARD_BY_ID[id]);
     const cnt = id => deck.filter(x => x === id).length;
+    const filter = cardFilterDefault(); // 🔎検索フィルタ（v32）: render をまたいで保持する
+
+    // 🔍ボタン＝カード詳細ポップアップ（行クリック＝追加/削除とは別の操作・v22）
+    const infoBtn = id => `<span class="pi-info" data-info="${id}" title="カード詳細を見る">🔍</span>`;
+    const poolItemHTML = id => {
+      const c = CARD_BY_ID[id], avail = owned[id] - cnt(id);
+      return `<div class="pool-item ${avail <= 0 ? "exhausted" : ""}" data-add="${id}" title="${esc(deckTip(c))}">
+        <span class="pi-icon">${cardIconOf(c)}</span><span class="pi-name">${esc(c.name)}</span>${bondTagHTML(c)}
+        <span class="pi-cost">${c.cost}G</span><span class="pi-have">残${avail}/${owned[id]}</span>${infoBtn(id)}</div>`;
+    };
 
     const render = () => {
       const v = deckValidity(deck);
@@ -288,14 +401,6 @@ function showDeckBuilder() {
         return `<button class="btn small deck-slot ${i === slot ? "primary" : ""}" data-slot="${i}"
           title="${d ? `保存済み（${DECK_SIZE}枚）` : "未保存（空きスロット）"}${i === active ? "・対戦で使用中" : ""}">
           ${mark}デッキ${i + 1}${d ? "" : "（空）"}</button>`;
-      }).join("");
-      // 🔍ボタン＝カード詳細ポップアップ（行クリック＝追加/削除とは別の操作・v22）
-      const infoBtn = id => `<span class="pi-info" data-info="${id}" title="カード詳細を見る">🔍</span>`;
-      const poolHtml = ownedIds.map(id => {
-        const c = CARD_BY_ID[id], avail = owned[id] - cnt(id);
-        return `<div class="pool-item ${avail <= 0 ? "exhausted" : ""}" data-add="${id}" title="${esc(deckTip(c))}">
-          <span class="pi-icon">${cardIconOf(c)}</span><span class="pi-name">${esc(c.name)}</span>
-          <span class="pi-cost">${c.cost}G</span><span class="pi-have">残${avail}/${owned[id]}</span>${infoBtn(id)}</div>`;
       }).join("");
       const dc = {}; deck.forEach(id => dc[id] = (dc[id] || 0) + 1);
       const deckHtml = Object.keys(dc).sort((a, b) => typeOrder(a) - typeOrder(b) || CARD_BY_ID[a].cost - CARD_BY_ID[b].cost)
@@ -308,7 +413,7 @@ function showDeckBuilder() {
         <p class="dlg-body">デッキは<b>5つまで保存</b>できます（✔＝対戦で使用中）。タブでスロットを切り替え（未保存の編集は破棄）、<b>保存するとそのデッキが使用中</b>になります。<br>
         左の所持カードをクリックで追加、右のデッキをクリックで外す。同名は${MAX_COPIES}枚まで／クリーチャーは${MIN_CREATURES}枚以上。</p>
         <div class="builder">
-          <div class="builder-col"><div class="bc-title">📦 所持カード（${ownedIds.length}種）</div><div class="pool-list">${poolHtml}</div></div>
+          <div class="builder-col"><div class="bc-title">📦 所持カード（<span id="pf-count">${ownedIds.length}種</span>）</div>${cardFilterBarHTML(filter)}<div class="pool-list"></div></div>
           <div class="builder-col"><div class="bc-title">🎴 デッキ（クリーチャー ${v.creatures}）</div><div class="deck-list">${deckHtml}</div></div>
         </div>
         <div class="builder-status ${v.ok ? "ok" : "ng"}">${v.ok ? "✅ 構築OK！ 保存できます" : "⚠ " + v.errors.join("／")}</div>
@@ -320,8 +425,29 @@ function showDeckBuilder() {
         </div>`;
       wire();
     };
+    // 🔎 プール側だけの再描画（v32）。テキスト入力のたびに render() すると検索欄のフォーカスが
+    // 失われるため、フィルタの変更ではこの関数でプールのリストと件数表示だけを差し替える
+    const updatePool = () => {
+      const pl = box.querySelector(".pool-list");
+      const ids = ownedIds.filter(id => cardMatchesFilter(CARD_BY_ID[id], filter));
+      pl.innerHTML = ids.length ? ids.map(poolItemHTML).join("")
+        : `<div class="deck-empty">🔎 条件に合うカードがありません</div>`;
+      const count = box.querySelector("#pf-count");
+      if (count) count.textContent = ids.length === ownedIds.length ? `${ownedIds.length}種` : `${ids.length} / ${ownedIds.length}種`;
+      renderPairChip(box, filter, updatePool);
+      wireBondTags(pl, filter, updatePool);
+      pl.querySelectorAll("[data-info]").forEach(el => el.addEventListener("click", e => {
+        e.stopPropagation(); showCardDetail(el.dataset.info);
+      }));
+      pl.querySelectorAll("[data-add]").forEach(el => el.addEventListener("click", () => {
+        const id = el.dataset.add;
+        if (deck.length >= DECK_SIZE || cnt(id) >= Math.min(MAX_COPIES, owned[id])) return;
+        deck.push(id); render();
+      }));
+    };
     const wire = () => {
-      // 🔍詳細（追加/削除より先に登録し、stopPropagationで行クリックへの伝播を止める・v22）
+      // 🔍詳細（追加/削除より先に登録し、stopPropagationで行クリックへの伝播を止める・v22）。
+      // プール側の行は updatePool が配線する（renderの時点でプールは空）
       box.querySelectorAll("[data-info]").forEach(el => el.addEventListener("click", e => {
         e.stopPropagation(); showCardDetail(el.dataset.info);
       }));
@@ -330,11 +456,8 @@ function showDeckBuilder() {
         deck = (deckInSlot(slot) || []).filter(id => CARD_BY_ID[id]);
         render();
       }));
-      box.querySelectorAll("[data-add]").forEach(el => el.addEventListener("click", () => {
-        const id = el.dataset.add;
-        if (deck.length >= DECK_SIZE || cnt(id) >= Math.min(MAX_COPIES, owned[id])) return;
-        deck.push(id); render();
-      }));
+      wireCardFilterBar(box, filter, updatePool);
+      updatePool();
       box.querySelectorAll("[data-remove]").forEach(el => el.addEventListener("click", () => {
         const i = deck.lastIndexOf(el.dataset.remove); if (i >= 0) deck.splice(i, 1); render();
       }));
@@ -757,6 +880,7 @@ function showSealedBuilder(pool) {
       .sort((a, b) => typeOrder(a) - typeOrder(b) || CARD_BY_ID[a].cost - CARD_BY_ID[b].cost);
     let deck = [];
     const cnt = id => deck.filter(x => x === id).length;
+    const filter = cardFilterDefault(); // 🔎検索フィルタ（v32・デッキ構築と同じ）
     const validity = () => {
       const creatures = deck.filter(id => CARD_BY_ID[id].type === "creature").length;
       const errors = [];
@@ -782,17 +906,37 @@ function showSealedBuilder(pool) {
       pick(() => true, DECK_SIZE - d.length);
       return d.slice(0, DECK_SIZE);
     };
+    const infoBtn = id => `<span class="pi-info" data-info="${id}" title="カード詳細を見る">🔍</span>`;
+    const poolItemHTML = id => {
+      const c = CARD_BY_ID[id], avail = poolCount[id] - cnt(id);
+      const rm = RARITY_META[cardRarity(c)];
+      return `<div class="pool-item ${avail <= 0 ? "exhausted" : ""}" data-add="${id}" title="${esc(deckTip(c))}">
+        <span class="pi-icon">${cardIconOf(c)}</span>
+        <span class="pi-name">${esc(c.name)} <span style="color:${rm.color}">${rm.stars}</span></span>${bondTagHTML(c)}
+        <span class="pi-cost">${c.cost}G</span><span class="pi-have">残${avail}/${poolCount[id]}</span>${infoBtn(id)}</div>`;
+    };
+    // 🔎 プール側だけの再描画（v32・デッキ構築と同じ設計＝検索欄のフォーカスを保つ）
+    const updatePool = () => {
+      const pl = box.querySelector(".pool-list");
+      const ids = poolIds.filter(id => cardMatchesFilter(CARD_BY_ID[id], filter));
+      pl.innerHTML = ids.length ? ids.map(poolItemHTML).join("")
+        : `<div class="deck-empty">🔎 条件に合うカードがありません</div>`;
+      const count = box.querySelector("#pf-count");
+      if (count) count.textContent = ids.length === poolIds.length
+        ? `${poolIds.length}種${pool.length}枚` : `${ids.length} / ${poolIds.length}種`;
+      renderPairChip(box, filter, updatePool);
+      wireBondTags(pl, filter, updatePool);
+      pl.querySelectorAll("[data-info]").forEach(el => el.addEventListener("click", e => {
+        e.stopPropagation(); showCardDetail(el.dataset.info);
+      }));
+      pl.querySelectorAll("[data-add]").forEach(el => el.addEventListener("click", () => {
+        const id = el.dataset.add;
+        if (deck.length >= DECK_SIZE || cnt(id) >= poolCount[id]) return;
+        deck.push(id); render();
+      }));
+    };
     const render = () => {
       const v = validity();
-      const infoBtn = id => `<span class="pi-info" data-info="${id}" title="カード詳細を見る">🔍</span>`;
-      const poolHtml = poolIds.map(id => {
-        const c = CARD_BY_ID[id], avail = poolCount[id] - cnt(id);
-        const rm = RARITY_META[cardRarity(c)];
-        return `<div class="pool-item ${avail <= 0 ? "exhausted" : ""}" data-add="${id}" title="${esc(deckTip(c))}">
-          <span class="pi-icon">${cardIconOf(c)}</span>
-          <span class="pi-name">${esc(c.name)} <span style="color:${rm.color}">${rm.stars}</span></span>
-          <span class="pi-cost">${c.cost}G</span><span class="pi-have">残${avail}/${poolCount[id]}</span>${infoBtn(id)}</div>`;
-      }).join("");
       const dc = {}; deck.forEach(id => dc[id] = (dc[id] || 0) + 1);
       const deckHtml = Object.keys(dc).sort((a, b) => typeOrder(a) - typeOrder(b) || CARD_BY_ID[a].cost - CARD_BY_ID[b].cost)
         .map(id => { const c = CARD_BY_ID[id]; return `<div class="deck-item" data-remove="${id}" title="クリックで1枚外す">
@@ -804,7 +948,7 @@ function showSealedBuilder(pool) {
         同名カードは<b>プールに出た枚数まで</b>使えます（クリーチャーは${MIN_CREATURES}枚以上）。<br>
         ⚠ このプールは<b>この1戦だけの使い捨て</b>です（コレクションには入りません。「やめる」でプールは破棄されます）。</p>
         <div class="builder">
-          <div class="builder-col"><div class="bc-title">📦 開封プール（${poolIds.length}種${pool.length}枚）</div><div class="pool-list">${poolHtml}</div></div>
+          <div class="builder-col"><div class="bc-title">📦 開封プール（<span id="pf-count">${poolIds.length}種${pool.length}枚</span>）</div>${cardFilterBarHTML(filter)}<div class="pool-list"></div></div>
           <div class="builder-col"><div class="bc-title">🎴 デッキ（クリーチャー ${v.creatures}）</div><div class="deck-list">${deckHtml}</div></div>
         </div>
         <div class="builder-status ${v.ok ? "ok" : "ng"}">${v.ok ? "✅ 構築OK！ 出陣できます" : "⚠ " + v.errors.join("／")}</div>
@@ -817,11 +961,8 @@ function showSealedBuilder(pool) {
       box.querySelectorAll("[data-info]").forEach(el => el.addEventListener("click", e => {
         e.stopPropagation(); showCardDetail(el.dataset.info);
       }));
-      box.querySelectorAll("[data-add]").forEach(el => el.addEventListener("click", () => {
-        const id = el.dataset.add;
-        if (deck.length >= DECK_SIZE || cnt(id) >= poolCount[id]) return;
-        deck.push(id); render();
-      }));
+      wireCardFilterBar(box, filter, updatePool);
+      updatePool();
       box.querySelectorAll("[data-remove]").forEach(el => el.addEventListener("click", () => {
         const i = deck.lastIndexOf(el.dataset.remove); if (i >= 0) deck.splice(i, 1); render();
       }));

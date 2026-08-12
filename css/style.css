@@ -1069,6 +1069,25 @@ body.hand-min #win-hand .win-head { margin-bottom: 0; }
   height: 44vh; overflow-y: auto; background: #1c1728; border: 1px solid var(--border);
   border-radius: 8px; padding: 5px;
 }
+/* 🔎 カード検索フィルタ（v32・デッキ構築とシールド戦で共用） */
+.pool-filter {
+  display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-bottom: 5px;
+}
+.pool-filter input[type=search], .pool-filter select {
+  background: #241d33; color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 6px; font-size: 12px; font-family: inherit;
+}
+.pool-filter input[type=search] { flex: 1 1 130px; min-width: 110px; }
+.pool-filter select { max-width: 118px; }
+.pool-filter .pf-bondlabel {
+  display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--gold);
+  cursor: pointer; white-space: nowrap;
+}
+.pool-filter .pf-pair { color: var(--gold); }
+.pi-bond { cursor: pointer; font-size: 12px; margin-left: 2px; filter: drop-shadow(0 0 2px #d8a93f); }
+.pi-bond:hover { transform: scale(1.2); }
+/* 検索フィルタのぶんプールが縦に窮屈になるので、深めの画面ではリストを少し伸ばす */
+@media (min-height: 760px) { .pool-list { height: 46vh; } }
 .pool-item, .deck-item {
   display: flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 6px;
   font-size: 12px; cursor: pointer; border: 1px solid transparent;

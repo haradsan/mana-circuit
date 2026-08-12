@@ -84,6 +84,7 @@ async function gameLoop() {
         const ranked = g.players.slice().sort((a, b) => assetsOf(g, b) - assetsOf(g, a));
         endGame(ranked[0], "ラウンド上限。総資産の最も多いプレイヤーの勝ち!");
       }
+      if (!g.over) boardEventTick(g); // 🗺盤面イベント（v32）: 一定ラウンドごとに発生
     }
   }
   await showGameOver();
@@ -413,6 +414,16 @@ async function playTurn(p) {
     dice += plus;
     log(`🤝 ${[...new Set(diceBonds.map(b => b.bond.name))].join("・")}！ ${p.name}の出目+${plus}＝${dice}`);
   }
+  // 💨追い風の季節（v32・盤面イベント）: 期間中は全員の出目+1
+  if (activeFx(G, "gale")) {
+    dice += 1;
+    log(`💨 追い風の季節！ ${p.name}の出目+1＝${dice}`);
+  }
+  // ⚖ 出目の上限（v32・チート対策）: 倍化・追い風・絆をすべて重ねても移動は DICE_MAX マスまで
+  if (dice > DICE_MAX) {
+    log(`⚖ 出目の上限！ ${dice}→${DICE_MAX}（どれだけ重ねても1ターンの移動は${DICE_MAX}マスまで）`, "warn");
+    dice = DICE_MAX;
+  }
   // 🟤泥沼（v20）: 次の移動は出目半分（切り上げ）
   if (p.mudded) {
     dice = Math.ceil(dice / 2);
@@ -455,6 +466,28 @@ async function playTurn(p) {
   p.spellSealed = false;
   notifyReach();
   renderAll(G);
+}
+
+// ⚖ 重ね掛けの上限（v32・原さん要望「特性・コンボ・相性での絶対的なチートが出ないように」）
+const PASSIVE_INCOME_MAX = 120; // 採掘＋魔力鉱脈＋収入の絆の1ターン合計上限
+const DICE_MAX = 12;            // ダイスブースト・追い風・絆をすべて重ねたときの出目上限
+
+// ---------- 🗺 盤面イベント（v32） ----------
+// BOARD_EVENT_EVERY ラウンドごとに、盤面全体のルールを BOARD_EVENT_ROUNDS だけ変えるイベントが起きる。
+// イベント表は state.js の BOARD_EVENTS。owner:null の全体エフェクトとして載せるので、
+// スペルの市場開放・戦火の世・魔力嵐・春の芽吹きと同じ判定コードがそのまま効く（AIも同条件）。
+// 同じイベントの連続だけは避ける（g.lastBoardEvent）
+const BOARD_EVENT_EVERY  = 5;
+const BOARD_EVENT_ROUNDS = 2;
+function boardEventTick(g) {
+  if (g.round % BOARD_EVENT_EVERY !== 0) return;
+  const pool = BOARD_EVENTS.filter(e => e.kind !== g.lastBoardEvent);
+  const ev = pool[Math.floor(Math.random() * pool.length)];
+  g.lastBoardEvent = ev.kind;
+  addFx(g, ev.kind, null, BOARD_EVENT_ROUNDS);
+  SFX.spell();
+  log(`🗺 盤面イベント発生！ ${ev.label} — ${ev.desc}（${BOARD_EVENT_ROUNDS}ラウンドの間）`, "warn");
+  renderAll(g);
 }
 
 // ---------- ターン開始時の第二弾能力（v19） ----------
@@ -518,6 +551,14 @@ function turnStartTick(p) {
       budHealed.push(CARD_BY_ID[t.creature.cardId].name);
     });
     if (budHealed.length) log(`🌸 春の芽吹き！ ${budHealed.join("・")}のHPが回復した（+15）`);
+  }
+  // ⚖ 不労所得の上限（v32・チート対策）: 採掘＋魔力鉱脈＋収入の絆を合わせて1ターン PASSIVE_INCOME_MAX まで。
+  // 採掘クリーチャーと収入絆を敷き詰める「座っているだけで勝つ」エンジンデッキだけを止める安全弁
+  const passive = mined + veinGain + bondGold;
+  if (passive > PASSIVE_INCOME_MAX) {
+    const over = passive - PASSIVE_INCOME_MAX;
+    p.magic -= over;
+    log(`⚖ 実り過ぎた収穫は土に還る——不労所得は1ターン+${PASSIVE_INCOME_MAX}Gまで（超過${over}Gは得られない）`, "warn");
   }
 }
 
@@ -2101,9 +2142,12 @@ async function movePlayer(p, steps) {
     const tile = G.tiles[p.pos];
     if (tile.type === "GATE" && !p.gates.has(tile.id)) {
       p.gates.add(tile.id);
-      p.magic += RULES.gateBonus;
+      // 💎黄金の脈（v32・盤面イベント）: 関門ボーナス2倍
+      const rush = activeFx(G, "goldrush");
+      const gateGain = RULES.gateBonus * (rush ? 2 : 1);
+      p.magic += gateGain;
       SFX.coin();
-      log(`⛩️ ${p.name}は関門を通過 +${RULES.gateBonus}G`);
+      log(`⛩️ ${p.name}は関門を通過 +${gateGain}G${rush ? "（💎黄金の脈で2倍！）" : ""}`);
       renderPanels(G);
     }
     if (tile.type === "CASTLE") {
@@ -2195,11 +2239,15 @@ async function tileAction(p, tile) {
       await enforceHandLimit(p);
       return false;
     }
-    case "MAGIC":
-      p.magic += RULES.magicTileG;
+    case "MAGIC": {
+      // 💎黄金の脈（v32・盤面イベント）: 魔力マスの実入り2倍
+      const rush = activeFx(G, "goldrush");
+      const gain = RULES.magicTileG * (rush ? 2 : 1);
+      p.magic += gain;
       SFX.coin();
-      log(`💎 ${p.name}は魔力マスで+${RULES.magicTileG}G`);
+      log(`💎 ${p.name}は魔力マスで+${gain}G${rush ? "（💎黄金の脈で2倍！）" : ""}`);
       return false;
+    }
     case "WARP": {
       await sleep(300);
       p.pos = tile.warpTo;
@@ -2227,7 +2275,9 @@ async function tileAction(p, tile) {
       return await tileAction(p, G.tiles[p.pos]); // 進んだ先のマスの判定を引き継ぐ
     }
     case "FORTUNE": {
-      // 🎰 運命マス: 何が出るかはお楽しみ（期待値はややプラス・15%ではずれ）
+      // 🎰 運命マス（v32で刷新・原さん要望「盤面のイベントをもう少し面白く」）:
+      // 魔力の増減だけでなく「盤面に作用する結果」（土地レベル・順位の揺さぶり）と
+      // 「自分で選ぶ結果」（⚖運命の選択）を加えた9種のルーレット。期待値はややプラスのまま
       SFX.dice();
       log(`🎰 ${p.name}は運命のルーレットを回した——`);
       await sleep(550);
@@ -2235,18 +2285,70 @@ async function tileAction(p, tile) {
       if (r < 0.10) {
         p.magic += 300; SFX.coin();
         log(`🎉 大当り！ 女神の祝福で +300G！`, "warn");
-      } else if (r < 0.35) {
+      } else if (r < 0.22) {
         p.magic += 150; SFX.coin();
         log(`💰 当り！ +150G`, "", { toast: true });
-      } else if (r < 0.60) {
+      } else if (r < 0.34) {
         const a = drawCard(G, p), b = drawCard(G, p);
         log(`🎴 運命の導き！ カードを${(a ? 1 : 0) + (b ? 1 : 0)}枚ドロー`, "", { toast: true });
         if (a && !p.isCPU) await animateDraw(CARD_BY_ID[a]);
         if (b && !p.isCPU) await animateDraw(CARD_BY_ID[b]);
         await enforceHandLimit(p);
-      } else if (r < 0.80) {
+      } else if (r < 0.44) {
         p.diceMult = 2;
         log(`🎲 追い風の予感！ 次のダイスの出目が2倍になる`, "", { toast: true });
+      } else if (r < 0.56) {
+        // 🏗 地脈の隆起（v32）: 自分の土地のうち最もレベルの低い1つが無料でLv+1（土地が無ければ+100G）
+        const lands = ownedLands(G, p.id).filter(t => t.level < MAX_LAND_LEVEL);
+        if (lands.length) {
+          const target = lands.reduce((a, b) => (b.level < a.level ? b : a));
+          adjustLandLevel(target, 1);
+          SFX.coin();
+          log(`🏗 地脈の隆起！ ${tileName(target)}のレベルが上がった（Lv${target.level}・費用なし）`, "warn");
+          renderBoard(G);
+        } else {
+          p.magic += 100; SFX.coin();
+          log(`🏗 地脈の隆起！ …だが育てる土地が無い。地の恵み +100G`, "", { toast: true });
+        }
+      } else if (r < 0.70) {
+        // ⚖ 運命の選択（v32）: 堅実に取るか、賭けに出るか——自分で選ぶマス
+        const gamble = p.isCPU
+          ? (isUnderdog(G, p) || p.magic < 120) // CPUは劣勢・金欠なら賭けに出る
+          : (await showDialog({
+              title: "⚖ 運命の選択",
+              body: `運命の女神が両手を差し出した——どちらを選ぶ？<br><br>
+                <b>💰 堅実</b>: 確実に <b>+100G</b><br>
+                <b>🎲 賭け</b>: 50%で <b>+250G</b> ／ 50%で <b>-100G</b>`,
+              buttons: [
+                { label: "💰 堅実（+100G）", value: "safe", primary: true },
+                { label: "🎲 賭けに出る", value: "gamble" },
+              ],
+            })).action === "gamble";
+        if (!gamble) {
+          p.magic += 100; SFX.coin();
+          log(`⚖ ${p.name}は堅実を選んだ +100G`, "", { toast: true });
+        } else if (Math.random() < 0.5) {
+          p.magic += 250; SFX.coin();
+          log(`⚖🎉 ${p.name}は賭けに出て——勝った！ +250G`, "warn");
+        } else {
+          const loss = Math.min(100, p.magic);
+          p.magic -= loss; SFX.hit();
+          log(`⚖💨 ${p.name}は賭けに出て——負けた… -${loss}G`, "warn");
+        }
+      } else if (r < 0.80) {
+        // 👑 女神の天秤（v32）: 首位から100Gを徴収して最下位に渡す（順位を揺さぶる再分配イベント）
+        const ranked = G.players.slice().sort((a, b) => assetsOf(G, b) - assetsOf(G, a));
+        const top = ranked[0], bottom = ranked[ranked.length - 1];
+        const amount = Math.min(100, top.magic);
+        if (top !== bottom && amount > 0) {
+          top.magic -= amount;
+          bottom.magic += amount;
+          SFX.spell();
+          log(`👑 女神の天秤が傾いた！ 首位${top.name}から${amount}Gが最下位${bottom.name}へ`, "warn");
+        } else {
+          p.magic += 50; SFX.coin();
+          log(`👑 女神の天秤は釣り合っている。祝福のおこぼれ +50G`, "", { toast: true });
+        }
       } else if (r < 0.90) {
         // 🌀 時空の渦（v24）: 進行方向が反転するイベント（逆走はスペルとこれでのみ起きる）
         reverseDirection(G, p);
@@ -2257,6 +2359,7 @@ async function tileAction(p, tile) {
         p.magic -= loss; SFX.hit();
         log(`💨 はずれ… -${loss}G`, "warn");
       }
+      renderPanels(G);
       return false;
     }
     case "SPRING": {
@@ -3223,7 +3326,7 @@ function showTileInfo(tile) {
       WARP:   "🌀 ワープマス — 止まると対のマスへ移動する",
       MAGMA:  `🌋 マグママス — 止まると魔力を失う（-${RULES.magmaLoss}G）`,
       BOOST:  "💨 疾風マス — 止まるとさらに2マス進む",
-      FORTUNE: "🎰 運命マス — 止まるとルーレット！ 大当り+300G／+150G／2枚ドロー／次のダイス2倍／🌀時空の渦（進行方向が反転）／はずれ-100G のどれかが起きる",
+      FORTUNE: "🎰 運命マス — 止まるとルーレット！ 大当り+300G／+150G／2枚ドロー／次のダイス2倍／🏗地脈の隆起（自分の土地1つが無料でLv+1）／⚖運命の選択（堅実+100G か 50%の賭け+250G/-100G）／👑女神の天秤（首位から最下位へ100G）／🌀時空の渦（進行方向が反転）／はずれ-100G のどれかが起きる",
       SPRING: "⛲ 泉マス — 止まると自軍クリーチャーのHPが全回復＋60G",
     };
     parts.push(descs[tile.type] || "");
@@ -3388,8 +3491,21 @@ function showHelp() {
       ・敵の土地 … 通行料を支払う or クリーチャーで侵略バトル<br>
       ・🎴カード＝1枚ドロー ／ 💎魔力＝魔力ゲット ／ ⛩️関門＝通過でボーナス<br>
       ・🌀ワープ＝対のマスへ移動 ／ 🌋マグマ＝魔力を失う ／ 💨疾風＝さらに2マス進む<br>
-      ・🎰<b>運命</b>＝ルーレット（大当り+300G／+150G／2枚ドロー／次のダイス2倍／🌀時空の渦＝進行方向が反転／はずれ-100G） ／
-      ⛲<b>泉</b>＝自軍クリーチャー全回復＋60G<br><br>
+      ・🎰<b>運命</b>＝9種のルーレット（大当り+300G／+150G／2枚ドロー／次のダイス2倍／
+      🏗<b>地脈の隆起</b>＝自分の土地1つが無料でLv+1／⚖<b>運命の選択</b>＝堅実+100G か 50%の賭け（+250G/-100G）を<b>自分で選ぶ</b>／
+      👑<b>女神の天秤</b>＝首位から最下位へ100G／🌀時空の渦＝進行方向が反転／はずれ-100G） ／
+      ⛲<b>泉</b>＝自軍クリーチャー全回復＋60G<br>
+      <b>🗺 盤面イベント（v32）</b>: <b>5ラウンドごと</b>に盤面全体のルールを<b>2ラウンド</b>だけ変えるイベントがランダムに発生する
+      （発生中はヘッダーに表示）。🏪<b>市場開放の日</b>＝カードマスで2枚ドロー ／ 🔥<b>戦火の世</b>＝侵略側ST+20 ／
+      💰<b>魔力嵐</b>＝通行料1.5倍 ／ 🌸<b>大地の恵み</b>＝全員ターン開始時に自軍HP+15回復 ／
+      💨<b>追い風の季節</b>＝全員の出目+1 ／ 💎<b>黄金の脈</b>＝魔力マス・関門ボーナス2倍。
+      全員に同じ条件で効くので、<b>イベントの2ラウンドをどう使うか</b>（攻め時・徴収時・回復時）が駆け引きになる。<br>
+      <b>⚖ 重ね掛けの上限（v32）</b>: 特性・コンボ・相性を重ねた「絶対的なチート」を防ぐ安全弁。
+      ①バトルの<b>相乗系補正</b>（群れ・応援・絆・武芸・反骨・共鳴武具・連携）は合計<b>ST+60／HP+60まで</b>（📊【式】に「⚖上限」で表示）
+      ②通行料を釣り上げる倍率（商魂×絆×魔力嵐）は掛け合わせて<b>×2.0まで</b>（連鎖倍率は対象外）
+      ③<b>不労所得</b>（採掘＋魔力鉱脈＋収入の絆）は1ターン<b>+120Gまで</b>
+      ④ダイスの出目は倍化・追い風・絆を重ねても<b>12まで</b>。
+      通常の1〜2種のコンボには届かない値なので、普段のプレイでは気にならない。<br><br>
       <b>連鎖</b>: 同じ属性の土地を複数持つと通行料が倍増（2つ→×1.5、3つ→×2.0、4つ以上→×2.5）<br>
       <b>周回</b>: 関門を規定数そろえて城を<b>通過または停止</b>すると<b>周回ボーナス＝魔力（基本${DEFAULT_RULES.lapBase}G＋所有土地×40G）＋自軍クリーチャーHP全回復</b>。大きく劣勢のときは魔力<b>1.5倍</b>！<br>
       <b>🏰 領地コントロール</b>: 城にコマが<b>ぴったり停止（通過ではなく丁度）</b>すると、周回に関係なく<b>支配する全領地を対象に1回だけ行動</b>できる（侵攻／交代／レベルアップ）。

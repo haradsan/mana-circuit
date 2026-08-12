@@ -91,11 +91,31 @@ function addFx(g, kind, ownerId, rounds = 2) {
   g.fxList = g.fxList || [];
   g.fxList.push({ kind, owner: ownerId, until: g.round + rounds - 1 });
 }
-// 有効な全体エフェクトを返す（ownerId指定時は「その人のもの」だけ）。期限切れは掃除する
+// 有効な全体エフェクトを返す（ownerId指定時は「その人のもの」だけ）。期限切れは掃除する。
+// owner が null のエフェクト（v32の🗺盤面イベント＝誰のものでもなく全員に効く）は誰の照会にも一致する
 function activeFx(g, kind, ownerId = null) {
   if (!g || !g.fxList) return null;
   g.fxList = g.fxList.filter(f => f.until >= g.round);
-  return g.fxList.find(f => f.kind === kind && (ownerId === null || f.owner === ownerId)) || null;
+  return g.fxList.find(f => f.kind === kind && (ownerId === null || f.owner === null || f.owner === ownerId)) || null;
+}
+
+// ---------- 🗺 盤面イベント（v32・原さん要望「盤面のイベントをもう少し面白く」） ----------
+// 一定ラウンドごとに、盤面全体のルールを2Rだけ変えるイベントがランダムに発生する。
+// スペル由来の全体エフェクト（addFx）と同じ仕組みに owner:null で載せる＝既存の判定がそのまま効く。
+// market/war/manastorm/bud はスペルと同じ効果、gale/goldrush は v32 の新設（main.js にフックがある）
+const BOARD_EVENTS = [
+  { kind: "market",    label: "🏪市場開放の日",   desc: "🎴カードマスで2枚ドローできる" },
+  { kind: "war",       label: "🔥戦火の世",       desc: "侵略側はバトルでST+20——攻め時！" },
+  { kind: "manastorm", label: "💰魔力嵐",         desc: "すべての通行料が1.5倍——他人の土地に注意" },
+  { kind: "bud",       label: "🌸大地の恵み",     desc: "全員、ターン開始時に自軍クリーチャーHP+15回復" },
+  { kind: "gale",      label: "💨追い風の季節",   desc: "全員のダイスの出目+1" },
+  { kind: "goldrush",  label: "💎黄金の脈",       desc: "💎魔力マス・⛩関門ボーナスが2倍" },
+];
+// いま発生している盤面イベント（owner:null の全体エフェクト）。ヘッダー表示・重複防止に使う
+function boardEventActive(g) {
+  if (!g || !g.fxList) return null;
+  const f = g.fxList.find(f => f.owner === null && f.until >= g.round);
+  return f ? (BOARD_EVENTS.find(e => e.kind === f.kind) || null) : null;
 }
 // 静寂のとばり: 使用不可になる「対象指定スペル」の一覧
 const TARGETED_SPELLS = new Set([
@@ -635,21 +655,26 @@ function chainMult(n) {
   return [0, 1.0, 1.5, 2.0][n] || 1.0;
 }
 
+// ⚖ 通行料ブーストの上限（v32・チート対策）: 通行料を釣り上げる倍率（商魂×絆×魔力嵐）は
+// 掛け合わせて×2.0まで。連鎖倍率（土地を並べる本来の稼ぎ方）とカースランドの半減は対象外
+const TOLL_BOOST_MAX = 2.0;
 function tollOf(g, tile) {
   if (tile.type !== "LAND" || tile.owner === null) return 0;
   const chain = chainCount(g, tile.owner, tile.element);
   let toll = LAND_VALUE[tile.level - 1] * RULES.tollRate * chainMult(chain);
+  let boost = 1;
   // 商魂（merchant・v19）: 駐留クリーチャー（交易市場など）がいる土地は通行料1.3倍
-  if (tile.creature && CARD_BY_ID[tile.creature.cardId].ab.includes("merchant")) toll *= 1.3;
+  if (tile.creature && CARD_BY_ID[tile.creature.cardId].ab.includes("merchant")) boost *= 1.3;
   // 🤝通行料の絆（v31）: 相方が盤上にいる間、この土地の通行料が上がる
   if (tile.creature && !creatureNulled(g, tile.creature)) {
     const bd = bondActiveFor(g, tile.owner, CARD_BY_ID[tile.creature.cardId], tile.id);
-    if (bd && bd.kind === "toll") toll *= bd.mult;
+    if (bd && bd.kind === "toll") boost *= bd.mult;
   }
+  // 魔力嵐（v20）: 2Rの間すべての通行料1.5倍
+  if (activeFx(g, "manastorm")) boost *= 1.5;
+  toll *= Math.min(TOLL_BOOST_MAX, boost);
   // カースランド（v20）: 呪われた土地は通行料半減（2R）
   if (landCursed(g, tile)) toll *= 0.5;
-  // 魔力嵐（v20）: 2Rの間すべての通行料1.5倍
-  if (activeFx(g, "manastorm")) toll *= 1.5;
   return Math.floor(toll);
 }
 
