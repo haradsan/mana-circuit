@@ -538,7 +538,7 @@ function newGame(stageIdx = 0, opts = {}) {
       charKey: null,                  // 対戦キャラのid（chars.js のセリフ・顔絵用。CPU生成側でセット）
       magic: isCPU ? cpuStartMagic : RULES.startMagic,
       pos: 0,
-      deck: custom ? shuffle(custom) : buildDeck(bias, isCPU ? cpuMaxCost : Infinity),
+      deck: custom ? shuffle(custom) : buildDeck(bias, isCPU ? cpuMaxCost : Infinity, isCPU ? (prof && prof.style) : null),
       hand: [],
       discard: [],        // 使用済みカード（山札切れ時に再利用）
       gates: new Set(),   // 通過済み関門ID
@@ -555,11 +555,19 @@ function newGame(stageIdx = 0, opts = {}) {
   };
   // CPUプレイヤーを1体作る（ステージ定義 or 三つ巴の乱入キャラ定義から）。charKey でセリフ・顔絵が紐づく
   const mkCpu = (id, def) => {
-    const p = mkPlayer(id, def.cpuName || "CPU", true, def.cpuBias, undefined, profileFor(def.ai));
-    p.charKey = def.id;
+    const prof = profileFor(def.ai);
+    // 戦型（v33・styles.js）: ステージ定義の style をプロファイルに載せる（デッキ構築とai.jsの係数が参照）
+    const styleDef = (typeof STYLES !== "undefined" && def.style && STYLES[def.style]) || null;
+    if (prof && styleDef) prof.style = styleDef;
+    const p = mkPlayer(id, def.cpuName || "CPU", true, def.cpuBias, undefined, prof);
+    p.charKey = def.char || def.id; // v33: キャラはステージから独立（char指定・無ければ従来どおりステージid）
+    p.aiTier = def.ai || "normal";  // v33: 強さtier（口上・出陣確認の「戦型（強豪）」表示用）
     // 固定エース（v20・ボス面）: 精霊王などをデッキに確定投入する（同数のランダムカードと差し替え＝30枚を維持）。
     // 先に全て抜いてから足す（1体ずつpop→pushすると、直前に足したエース自身をpopしてしまう）
-    const aces = (def.cpuAces || []).filter(aceId => CARD_BY_ID[aceId]);
+    // v33: 戦型のエース（精霊使いのhard以上＝主属性の精霊王）もここで合流する
+    const styleAces = (styleDef && styleDef.deck && styleDef.deck.ace && prof && prof.deckMaxCost >= 150)
+      ? styleDef.deck.ace(def.cpuBias || null) : [];
+    const aces = [...(def.cpuAces || []), ...styleAces].filter(aceId => CARD_BY_ID[aceId]);
     if (aces.length) {
       p.deck.splice(0, aces.length); // デッキはシャッフル済み＝ランダムなN枚が抜ける
       p.deck.push(...aces);

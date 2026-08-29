@@ -822,6 +822,16 @@ body.hand-min #win-hand .win-head { margin-bottom: 0; }
 .sc-desc { color: var(--dim); font-size: 12.5px; line-height: 1.75; margin: 10px 0 0; }
 .sc-quote { color: var(--text); font-size: 12.5px; line-height: 1.7; margin: 6px 0 0; opacity: 0.85; }
 .sc-facts { margin-top: 10px; }
+/* 戦型（v33）: 出陣確認で相手の作戦・得意・弱点を公開する枠 */
+.sc-style {
+  margin: 10px 0 0; padding: 8px 10px;
+  border: 1px dashed var(--gold); border-radius: 8px;
+  background: rgba(255, 215, 106, 0.05);
+  font-size: 12.5px; line-height: 1.7;
+}
+.sc-style-head { color: var(--text); }
+.sc-style-row { color: var(--dim); }
+.sc-style-row.sc-weak { color: #ffd76a; }
 
 .stage-list {
   display: flex;
@@ -1700,6 +1710,10 @@ body.hand-min #win-hand .win-head { margin-bottom: 0; }
 .vs-title { font-size: 11.5px; letter-spacing: 1px; }
 .vs-name { font-size: 17px; font-weight: bold; margin: 1px 0 4px; }
 .vs-quote { font-size: 12.5px; color: var(--dim); line-height: 1.55; }
+/* 戦型（v33）: 口上でも手の内を公開する */
+.vs-style { margin-top: 6px; padding-top: 6px; border-top: 1px dashed rgba(255, 215, 106, 0.3); font-size: 12px; line-height: 1.6; color: var(--text); }
+.vs-style-row { color: var(--dim); }
+.vs-style-row.vs-weak { color: #ffd76a; }
 .vs-and { text-align: center; color: var(--gold); font-weight: bold; font-size: 13px; }
 .vs-stage { text-align: center; color: var(--dim); font-size: 12.5px; margin-top: 4px; }
 

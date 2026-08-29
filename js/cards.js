@@ -18,10 +18,11 @@ const ELEMENTS = {
 // 土地として存在できる属性（盤面・エレメンタルシフト・デッキの属性枠は無属性を除く4種）
 const LAND_ELEMENTS = ["fire", "wood", "earth", "water"];
 
-// 属性相性（4すくみ）: 火→木→地→水→火（左が右に強い）＝「水＞火＞木＞地＞水」。バトル時 ST+10
+// 属性相性（4すくみ）: 火→木→地→水→火（左が右に強い）＝「水＞火＞木＞地＞水」。バトル時 ST+ELEM_ADV_ST
 // 火は木を焼き、木は地を痩せさせ（根が土を割る）、地は水を堰き止め、水は火を消す。
 const ELEM_ADVANTAGE = { fire: "wood", wood: "earth", earth: "water", water: "fire" };
-const ELEM_ADV_ST = 10;
+// v33: 10→15。すくみの影響を「もう少しだけ」強く（原さん要望）。効き過ぎたら12へ戻す
+const ELEM_ADV_ST = 15;
 function hasElemAdvantage(attElem, defElem) { return ELEM_ADVANTAGE[attElem] === defElem; }
 
 // 能力: first=先制 / pierce=貫通 / assault=強襲(侵略時ST+20)
@@ -739,24 +740,35 @@ function shuffle(arr) {
 // スペル6枚、アイテム6枚＝合計30枚。biasElement を指定すると主属性の1つ目が固定される（ステージのCPU用）
 // maxCost: このコストを超えるカードは入れない（弱い難易度のCPUほど低コスト＝弱いデッキになる）。
 //   クリーチャーが枯れないよう、maxCost で候補が空になった場合はコスト昇順で最も安いものにフォールバックする。
-function buildDeck(biasElement = null, maxCost = Infinity) {
+// style（v33・styles.js）: 戦型。重み付き抽選と看板カード（sig）の確定投入で
+//   「相手ごとにデッキの中身が違う」を作る。null なら従来と完全に同一の挙動。
+function buildDeck(biasElement = null, maxCost = Infinity, style = null) {
   // 属性枠は土地属性の4種のみ（無属性クリーチャーはレア以上の特別枠＝自動デッキには入れず、構築デッキで使う）
   let elems = shuffle(LAND_ELEMENTS.slice());
   if (biasElement) elems = [biasElement, ...elems.filter(e => e !== biasElement)];
-  const main = elems.slice(0, 2), sub = elems.slice(2); // main=2属性 / sub=残り2属性
   const deck = [];
-  const pickType = (filter, n) => {
+  const sd = (style && style.deck) || null;
+  // 重み付き抽選: weightFn(c) の分だけ出やすくなる（無ければ一様＝従来どおり）
+  const pickType = (filter, n, weightFn) => {
     const all = CARD_DB.filter(filter);
     if (all.length === 0) return;
     let pool = all.filter(c => c.cost <= maxCost);
     // maxCostで全滅したら、そのカテゴリの最安カードだけは使えるようにする（デッキが機能する保証）
     if (pool.length === 0) pool = [all.slice().sort((a, b) => a.cost - b.cost)[0]];
-    for (let i = 0; i < n; i++) deck.push(pool[Math.floor(Math.random() * pool.length)].id);
+    const w = pool.map(c => 1 + (weightFn ? Math.max(0, weightFn(c) || 0) : 0));
+    const total = w.reduce((s, x) => s + x, 0);
+    for (let i = 0; i < n; i++) {
+      let r = Math.random() * total, at = 0;
+      while (at < pool.length - 1 && (r -= w[at]) > 0) at++;
+      deck.push(pool[at].id);
+    }
   };
   // 建造物（ST0・反撃しない施設）と noCpu スペル（AIの発動条件が無い）は
   // CPU/おまかせデッキには入れない（構築デッキでは使える）
-  main.forEach(e => pickType(c => c.type === "creature" && !c.structure && c.element === e, 6));
-  sub.forEach(e => pickType(c => c.type === "creature" && !c.structure && c.element === e, 3));
+  const creatureW = sd ? (sd.creatureWB ? (c => sd.creatureWB(c, biasElement)) : sd.creatureW) : null;
+  // 属性ごとの枚数。既定 [6,6,3,3]＝主属性2つを厚めに（従来どおり）。精霊使いは [9,3,3,3] の単色寄せ
+  const counts = (sd && sd.counts) || [6, 6, 3, 3];
+  elems.forEach((e, i) => pickType(c => c.type === "creature" && !c.structure && c.element === e, counts[i] || 0, creatureW));
   // 🤝絆（v31）: ランダム構築のままだと「対になる2枚が同じデッキに入る」確率がほぼ無く、
   // 絆が盤面に一度も現れない。絆持ちを引き当てたときは、その相方をクリーチャー枠と1枚入れ替えて
   // 差し込む（デッキの枚数・属性バランスは変えない）。相方が施設・無属性・高コスト帯の場合は見送る。
@@ -778,7 +790,27 @@ function buildDeck(biasElement = null, maxCost = Infinity) {
     if (slot === i) continue;
     deck[slot] = partners[Math.floor(Math.random() * partners.length)].id;
   }
-  pickType(c => c.type === "spell" && !c.noCpu, 6);
-  pickType(c => c.type === "item", 6);
+  pickType(c => c.type === "spell" && !c.noCpu, 6, (sd && sd.spells) ? (c => (sd.spells.has(c.id) ? 4 : 0)) : null);
+  pickType(c => c.type === "item", 6, sd ? sd.itemW : null);
+  // 戦型の看板カード（sig・v33）: 同じタイプの枠と差し替えて確定投入（30枚と枠構成を維持）。
+  // コスト上限内のカードだけ＝弱いtierの商人は安い施設だけ持つ、が自然に成立する
+  if (sd && sd.sig) {
+    const sigIds = sd.sig(biasElement).filter(id => {
+      const c = CARD_BY_ID[id];
+      return c && !c.noCpu && c.cost <= maxCost && !deck.includes(id);
+    });
+    const usedIdx = new Set();
+    for (const id of sigIds) {
+      const c = CARD_BY_ID[id];
+      const lo = c.type === "creature" ? 0 : (c.type === "spell" ? creatureSlots : creatureSlots + 6);
+      const hi = c.type === "creature" ? creatureSlots : (c.type === "spell" ? creatureSlots + 6 : deck.length);
+      const cand = [];
+      for (let i = lo; i < hi; i++) if (!usedIdx.has(i)) cand.push(i);
+      if (!cand.length) continue;
+      const at = cand[Math.floor(Math.random() * cand.length)];
+      deck[at] = id;
+      usedIdx.add(at);
+    }
+  }
   return shuffle(deck);
 }

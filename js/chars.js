@@ -1,7 +1,10 @@
 // ============================================================
 // chars.js — 対戦相手キャラクター（顔絵・性格・セリフ）
 // 「相手の存在を感じられる」ようにする v18 の要。
-//   CHARACTERS: ステージid をキーにしたキャラ定義（face絵文字・色・肩書き・セリフ集）
+// v33: キャラをステージから独立させ 16人→9人に集約（原さん「多すぎて区別できない」）。
+//   同じキャラが複数ステージに強さを変えて登場する＝顔と戦型で覚えられる。
+//   CHARACTERS: キャラid をキーにしたキャラ定義（face絵文字・色・肩書き・セリフ集）。
+//   ステージとの紐づけは stages.js の char:（mkCpu が p.charKey にセット）
 //   cpuSay(p, cat): 対戦中に吹き出しでセリフを表示（非ブロッキング）
 //   showMatchIntro(g): 対戦開始前の「VS 口上」画面
 //   pickRoyaleRival(stage): 三つ巴モードの乱入キャラを選ぶ
@@ -14,7 +17,7 @@
 //   lap=周回達成 / reach=目標資産に到達 / restart=魔力が尽きて城で再起 /
 //   win=最終勝利 / lose=最終敗北
 const CHARACTERS = {
-  s1: {
+  noa: {
     face: "🌱", color: "#8ee0a0", title: "見習いセプター",
     lines: {
       greet: ["よ、よろしくお願いします！ 僕だって練習してきたんですから！"],
@@ -30,39 +33,7 @@ const CHARACTERS = {
       lose: ["負けちゃいました……でも、いい勝負でした！"],
     },
   },
-  s2: {
-    face: "🔥", color: "#ff7a4d", title: "火術師",
-    lines: {
-      greet: ["この峠を越えたくば、我が炎を越えてみせよ！"],
-      taunt: ["燃えろ、燃え上がれ……！", "この土地は熱いぞ、覚悟はいいか", "ふん、ぬるい手を打つ"],
-      invade: ["焼き払え！ 侵略だ！", "我が炎の前に立つか、愚か者め！"],
-      battleWin: ["灰も残らんわ！ はっはっは！", "これが火術の真髄よ！"],
-      battleLose: ["ば、馬鹿な……我が炎が消されただと！？", "ぐぬぬ……水でもかけられた気分だ"],
-      tollGain: ["通行料だ、置いていけ！", "熱い道を通るなら対価を払え！"],
-      lap: ["峠をひと回り！ 火勢はますます強まるぞ！"],
-      reach: ["見よ、財は燃え盛る炎のごとし！ あとは玉座に戻るのみ！"],
-      restart: ["火が……消えた……だがまだ火種は残っているッ！"],
-      win: ["すべては灰燼と帰した！ 我が勝利だ！"],
-      lose: ["我が炎が……敗れるとは……見事だ"],
-    },
-  },
-  s3: {
-    face: "🌊", color: "#6ec3ff", title: "水賢者",
-    lines: {
-      greet: ["ようこそ水の都へ。流れを読める者が、この盤を制します"],
-      taunt: ["流れが変わりましたね", "水は形を選ばない……盤面も同じこと", "静かに、深く"],
-      invade: ["失礼。その土地、頂きます", "波が引くとき、岸は変わるのです"],
-      battleWin: ["水の流れには逆らえません", "お見事……とは言えませんね"],
-      battleLose: ["ほう……流れを読み違えましたか", "一敗。ですが水は涸れません"],
-      tollGain: ["渡し賃を頂きます", "水路の通行料です。ご協力を"],
-      lap: ["ひと巡り。潮が満ちてきました"],
-      reach: ["満潮です。あとは城へ帰るだけ"],
-      restart: ["干上がりましたか……ですが、雨はまた降る"],
-      win: ["水は低きに流れ、勝利は備えた者に流れる。当然の帰結です"],
-      lose: ["見事な流れでした。私の負けです"],
-    },
-  },
-  s4: {
+  sail: {
     face: "🍃", color: "#9be07a", title: "疾風の旅人",
     lines: {
       greet: ["よう！ 足の遅いヤツから負けてくんだぜ、この高地はな！"],
@@ -78,7 +49,7 @@ const CHARACTERS = {
       lose: ["マジかよ、俺より速いヤツがいたとはな……"],
     },
   },
-  s5: {
+  dolga: {
     face: "⛰️", color: "#d0a878", title: "岩人",
     lines: {
       greet: ["……よく来た。山は、逃げぬ。ワシも、逃げぬ"],
@@ -94,7 +65,7 @@ const CHARACTERS = {
       lose: ["……見事。山より高い志であった"],
     },
   },
-  s6: {
+  linoa: {
     face: "🌀", color: "#c9a0ff", title: "幻術師",
     lines: {
       greet: ["ふふ……この回廊で、どちらが本物のあなたか、確かめましょう"],
@@ -110,7 +81,7 @@ const CHARACTERS = {
       lose: ["幻術が解けた……あなたが、本物だったのね"],
     },
   },
-  s7: {
+  gold: {
     face: "💰", color: "#ffd76a", title: "大商人",
     lines: {
       greet: ["いらっしゃい！ この市場じゃ、金がすべてを語るんでな！ がっはっは！"],
@@ -126,7 +97,7 @@ const CHARACTERS = {
       lose: ["わしの負けか……あんた、商才あるよ"],
     },
   },
-  s8: {
+  gaius: {
     face: "⚔️", color: "#ff9a9a", title: "剣闘士",
     lines: {
       greet: ["この闘技場に来たからには、逃げ場はないと知れ！"],
@@ -142,39 +113,7 @@ const CHARACTERS = {
       lose: ["完敗だ……お前こそ真の剣闘士だ"],
     },
   },
-  s9: {
-    face: "⚡", color: "#ffe066", title: "雷帝",
-    lines: {
-      greet: ["我が峡谷に足を踏み入れたこと、後悔させてやろう"],
-      taunt: ["雷鳴が聞こえるか？", "ひれ伏せ", "遅い。すべてが遅い"],
-      invade: ["雷光の如く、奪う！", "裁きの雷を受けよ！"],
-      battleWin: ["塵と化せ", "抵抗など無意味だ"],
-      battleLose: ["おのれ……この我に傷を！？", "小癪な……！"],
-      tollGain: ["貢物として受け取っておこう", "通行税だ。感謝して払え"],
-      lap: ["峡谷をひと巡り……我が雷は衰えぬ"],
-      reach: ["財は満ちた……あとは玉座に戻り、貴様の敗北を見届けるだけよ"],
-      restart: ["我が財が尽きただと……！？ 覚えておれ……！"],
-      win: ["ひれ伏せ！ これが雷帝の力だ！"],
-      lose: ["馬鹿な……この我が、敗れるとは……"],
-    },
-  },
-  s10: {
-    face: "👑", color: "#ff5b5b", title: "魔王",
-    lines: {
-      greet: ["よくぞここまで来た、人の子よ。だが、ここが貴様の終着点だ"],
-      taunt: ["くくく……", "絶望はまだか？", "踊れ、我が盤上で"],
-      invade: ["滅びよ", "我が軍勢の前に、道を開けるがいい"],
-      battleWin: ["脆い、脆いぞ人の子よ", "これが魔王の力……刻み込め"],
-      battleLose: ["ほう……我が配下を破るか", "面白い……少しは楽しめそうだ"],
-      tollGain: ["魂の代わりに金で許してやろう", "貢げ、人の子よ"],
-      lap: ["我が城郭をひと巡り……闇は深まるばかりよ"],
-      reach: ["富は満ちた……玉座へ戻り、貴様の絶望を眺めるとしよう"],
-      restart: ["この魔王が金欠だと……！？ 笑わせる……だが滅びはせぬ！"],
-      win: ["これが絶望だ。よく味わうがいい"],
-      lose: ["馬鹿な……魔王たる我が……人の子に敗れるとは……見事だ"],
-    },
-  },
-  s11: {
+  stella: {
     face: "✨", color: "#a0c8ff", title: "星詠み",
     lines: {
       greet: ["星々は告げています……今宵、大きな勝負が動くと"],
@@ -190,56 +129,7 @@ const CHARACTERS = {
       lose: ["星に映らぬ未来があったなんて……あなたは星の外を歩く人ね"],
     },
   },
-  s12: {
-    face: "🎭", color: "#e0a0ff", title: "円卓の盟主",
-    lines: {
-      greet: ["ようこそ円卓へ。ここでは全員が敵、全員が客人だ"],
-      taunt: ["三つ巴とは、実に美しい", "さて、誰から崩れるかな", "同盟？ そんなものは幻想だよ"],
-      invade: ["円卓の流儀で、頂くとしよう", "悪く思うな。これが円卓だ"],
-      battleWin: ["これぞ円卓の采配", "席がひとつ、空いたようだ"],
-      battleLose: ["ほう、私の席を脅かすか", "……面白くなってきた"],
-      tollGain: ["円卓の席料だ、置いていきたまえ"],
-      lap: ["円卓をひと巡り。盤上は私の庭だよ"],
-      reach: ["準備は整った。あとは玉座に着くだけだ"],
-      restart: ["丸裸か……いいだろう、ここからが盟主の腕の見せどころだ"],
-      win: ["円卓の主は、常にひとり。私だ"],
-      lose: ["円卓の席を、君に譲ろう……見事だった"],
-    },
-  },
-  // ---------- 第二弾ステージ（v20） ----------
-  s13: {
-    face: "🐪", color: "#d8c070", title: "隊商長",
-    lines: {
-      greet: ["ようこそ大草原へ！ ここでは急ぐ者より、育てる者が勝つのさ"],
-      taunt: ["いい風だ。商売日和だな", "ラクダも土地も、手をかけた分だけ応える", "この道は長いぞ〜、覚悟はいいか？"],
-      invade: ["すまんが、そこはウチの商路にさせてもらう！", "隊商の進路を邪魔する者は、どいてもらおうか"],
-      battleWin: ["砂漠で鍛えた隊商をなめるなよ！", "積み荷がまた増えたな！"],
-      battleLose: ["おっと、荷崩れだ！", "この損失は次の商いで取り返す！"],
-      tollGain: ["草原の通行料、まいどあり！", "旅人からの実入りが一番うまい"],
-      lap: ["大草原をひと回り！ 隊商は肥え太るばかりよ"],
-      reach: ["積み荷は満杯だ！ あとは店じまいして城へ帰るだけ！"],
-      restart: ["隊商が空っぽに……だが商人は道がある限り歩くのさ"],
-      win: ["これぞ隊商の底力！ 大草原はワシの庭よ！"],
-      lose: ["完敗だ、参った！ あんたはワシより商売上手だ"],
-    },
-  },
-  s14: {
-    face: "⚙️", color: "#c0b8a0", title: "機構技師",
-    lines: {
-      greet: ["ようこそ、我が機構都市へ。歯車の回りを読めない者から脱落していく"],
-      taunt: ["カチ、カチ、カチ……聞こえるか、時を刻む音が", "設計図どおりだ", "その一手、機構に組み込み済みだ"],
-      invade: ["歯車が噛み合った——駆動する！", "その土地は我が機構の部品となる"],
-      battleWin: ["精密設計の勝利だ", "計算どおり。誤差はない"],
-      battleLose: ["ば、馬鹿な——歯車が欠けただと！？", "設計を見直さねば……"],
-      tollGain: ["機構の維持費だ。置いていきたまえ", "整備代として頂戴する"],
-      lap: ["大環をひと回り。機構は快調だ"],
-      reach: ["装置は完成した……あとは玉座に戻り、起動するだけだ"],
-      restart: ["全部品を失った……だが設計図は頭の中にある！"],
-      win: ["これが機構の完成形だ。美しいだろう"],
-      lose: ["私の設計を超えるとは……君は天才か"],
-    },
-  },
-  s15: {
+  celestia: {
     face: "🕯️", color: "#ffd88a", title: "精霊王の巫女",
     lines: {
       greet: ["ようこそ五王の間へ……王たちは、強き者の訪れを待っておられました"],
@@ -255,7 +145,7 @@ const CHARACTERS = {
       lose: ["王たちが……あなたを認めたようです。お見事でした"],
     },
   },
-  s16: {
+  aeon: {
     face: "⏳", color: "#b8a0ff", title: "時空の王",
     lines: {
       greet: ["よくぞ時の果てまで辿り着いた。だが知るがいい——余は貴様の敗北を、すでに見届けている"],
@@ -273,7 +163,7 @@ const CHARACTERS = {
   },
 };
 
-// プレイヤー(CPU)のキャラ定義を取得（charKey はステージid）
+// プレイヤー(CPU)のキャラ定義を取得（charKey はキャラid。stages.js の char: → mkCpu がセット）
 function charOf(p) {
   return (p && p.charKey && CHARACTERS[p.charKey]) || null;
 }
@@ -328,12 +218,20 @@ function showMatchIntro(g) {
   if (cpus.length === 0) return Promise.resolve();
   const blocks = cpus.map(p => {
     const ch = charOf(p);
+    // 戦型（v33）: 口上でも手の内（作戦・得意・弱点）を公開する＝対策を立ててから挑める
+    const st = (typeof styleOfPlayer === "function") ? styleOfPlayer(p) : null;
+    const tier = (typeof AI_TIER_LABEL !== "undefined" && p.aiTier && AI_TIER_LABEL[p.aiTier]) || "";
     return `<div class="vs-char" style="border-color:${ch.color}55">
       <div class="vs-portrait">${charPortraitSVG(ch, 76)}</div>
       <div class="vs-info">
         <div class="vs-title" style="color:${ch.color}">${esc(ch.title)}</div>
         <div class="vs-name">${esc(p.name)}</div>
         <div class="vs-quote">「${esc(charLine(p, "greet"))}」</div>
+        ${st ? `<div class="vs-style">
+          <div>${st.icon} 戦型: <b>${st.label}</b>${tier ? `（${tier}）` : ""}</div>
+          <div class="vs-style-row">💪 ${esc(st.strong)}</div>
+          <div class="vs-style-row vs-weak">🎯 弱点: ${esc(st.weak)}</div>
+        </div>` : ""}
       </div>
     </div>`;
   }).join(`<div class="vs-and">＆</div>`);
@@ -350,8 +248,15 @@ function showMatchIntro(g) {
 }
 
 // ---------- 三つ巴の乱入キャラ ----------
-// ステージ本来の相手に加えて、他ステージのキャラが1人乱入する（毎回ランダム）
+// ステージ本来の相手に加えて、他ステージのキャラが1人乱入する（毎回ランダム）。
+// v33: キャラはステージから独立（s.char）。同じキャラが複数ステージに居るので、
+//   まず「キャラ」を等確率で選んでから、そのキャラのステージ定義を1つ選ぶ
+//   （＝出現率をキャラ単位で均す）。ステージ本来の相手と同キャラの乱入（ゴルドvsゴルド）は避ける
 function pickRoyaleRival(stage) {
-  const pool = STAGES.filter(s => s.id !== stage.id && CHARACTERS[s.id]);
-  return pool[Math.floor(Math.random() * pool.length)];
+  const keyOf = s => s.char || s.id;
+  const pool = STAGES.filter(s => keyOf(s) !== keyOf(stage) && CHARACTERS[keyOf(s)]);
+  const charKeys = [...new Set(pool.map(keyOf))];
+  const picked = charKeys[Math.floor(Math.random() * charKeys.length)];
+  const defs = pool.filter(s => keyOf(s) === picked);
+  return defs[Math.floor(Math.random() * defs.length)];
 }

@@ -182,15 +182,16 @@ function aiChooseSpell(g, p) {
 // invade型＝奪われたくない高価値の駐留地に／stop型＝敵が踏むと実入りの大きい高通行料の土地に。
 // 無駄打ち（価値の薄い土地への設置）はしない
 function aiPickTrapTarget(g, p, card) {
+  const sty = styleAI(p); // 戦型（v33）: 策士（trap>1）は安めの土地にも罠を張り巡らせる
   const cands = ownedLands(g, p.id).filter(t => !trapOf(g, t));
   if (cands.length === 0) return null;
   if (card.trap === "invade") {
-    const pool = cands.filter(t => t.creature && landValue(t) >= 240)
+    const pool = cands.filter(t => t.creature && landValue(t) >= 240 / sty.trap)
       .sort((a, b) => landValue(b) - landValue(a));
     return pool[0] || null;
   }
   const pool = cands.slice().sort((a, b) => tollOf(g, b) - tollOf(g, a));
-  if (card.id === "trap_toll") return tollOf(g, pool[0]) >= 100 ? pool[0] : null; // 二重徴収は高額地でこそ
+  if (card.id === "trap_toll") return tollOf(g, pool[0]) >= 100 / sty.trap ? pool[0] : null; // 二重徴収は高額地でこそ
   return pool[0] || null;
 }
 
@@ -372,14 +373,17 @@ function aiChooseDiscard(g, p) {
 // --- 空き地: 召喚するクリーチャーを選ぶ（しないなら null） ---
 function aiChooseSummon(g, p, tile) {
   const budget = p.magic - aiProf(p).reserve;
+  const sty = styleAI(p); // 戦型係数（v33・styles.js。戦型なしは全て1＝従来挙動）
   const candidates = aiHandCards(p).filter(c => c.type === "creature" && c.cost <= budget);
   if (candidates.length === 0) return null;
   // 属性一致 > 連鎖が伸びる属性 > 🤝絆が成立する > 安い、で採点
   const score = c => {
     let s = 0;
-    if (c.element === tile.element) s += 100 + chainCount(g, p.id, tile.element) * 30;
+    if (c.element === tile.element) s += 100 + chainCount(g, p.id, tile.element) * 30 * sty.chain;
     s += (c.st + c.hp) / 10;
     s -= c.cost / 10;
+    // 戦型の好み（v33）: 商人は施設・稼ぎ手を属性が合わないマスにも置く、など
+    if (sty.summonBonus) s += sty.summonBonus(c);
     // 🤝絆（v31）: 相方がすでに自領にいるなら、その1体を置くだけで絆が成立する＝高く評価する。
     // 逆に「これから相方を呼ぶ側」も少しだけ加点（次に相方を引いたとき繋がる布石）
     if (c.bond) {
@@ -423,7 +427,8 @@ function aiChooseInvade(g, p, tile) {
   combos.sort((a, b) => a.cost - b.cost);
   const best = combos[0];
   const gain = landValue(tile) + toll; // 奪う価値 + 払わずに済む通行料
-  if (gain > best.cost * aiProf(p).invadeRatio) {
+  // 戦型（v33）: 武人は踏み切りやすく（invade>1）、商人・城主は慎重（invade<1）
+  if (gain > best.cost * aiProf(p).invadeRatio / styleAI(p).invade) {
     // 弱い相手は「勝てる戦い」でも一定確率で見送る（＝冷徹に最善手を取り続けない）
     if (aiProf(p).hesitateProb && Math.random() < aiProf(p).hesitateProb) return null;
     return best;
@@ -443,8 +448,8 @@ function aiChooseDefenseItem(g, defender, tile, attCard, attItem) {
   const savers = items.filter(it => !it.eff.escape && !resolveBattle(attCard, tile, attItem, it.eff, bopts).attackerWins);
   if (savers.length > 0) {
     savers.sort((a, b) => a.cost - b.cost);
-    // 守る価値がある土地か（アイテム代 < 土地価値）
-    if (savers[0].cost < landValue(tile)) return savers[0].id;
+    // 守る価値がある土地か（アイテム代 < 土地価値）。城主（defItem>1）は割に合わなくても守る
+    if (savers[0].cost < landValue(tile) * styleAI(defender).defItem) return savers[0].id;
     return null;
   }
   // 💨煙玉（v19）: どうやっても守れないとき、高価なクリーチャーなら土地を明け渡して手札へ退避させる
@@ -486,7 +491,7 @@ function aiMarchFromTile(g, p, src) {
   if (card.ab.includes("immobile")) return null;
   const cost = marchCost(card);
   if (p.magic - aiProf(p).reserve < cost) return null;
-  let best = null, bestScore = 40; // 最低限のうまみが無ければ動かさない
+  let best = null, bestScore = 40 / styleAI(p).march; // 最低限のうまみが無ければ動かさない（武人は腰が軽い）
   for (const dst of marchTargets(g, p, src)) {
     let score = -cost;
     if (dst.owner === null) {
@@ -507,28 +512,30 @@ function aiMarchFromTile(g, p, src) {
 
 // --- 自分の土地: レベルアップするか ---
 function aiChooseLevelUp(g, p, tile) {
+  const sty = styleAI(p); // 戦型（v33）: 城主・商人は投資に積極的（level>1・singleLv+1）、疾走は消極的
   const cost = levelUpCost(tile);
-  if (!isFinite(cost) || cost > p.magic - aiProf(p).reserve * 2) return false;
+  if (!isFinite(cost) || cost > p.magic - Math.round(aiProf(p).reserve * 2 / sty.level)) return false;
   const chain = chainCount(g, p.id, tile.element);
   // 連鎖のある土地を優先的に伸ばす。単発土地もある程度は投資する
   if (chain >= 2) return true;
-  return tile.level < aiProf(p).levelSingle && p.magic > cost + 300;
+  return tile.level < aiProf(p).levelSingle + sty.singleLv && p.magic > cost + Math.round(300 / sty.level);
 }
 
 // --- 進む方向の選択（v24: 方向つき移動＝分岐でのみ呼ばれる）: moveOptions の候補ごとに「既定ルート近似」で
 //     stepsLeft 先まで歩いて評価し、最も実りのある方向のタイルidを返す ---
 function aiChooseDirection(g, p, tile, stepsLeft, prevId = null) {
   const opts = moveOptions(g, tile, prevId);
+  const sty = styleAI(p); // 戦型（v33）: 疾走は関門・周回を強く好む（lap>1）
   let best = opts[0].id, bestScore = -Infinity;
   for (const nb of opts) {
     let score = Math.random() * 20; // 同点時のゆらぎ
     let prev = tile.id, cur = nb.id;
     for (let s = 0; s < stepsLeft; s++) {
       const t = g.tiles[cur];
-      if (t.type === "GATE" && !p.gates.has(t.id)) score += RULES.gateBonus * 0.5;
+      if (t.type === "GATE" && !p.gates.has(t.id)) score += RULES.gateBonus * 0.5 * sty.lap;
       if (t.type === "CASTLE") {
         if (assetsOf(g, p) >= RULES.target) score += 5000;         // 勝ちに行く
-        else if (p.gates.size >= gatesNeededOf(g)) score += 150;   // 周回ボーナス
+        else if (p.gates.size >= gatesNeededOf(g)) score += 150 * sty.lap; // 周回ボーナス
       }
       if (s === stepsLeft - 1) score += aiLandingScore(g, p, t);
       else {
@@ -555,10 +562,13 @@ function aiLandingScore(g, p, t) {
       const wounded = g.tiles.filter(t => t.type === "LAND" && t.owner === p.id && t.creature && isWounded(t.creature)).length;
       return 30 + wounded * 25;
     }
-    case "LAND":
-      if (t.owner === null) return 60 + chainCount(g, p.id, t.element) * 30;
+    case "LAND": {
+      // 戦型（v33）: 商人・精霊使いは空き地を好み（settle>1）、疾走は敵地の通行料を強く嫌う（tollFear>1）
+      const sty = styleAI(p);
+      if (t.owner === null) return (60 + chainCount(g, p.id, t.element) * 30) * sty.settle;
       if (t.owner === p.id) return 30;
-      return -tollOf(g, t) * 0.8;
+      return -tollOf(g, t) * 0.8 * sty.tollFear;
+    }
     default: return 0;
   }
 }
@@ -784,7 +794,7 @@ function aiWantRenew(g, p) {
 function aiChoosePassLevelUp(g, p) {
   const cands = passLevelupSources(g, p).filter(t =>
     chainCount(g, p.id, t.element) >= 2 && t.level <= 3 &&
-    levelUpCost(t) <= p.magic - aiProf(p).reserve);
+    levelUpCost(t) <= p.magic - Math.round(aiProf(p).reserve / styleAI(p).level));
   if (cands.length === 0) return null;
   cands.sort((a, b) => (chainCount(g, p.id, b.element) - chainCount(g, p.id, a.element)) || (levelUpCost(a) - levelUpCost(b)));
   return cands[0];
@@ -827,7 +837,7 @@ function aiChooseMarch(g, p) {
   const sources = marchSources(g, p);
   if (sources.length === 0) return null;
 
-  let best = null, bestScore = 40; // 最低限のうまみが無ければ侵攻しない
+  let best = null, bestScore = 40 / styleAI(p).march; // 最低限のうまみが無ければ侵攻しない（武人は腰が軽い）
   for (const src of sources) {
     const card = CARD_BY_ID[src.creature.cardId];
     const cost = marchCost(card);

@@ -119,7 +119,7 @@ function buildBoard(stage) {
 const STAGES = [
   {
     id: "s1", name: "草原の環", icon: "🌿",
-    cpuName: "見習いセプター・ノア", ai: "novice",
+    cpuName: "見習いセプター・ノア", ai: "novice", char: "noa", // 戦型なし＝素のバランス型（チュートリアル役）
     desc: "ひとまわり20マスの小さな環。テンポよく周回ボーナスを稼ごう。火・木・地・水の4属性バランス型。",
     board: { rings: [{ w: 6, h: 6 }] },
     types: {
@@ -134,8 +134,8 @@ const STAGES = [
     rules: { target: 3000, maxRounds: 32 },
   },
   {
-    id: "s2", name: "火山峠ヴォルグ", icon: "🌋",
-    cpuName: "火術師ヴォルグ", ai: "easy", cpuBias: "fire",
+    id: "s2", name: "火山峠", icon: "🌋", // v33: ヴォルグ引退＝⚔武人ガイアスの入門戦に
+    cpuName: "剣闘士ガイアス", ai: "easy", cpuBias: "fire", char: "gaius", style: "brawler",
     desc: "横に長い22マスの峠道。火の土地が多く、🌋マグマに止まると80G失う。",
     board: { rings: [{ w: 7, h: 6 }] },
     types: {
@@ -152,7 +152,7 @@ const STAGES = [
   },
   {
     id: "s3", name: "蒼水の都メルディア", icon: "🌊",
-    cpuName: "水賢者マリナ", ai: "easy", cpuBias: "water",
+    cpuName: "大商人ゴルド", ai: "easy", cpuBias: "water", char: "gold", style: "merchant", // v33: マリナ引退＝港湾都市は💰商人の入門戦に
     desc: "24マスの環に「水路の橋」が架かる29マスの街。橋を渡れば対岸へ近道、中央には💎魔力の泉。",
     board: {
       rings: [{ w: 7, h: 7 }],
@@ -173,7 +173,7 @@ const STAGES = [
   },
   {
     id: "s4", name: "風走る高地", icon: "🍃",
-    cpuName: "疾風のセイル", ai: "normal", cpuBias: "wood",
+    cpuName: "疾風のセイル", ai: "normal", cpuBias: "wood", char: "sail", style: "runner",
     desc: "横一直線に伸びた24マスの細長い高原。💨疾風マスに乗れば一気に加速、城へ吹き戻されることも。",
     board: { rings: [{ w: 10, h: 4 }] },
     types: {
@@ -191,7 +191,7 @@ const STAGES = [
   },
   {
     id: "s5", name: "大地の霊峰ガンド", icon: "⛰️",
-    cpuName: "岩人ドルガ", ai: "normal", cpuBias: "earth",
+    cpuName: "岩人ドルガ", ai: "normal", cpuBias: "earth", char: "dolga", style: "warden",
     desc: "縦に高い24マスの霊峰＋中腹を横切る「尾根の近道」。尾根の奥には+300Gの地脈💎が眠る。",
     board: {
       rings: [{ w: 6, h: 8 }],
@@ -212,7 +212,7 @@ const STAGES = [
   },
   {
     id: "s6", name: "幻影回廊リノア", icon: "🌀",
-    cpuName: "幻術師リノア", ai: "normal",
+    cpuName: "幻術師リノア", ai: "normal", char: "linoa", style: "trickster",
     desc: "2つの環が🏰城で交差する31マスの「八の字」回廊。周回には両方の環を巡る必要がある。遠い角同士は🌀ワープで繋がる。",
     board: {
       rings: [
@@ -237,7 +237,7 @@ const STAGES = [
   },
   {
     id: "s7", name: "黄金市場ゴルド", icon: "💰",
-    cpuName: "大商人ゴルド", ai: "hard", cpuBias: "water",
+    cpuName: "大商人ゴルド", ai: "hard", cpuBias: "water", char: "gold", style: "merchant", // 本拠地＝💰商人の本気
     desc: "28マスの大きな市場をぐるりと回る。通行料は割高、💎魔力+250・⛩️関門+150の高額経済戦。",
     board: { rings: [{ w: 8, h: 8 }] },
     types: {
@@ -253,7 +253,7 @@ const STAGES = [
   },
   {
     id: "s8", name: "闘技場アレナ", icon: "⚔️",
-    cpuName: "剣闘士ガイアス", ai: "hard", cpuBias: "earth",
+    cpuName: "剣闘士ガイアス", ai: "hard", cpuBias: "earth", char: "gaius", style: "brawler", // 本拠地＝⚔武人の本気
     desc: "たった16マスの小さな闘技場。土地の奪い合いは避けられない。侵略ST+10＆土地の加護2倍。周回は関門2つでOK。",
     board: { rings: [{ w: 5, h: 5 }] },
     types: {
@@ -268,8 +268,8 @@ const STAGES = [
     rules: { target: 4000, maxRounds: 40, invaderSt: 10, landHpMult: 2 },
   },
   {
-    id: "s9", name: "雷鳴峡谷ズーム", icon: "⚡",
-    cpuName: "雷帝ズーム", ai: "hard", cpuBias: "water",
+    id: "s9", name: "雷鳴峡谷", icon: "⚡", // v33: ズーム引退＝速さのテーマは💨疾走セイルの本気戦へ
+    cpuName: "疾風のセイル", ai: "hard", cpuBias: "water", char: "sail", style: "runner",
     desc: "24マスの環を縦横の谷道が貫く33マスの大峡谷。中央の十字路で道を選べ。谷道には🌋マグマと💨疾風が待つ。",
     board: {
       rings: [{ w: 7, h: 7 }],
@@ -293,9 +293,9 @@ const STAGES = [
     rules: { target: 3200, maxRounds: 42 },
   },
   {
-    id: "s10", name: "魔王城ザルバド", icon: "👑",
-    cpuName: "魔王ザルバド", ai: "demon", cpuBias: "fire",
-    desc: "最終決戦。28マスの城郭の頂から🏰玉座へ一直線に堕ちる「地獄回廊」——ただし🌋マグマだらけ。魔王は初期魔力+200。",
+    id: "s10", name: "地獄回廊", icon: "🔥", // v33: ザルバド引退＝⚔武人の極「闘神ガイアス」の決戦場に
+    cpuName: "闘神ガイアス", ai: "demon", cpuBias: "fire", char: "gaius", style: "brawler",
+    desc: "最終決戦。28マスの城郭の頂から🏰玉座へ一直線に堕ちる「地獄回廊」——ただし🌋マグマだらけ。闘神は初期魔力+200。",
     board: {
       rings: [{ w: 9, h: 7 }],
       // 地獄回廊は「堕ちる」だけの➡一方通行（v23: 自由移動化に伴い明示）
@@ -324,7 +324,7 @@ const STAGES = [
     //   縦横に貫く「十字路」に改修＝道はすべて縦横のみ・中央は見た目どおりの四つ辻になった。
     //   縦の道は城(3,4)へ直結する近道でもある。
     id: "s11", name: "星辰の四つ辻", icon: "✴️",
-    cpuName: "星詠みステラ", ai: "normal",
+    cpuName: "星詠みステラ", ai: "normal", cpuBias: "wood", char: "stella", style: "spirit", // ステラ＝木の精霊使い（弱点は火）
     desc: "中央の環から四方へ小さな環が伸びる星型の盤面。⛩️関門4つは全てが必須通過点——全て巡って城へ戻れば1周。中央の環を縦横に貫く💎十字路は、城へ抜ける近道だ。",
     board: {
       rings: [
@@ -357,7 +357,7 @@ const STAGES = [
     // ★ v18追加: 三つ巴のために設計した大型盤面。外周の大環に「三本の腕」が刺さり、
     //   どの腕も中央のハブ(3,3)を経て城へ流れ込む＝終盤の凱旋レースが熱い。
     id: "s12", name: "円卓の三叉界", icon: "🎭",
-    cpuName: "円卓の盟主アルヴィス", ai: "hard",
+    cpuName: "幻術師リノア", ai: "hard", char: "linoa", style: "trickster", // v33: アルヴィス引退＝🃏策士の本気
     desc: "外周28マスの大環に、三方から城へ流れ込む「円卓の腕」が交わる40マスの決戦場。⚔三つ巴で真価を発揮する広さ——🎰運命と⛲泉が波乱を呼ぶ。",
     board: {
       rings: [{ w: 8, h: 8 }],
@@ -384,7 +384,7 @@ const STAGES = [
     // ★ v20（第二弾）: 「盤面が手狭」への回答その1＝横に広い46マスの大草原。
     //   経済・建造物・移動スペルがのびのび活きる通常大型ステージ。
     id: "s13", name: "隊商の大草原", icon: "🐪",
-    cpuName: "隊商長ラシード", ai: "normal", cpuBias: "wood",
+    cpuName: "星詠みステラ", ai: "hard", cpuBias: "wood", char: "stella", style: "spirit", // v33: ラシード引退＝🧚木の精霊使いの本気（豊かな草原）
     desc: "地平まで続く46マスの大草原を、隊商路が横切る。道は長く、土地は豊か——🏛建造物や⛏採掘でじっくり富を育てる者が勝つ。",
     board: {
       rings: [{ w: 12, h: 8 }],
@@ -407,7 +407,7 @@ const STAGES = [
     // ★ v20（第二弾）: 「盤面が手狭」への回答その2＝外環と内環を4本の歯車道で結ぶ56マスの機構都市。
     //   内環は近道だが出口は南と東のみ＝一方通行の歯車に巻き込まれる緊張感。
     id: "s14", name: "時計仕掛けの大環", icon: "⚙️",
-    cpuName: "機構技師ギアハルト", ai: "hard", cpuBias: "earth",
+    cpuName: "岩人ドルガ", ai: "hard", cpuBias: "earth", char: "dolga", style: "warden", // v33: ギアハルト引退＝🏰城主の本気
     desc: "巨大な外環と小さな内環が4本の歯車道で噛み合う56マスの機構都市。北と西から内環へ入り、南と東へ吐き出される——歯車の回りを読んだ者が時を制す。",
     board: {
       rings: [
@@ -440,7 +440,7 @@ const STAGES = [
     // ★ v20（第二弾ボスその1）: 四隅の玉座の間に4体の精霊王が眠る56マスの神殿。
     //   ⛩️関門4つは全て必須（gatesNeeded:"all"）。巫女は精霊王4体を固定エースに従える（cpuAces）。
     id: "s15", name: "五王の間", icon: "🕯️", boss: true, // boss:true＝対戦中のBGMがボス曲になる
-    cpuName: "精霊王の巫女セレスティア", ai: "hard",
+    cpuName: "精霊王の巫女セレスティア", ai: "hard", char: "celestia", style: "spirit", // 🧚精霊使いの極（4色・精霊王4体）
     cpuAces: ["ignisking", "sylvanking", "terraking", "nereusking"],
     desc: "中央の祭壇から四方の玉座の間へ渡る56マスの大神殿。⛩️4つの玉座はすべて必須通過点。巫女セレスティアは👑火・木・地・水の精霊王を従える——王たちの目覚めが遅いことを祈れ。",
     board: {
@@ -470,7 +470,7 @@ const STAGES = [
     // ★ v20（第二弾ボスその2・最終）: 時の十字が刻まれた51マスの玉座。
     //   時空王アイオーン自身が盤上に立つ（cpuAces=aeonking×2）。中央は🌋マグマに守られた💎時の泉。
     id: "s16", name: "時流の玉座", icon: "⏳", boss: true, // 最終決戦もボス曲
-    cpuName: "時空王アイオーン", ai: "demon", cpuBias: "water",
+    cpuName: "時空王アイオーン", ai: "demon", cpuBias: "water", char: "aeon", style: "runner", // 💨疾走の極（時流を支配する）
     cpuAces: ["aeonking", "aeonking"],
     desc: "第二弾の最終決戦。51マスの大環に「時の十字」が交わる時空の玉座——中央の💎大魔力は🌋時の奔流に守られている。時空王アイオーンは自らの写し身を従え、潤沢な資金で時を支配する。",
     board: {

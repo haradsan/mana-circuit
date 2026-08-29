@@ -1284,8 +1284,11 @@ function showStageSelect(opts = {}) {
     const rows = STAGES.map((s, i) => {
       const unlocked = versus || royale || sealed || isStageUnlocked(i); // 2人対戦・三つ巴・シールド戦は全ステージから選べる
       const cleared = !!prog.cleared[s.id];
+      // 戦型（v33）: 一覧の段階から相手の戦型を見せる＝デッキを選んで挑む駆け引きの入口
+      const st = (typeof styleOfStage === "function") ? styleOfStage(s) : null;
+      const stChip = st ? `（${st.icon}${st.label}）` : "";
       const desc = unlocked
-        ? `${versus ? "" : royale ? `VS ${esc(s.cpuName)} ＋ 乱入者1名｜` : `VS ${esc(s.cpuName)}｜`}${buildBoard(s).length}マス｜目標 ${((s.rules && s.rules.target) || 4000)}G<br>${esc(s.desc)}`
+        ? `${versus ? "" : royale ? `VS ${esc(s.cpuName)}${stChip} ＋ 乱入者1名｜` : `VS ${esc(s.cpuName)}${stChip}｜`}${buildBoard(s).length}マス｜目標 ${((s.rules && s.rules.target) || 4000)}G<br>${esc(s.desc)}`
         : "？？？（前のステージをクリアで解放）";
       return `<button class="stage-btn ${unlocked ? "" : "locked"}" data-idx="${i}" ${unlocked ? "" : "disabled"}>
         <span class="st-bg" aria-hidden="true">${unlocked ? s.icon : "🔒"}</span>
@@ -1375,7 +1378,9 @@ function showStageSelect(opts = {}) {
     // --- 出陣確認（相手の顔・盤面の規模・目標・ルールを見てから決める） ---
     function renderConfirm(idx) {
       const s = STAGES[idx];
-      const ch = (typeof CHARACTERS !== "undefined" && CHARACTERS[s.id]) || null;
+      const ch = (typeof CHARACTERS !== "undefined" && CHARACTERS[s.char || s.id]) || null; // v33: キャラはステージから独立
+      const st = (typeof styleOfStage === "function") ? styleOfStage(s) : null; // 戦型（v33）
+      const tier = (typeof AI_TIER_LABEL !== "undefined" && AI_TIER_LABEL[s.ai]) || "";
       const target = (s.rules && s.rules.target) || 4000;
       const facts = [
         versus ? `🎮 <b>${esc(versus.names[0])}</b> vs <b>${esc(versus.names[1])}</b>` : "",
@@ -1401,6 +1406,11 @@ function showStageSelect(opts = {}) {
           </div>
           <p class="sc-desc">${esc(s.desc)}</p>
           ${ch && !versus ? `<p class="sc-quote">「${esc((ch.lines.greet && ch.lines.greet[0]) || "")}」</p>` : ""}
+          ${st && !versus ? `<div class="sc-style" style="border-color:${ch ? ch.color + "66" : "var(--gold)"}">
+            <div class="sc-style-head">${st.icon} 戦型: <b>${st.label}</b>${tier ? `（${tier}）` : ""} — ${esc(st.plan)}</div>
+            <div class="sc-style-row">💪 得意: ${esc(st.strong)}</div>
+            <div class="sc-style-row sc-weak">🎯 弱点: ${esc(st.weak)}</div>
+          </div>` : ""}
           <div class="ss-chips sc-facts">${facts.filter(Boolean).map(t => `<span class="ss-chip">${t}</span>`).join("")}</div>
         </div>
         <div class="dlg-buttons">
