@@ -174,8 +174,27 @@ function aiChooseSpell(g, p) {
     // 雪辱の契約: 劣勢時のみ。首位が高額地を持っている＝踏まされる公算が高いときに保険として結ぶ
     if (c.spell === "mirrorpact" && isUnderdog(g, p) && !p.tollPayback &&
         ownedLands(g, opponentOf(g, p).id).some(t => tollOf(g, t) >= 120)) return id;
+    // ---------- 第三弾・追補第2「群像と一擲」（v34） ----------
+    // 運命のコイン: 劣勢か金欠のときに賭ける（🎰運命マス「運命の選択」のCPU判断と同じ思想）。
+    // 裏（-100G）を引いても行動不能にならないだけの残額は確保する
+    if (c.spell === "fortunecoin" && (isUnderdog(g, p) || p.magic <= 250) &&
+        p.magic >= c.cost + 100) return id;
+    if (c.spell === "repairwall" && aiPickRepairTarget(g, p)) return id;
+    if (c.spell === "recruit" && aiHandCards(p).filter(x => x.type === "creature").length <= 1 &&
+        p.deck.some(x => CARD_BY_ID[x].type === "creature")) return id;
+    if (c.spell === "comeback" && isUnderdog(g, p) && p.hand.length <= 4) return id;
+    // 収穫祭の宴: 関門がほぼ揃っている＝自分がまもなく周回するときに宴を開く
+    if (c.spell === "fx_harvest" && !activeFx(g, "harvest") &&
+        p.gates.size >= Math.max(1, gatesNeededOf(g) - 1)) return id;
   }
   return null;
+}
+
+// 🧱補修工事（v34）: Lv1の自領のうち、連鎖数の多い属性の土地を優先して底上げする
+function aiPickRepairTarget(g, p) {
+  const cands = ownedLands(g, p.id).filter(t => t.level === 1);
+  if (cands.length === 0) return null;
+  return cands.sort((a, b) => chainCount(g, p.id, b.element) - chainCount(g, p.id, a.element))[0];
 }
 
 // 🃏 伏せ札（v29）: 罠を仕掛ける自分の土地を選ぶ。

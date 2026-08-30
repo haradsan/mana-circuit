@@ -110,6 +110,7 @@ const BOARD_EVENTS = [
   { kind: "bud",       label: "🌸大地の恵み",     desc: "全員、ターン開始時に自軍クリーチャーHP+15回復" },
   { kind: "gale",      label: "💨追い風の季節",   desc: "全員のダイスの出目+1" },
   { kind: "goldrush",  label: "💎黄金の脈",       desc: "💎魔力マス・⛩関門ボーナスが2倍" },
+  { kind: "harvest",   label: "🌾収穫祭の季節",   desc: "全員の周回ボーナスが1.5倍" }, // v34: フックは lapBonus
 ];
 // いま発生している盤面イベント（owner:null の全体エフェクト）。ヘッダー表示・重複防止に使う
 function boardEventActive(g) {
@@ -248,9 +249,16 @@ const BOND_KIND_LABEL = {
   battle: "戦闘", grant: "能力", income: "収入", heal: "回復", dice: "移動", march: "侵攻", toll: "通行料",
 };
 // 相方が駐留している自分の土地（見つからなければ null）。excludeTileId は「自分自身のマス」を除くため
+// v34: bond.all（🎺トリオ絆）は with の相方「全員」が揃っているときだけ成立（返すのは筆頭の相方タイル）
 function bondPartnerTile(g, playerId, card, excludeTileId = null) {
   if (!g || !card || !card.bond || playerId === null || playerId === undefined) return null;
   const want = card.bond.with;
+  const findOf = id => g.tiles.find(t => t.type === "LAND" && t.owner === playerId && t.creature &&
+    t.id !== excludeTileId && t.creature.cardId === id && !creatureNulled(g, t.creature)) || null;
+  if (card.bond.all) {
+    const tiles = want.map(findOf);
+    return tiles.every(Boolean) ? tiles[0] : null;
+  }
   return g.tiles.find(t => t.type === "LAND" && t.owner === playerId && t.creature &&
     t.id !== excludeTileId && want.includes(t.creature.cardId) && !creatureNulled(g, t.creature)) || null;
 }
@@ -716,6 +724,8 @@ function lapBonus(g, p) {
     t.creature && CARD_BY_ID[t.creature.cardId].ab.includes("festival"));
   let gold = comeback ? Math.floor(base * 1.5) : base;
   if (festival) gold = Math.floor(gold * 1.5);
+  // 🌾収穫祭の宴（v34）: 2Rの間、全員の周回ボーナス1.5倍（スペル／盤面イベント共用のfx）
+  if (activeFx(g, "harvest")) gold = Math.floor(gold * 1.5);
   return { gold, comeback, festival };
 }
 

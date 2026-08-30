@@ -2070,6 +2070,65 @@ async function castSpellEffect(p, cardId) {
     pay();
     p.tollPayback = true;
     log(`⚖ ${p.name}は雪辱の契約を結んだ——次に支払う通行料は、屈辱ごと2倍にして取り返す！`, "warn");
+
+  // ---------- 第三弾・追補第2「群像と一擲」（v34） ----------
+  } else if (c.spell === "fortunecoin") {
+    // 🪙イチかバチかの賭け金策（🎰運命マス「運命の選択」のスペル版）
+    pay();
+    if (Math.random() < 0.5) {
+      p.magic += 300;
+      SFX.coin();
+      log(`🪙 ${p.name}の運命のコイン——表！ +300G`, "", { toast: true });
+    } else {
+      const loss = Math.min(100, p.magic);
+      p.magic -= loss;
+      log(`🪙 ${p.name}の運命のコイン——裏…… -${loss}G`, "warn");
+    }
+
+  } else if (c.spell === "repairwall") {
+    // 🧱Lv1の自分の土地をLv2へ（安価な底上げ。通常のレベルアップは140G）
+    const target = p.isCPU ? aiPickRepairTarget(G, p)
+      : await humanPickLand(ownedLands(G, p.id).filter(t => t.level === 1),
+        "🧱 補修工事 — 対象を選択", "自分の<b>Lv1</b>の土地1つをLv2にします",
+        "対象となる土地（自分のLv1）がありません");
+    if (!target) return false;
+    pay();
+    target.level = 2;
+    log(`🧱 ${p.name}の補修工事！ ${tileName(target)}がLv2になった`);
+
+  } else if (c.spell === "recruit") {
+    // 🪖山札の上からめくり、最初のクリーチャーを手札へ（残りは戻して切り直す）
+    if (!p.deck.some(id => CARD_BY_ID[id].type === "creature")) {
+      if (!p.isCPU) log("山札にクリーチャーがいません", "warn");
+      return false;
+    }
+    pay();
+    let found = null;
+    const flipped = [];
+    while (p.deck.length) {
+      const id = p.deck.shift();
+      if (CARD_BY_ID[id].type === "creature") { found = id; break; }
+      flipped.push(id);
+    }
+    p.deck.push(...flipped);
+    p.deck = shuffle(p.deck);
+    p.hand.push(found);
+    log(`🪖 ${p.name}の募兵！ 山札から${CARD_BY_ID[found].name}が馳せ参じた（${flipped.length}枚めくって切り直し）`);
+    await enforceHandLimit(p);
+
+  } else if (c.spell === "comeback") {
+    // ⚒️逆転: 2枚ドロー+100G（underdogゲートは冒頭の共通判定が通している）
+    pay();
+    const d1 = drawCard(G, p), d2 = drawCard(G, p);
+    p.magic += 100;
+    SFX.coin();
+    log(`⚒ ${p.name}の捲土重来！ カードを${(d1 ? 1 : 0) + (d2 ? 1 : 0)}枚引き、+100G`, "warn");
+    await enforceHandLimit(p);
+
+  } else if (c.spell === "fx_harvest") {
+    pay();
+    addFx(G, "harvest", p.id, OVERLAY_DURATION);
+    log(`🌾 ${p.name}の収穫祭の宴！ ${OVERLAY_DURATION}Rの間、全員の周回ボーナス1.5倍`);
   }
 
   SFX.spell();
@@ -2680,6 +2739,17 @@ async function enemyLandFlow(p, tile) {
       p.skipTurn = true;
       p.skipReason = "freeze";
       log(`💤 眠りの霧が${p.name}を包む——次のターンは1回休み！`, "warn");
+    } else if (tc.id === "trap_mimic") {
+      // 🎁ミミックの宝箱（v34）: 停止した敵の手札からランダムに1枚奪う
+      if (p.hand.length > 0) {
+        const idx = Math.floor(Math.random() * p.hand.length);
+        const stolen = p.hand.splice(idx, 1)[0];
+        owner.hand.push(stolen);
+        log(`🎁 宝箱が牙を剥いた——${p.name}の手札から${owner.isCPU ? "カード1枚" : CARD_BY_ID[stolen].name}を呑み込んだ！`, "warn");
+        await enforceHandLimit(owner);
+      } else {
+        log(`🎁 宝箱が牙を剥いたが、${p.name}の手札は空だった`);
+      }
     } else if (tc.id === "trap_gate") {
       log(`🌀 転送陣が開き、${p.name}は城へ強制送還された！（通行料は発生しない）`, "warn");
       p.pos = 0;
@@ -2857,6 +2927,7 @@ async function fightFor(p, tile, attCard, attItem, battleOpts = {}) {
       if (tc.id === "trap_pit") trapFx = { attTrapSt: -25, trapName: tc.name };
       else if (tc.id === "trap_bolt") trapFx = { attPreDmg: 30, trapName: tc.name };
       else if (tc.id === "trap_ambush") trapFx = { defTrapSt: 25, trapName: tc.name };
+      else if (tc.id === "trap_poison") trapFx = { attPreDmg: 15, attTrapSt: -15, trapName: tc.name }; // ☠️毒霧（v34）: 削り+弱体の複合
       await awardTrapper(defender);
       renderBoard(G);
     }
@@ -3621,6 +3692,16 @@ function showHelp() {
       　・<b>移動・侵攻</b>: 🦄幻獣騎の絆（ペガサス⇔ユニコーン）で<b>ダイスの出目+1</b>、🐉双竜の絆（森竜＋グリーンドラゴン）で<b>侵攻が2マス先まで届く</b><br>
       　・<b>通行料</b>: 🐙灯火の漁場（クラーケン＋灯台）でその土地の<b>通行料×1.4</b><br>
       相方は「自分の領地にいる」ことが条件（🌫無力化の霧を受けた相方は数えない）。デッキに2枚とも入れておく価値のある、組み合わせて遊ぶための仕掛け。<br>
+      <b>🎺 トリオ絆（v34）</b>: 絆の三枚看板。<b>相方「全員」が自分の領地に揃って初めて成立</b>する——
+      🥊<b>ゴブリン三兄弟</b>（長男・次男・三男が揃うと全員バトルでST+20/HP+20）／
+      💠<b>三精の環</b>（ホムラ・シズク・コノハで毎ターン+50G）／
+      🎻<b>旅の楽団</b>（リュート・笛・太鼓で毎ターン自軍全員HP+20）。
+      1枚1枚はモブ級の安カードだが、3枚揃えたときの効果はペア絆より一段大きい。<br>
+      <b>⚡ 第三弾・追補第2「群像と一擲」（v34・61種）</b>: 新能力なしの拡張——既存の仕組みの組み合わせで
+      「<b>個々はモブでも組み合わせで化ける</b>」（トリオ絆・群れ・応援）と「<b>イチかバチかの一点突破</b>」
+      （ベルセルク・ランページソード・🪙運命のコイン）を足した。各対戦相手の<b>戦型の看板カード</b>も増えている——
+      武人のランページソード、商人の黄金竜、策士の影武者と新しい伏せ札2種（🎁ミミックの宝箱・☠️毒霧の罠）、
+      城主の砦の巨人と🧱補修工事、疾走の忍と🌾収穫祭の宴、精霊使いの四大精霊（群れ）など。<br>
       <b>🎪 ウィークリールール</b>: 毎週月曜に切り替わる特殊ルール（通行料2倍・初期手札レジェンド保証など）。タイトルの「🎪 週替り」でON/OFF。
       ONで正規対戦に勝つと<b>ボーナスカード+${typeof WEEKLY_BONUS_CARDS !== "undefined" ? WEEKLY_BONUS_CARDS : 2}枚</b>（トレーニングには適用されない）。<br>
       <b>👥 情報窓（画面上部・3名分）</b>: 各プレイヤーの<b>順位・魔力・総資産（バー）・連鎖・関門・周回・山札</b>を

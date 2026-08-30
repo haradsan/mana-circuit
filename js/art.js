@@ -689,6 +689,66 @@ const CREATURE_ART = {
   pearlmaiden:   { arch: "mermaid" },                                        // 真珠の殻に守られた姫（不屈・守護）
   tideavenger:   { arch: "humanoid", o: { trident: 1 } },                    // 潮の恨みを返す復讐者（倍返し）
   vendettalord:  { arch: "humanoid", o: { sword: 1, horns: 1, wings: 1 } },  // 一太刀受けてから倍で返す復讐公
+  // ============================================================
+  // ⚡ 第三弾・追補第2「群像と一擲」（v34・クリーチャー47種）
+  // ============================================================
+  // 🎺トリオ絆
+  gobeldest:     { arch: "humanoid", o: { small: 1, horns: 1, club: 1 } },   // 棍棒を担ぐ長男
+  gobsecond:     { arch: "humanoid", o: { small: 1, horns: 1, axe: 1 } },    // 斧を振り回す次男
+  gobthird:      { arch: "humanoid", o: { small: 1, horns: 1 } },            // 要領のいい三男
+  flamelet:      { arch: "fairy",    o: { wings: false } },                  // 火の玉の小精霊
+  aqualet:       { arch: "fairy",    o: { wings: false } },                  // 雫の小精霊
+  leaflet:       { arch: "fairy" },                                          // 木の葉の小精霊
+  lutist:        { arch: "humanoid", o: { small: 1, leafhair: 1 } },         // リュートを爪弾く楽士
+  piper:         { arch: "humanoid", o: { small: 1, hat: 1 } },              // 笛の音を運ぶ楽士
+  drummer:       { arch: "humanoid", o: { small: 1, club: 1 } },             // 太鼓を打ち鳴らす楽士
+  // 🤝ペア絆
+  hayate:        { arch: "horse" },                                          // 風を追い越す早馬
+  postpigeon:    { arch: "bird" },                                           // 手紙を運ぶ白鳩
+  vaultgolem:    { arch: "golem",    o: { shine: 1 } },                      // 金庫を抱いた石人形
+  // 🪙一点突破
+  berserker:     { arch: "humanoid", o: { big: 1, axe: 1, horns: 1 } },      // 守りを捨てた狂戦士
+  bulletbat:     { arch: "bird" },                                           // 弾丸のように飛ぶ蝙蝠
+  ramrhino:      { arch: "beast",    o: { spikes: 1 } },                     // 一点突破の巨角
+  bombrock:      { arch: "golem",    o: { veins: 1 } },                      // 火脈の走る爆弾岩
+  doubledge:     { arch: "humanoid", o: { sword: 1 } },                      // 諸刃を握る剣豪
+  pistolshrimp:  { arch: "insect",   o: { spark: 1 } },                      // 水弾を撃つ大鋏
+  // ⚔️武人
+  blademaster:   { arch: "humanoid", o: { big: 1, sword: 1 } },              // 歴戦の傭兵隊長
+  duelknight:    { arch: "humanoid", o: { sword: 1, shield: 1 } },           // 決闘場の騎士
+  arenabeast:    { arch: "beast",    o: { spikes: 1 } },                     // 打たれて燃える闘技獣
+  twinfang:      { arch: "humanoid", o: { sword: 1 } },                      // 双剣の使い手
+  // 💰商人
+  caravanmouse:  { arch: "beast",    o: { cat: 1 } },                        // 荷を引く行商ネズミ
+  misergoblin:   { arch: "humanoid", o: { small: 1, horns: 1, beard: 1 } },  // 銭袋を離さない守銭奴
+  moneyfairy:    { arch: "mermaid" },                                        // 通行料を数える人魚
+  golddragon:    { arch: "dragon",   o: { big: 1 } },                        // 財宝の山に眠る黄金竜
+  windmill:      { arch: "tower",    o: { crane: 1 } },                      // 粉を挽く風車小屋
+  // 🃏策士
+  ikasamashi:    { arch: "humanoid", o: { hat: 1 } },                        // 袖に札を隠す詐欺師
+  kagemusha:     { arch: "humanoid", o: { hat: 1, sword: 1 } },              // 誰にでも化ける影武者
+  // 🏰城主
+  walllizard:    { arch: "lizard" },                                         // 壁に張り付く城壁蜥蜴
+  barricadebeetle: { arch: "insect" },                                       // 道を塞ぐ大甲虫
+  gateogre:      { arch: "humanoid", o: { big: 1, club: 1, horns: 1 } },     // 門前で仁王立ちする鬼
+  colossus:      { arch: "golem",    o: { big: 1, crown: 1 } },              // 砦そのものの巨人
+  // 💨疾走
+  shinobi:       { arch: "humanoid", o: { small: 1, sword: 1 } },            // 風のように駆ける忍
+  roadrunner:    { arch: "bird" },                                           // 走るほうが速い鳥
+  flyingfish:    { arch: "serpent",  o: { fins: 1 } },                       // 水面を滑空する飛魚
+  sparkswallow:  { arch: "bird",     o: { flame: 1 } },                      // 火の粉を散らす燕
+  // 🧚四大精霊（群れ）
+  flamma:        { arch: "fairy",    o: { wings: false } },                  // 焔の上位精霊
+  silva:         { arch: "fairy" },                                          // 木洩れ日の上位精霊
+  terralet:      { arch: "golem",    o: { blob: 1 } },                       // 土くれの上位精霊
+  unda:          { arch: "fairy",    o: { wings: false } },                  // 波間の上位精霊
+  // 🐺群れ・応援・分裂
+  starlingflock: { arch: "bird" },                                           // 群れて渦を描く椋鳥
+  sardineswarm:  { arch: "serpent",  o: { fins: 1 } },                       // 銀色にきらめく大群
+  antemperor:    { arch: "insect",   o: { spark: 1 } },                      // 億の兵を従える蟻帝
+  dondoko:       { arch: "humanoid", o: { small: 1, club: 1 } },             // 祭囃子で味方を鼓舞する精
+  sporeshroom:   { arch: "tree",     o: { small: 1, bloom: 1 } },            // 胞子で増える茸
+  rebelleader:   { arch: "humanoid", o: { big: 1, sword: 1 } },              // 旗を掲げる反逆の頭目
 };
 
 // ---------- アイテムの造形 ----------
@@ -826,6 +886,11 @@ const ITEM_ART = {
   wardrum: { arch: "banner" }, guardbell: { arch: "charm" },
   chargerod: { arch: "wand", o: { big: 1 } }, rebelplate: { arch: "armor" },
   grandbanner: { arch: "banner" }, trickdagger: { arch: "dagger", o: { dual: 1 } },
+  // ⚡第三弾・追補第2「群像と一擲」（v34）
+  rampagesword: { arch: "sword", o: { big: 1 } }, gloriousmace: { arch: "axe", o: { double: 1 } },
+  masterguide: { arch: "scroll" }, gateshield: { arch: "shield", o: { tower: 1 } },
+  foldingbow: { arch: "bow" }, megurishield: { arch: "shield", o: { shine: 1 } },
+  harmonyring: { arch: "charm" },
 };
 
 // ---------- 背景シーン（属性の魔力が満ちる空間＋魔法陣＋地面の影） ----------

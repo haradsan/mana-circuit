@@ -52,12 +52,12 @@ const STYLES = {
     weak: "経済が細く、高Lvの連鎖経済と長期戦に置いていかれる。守りも薄い",
     ai: { invade: 1.4, march: 1.5, chain: 0.85, level: 0.8, lap: 0.9, settle: 0.9, tollFear: 0.8, defItem: 0.9 },
     deck: {
-      creatureW: c => ((c.ab || []).some(a => ["assault", "first", "double", "pierce"].includes(a)) ? 2 : 0)
+      creatureW: c => ((c.ab || []).some(a => ["assault", "first", "double", "pierce", "weaponlove"].includes(a)) ? 2 : 0)
         + (c.st > c.hp ? 1 : 0),
-      spells: new Set(["fx_war", "quake", "grandquake", "meteor", "r_blaze", "snipe"]),
+      spells: new Set(["fx_war", "quake", "grandquake", "meteor", "r_blaze", "snipe", "recruit"]),
       itemW: c => (c.st >= 40 ? 2 : c.st >= 20 ? 1 : 0)
-        + ((c.grant || []).some(a => ["assault", "double", "pierce"].includes(a)) ? 2 : 0),
-      sig: () => ["wardrum", "warhammer", "fx_war"],
+        + ((c.grant || []).some(a => ["assault", "double", "pierce", "weaponlove"].includes(a)) ? 2 : 0),
+      sig: () => ["wardrum", "warhammer", "fx_war", "rampagesword"], // v34: 一点突破の大剣も看板に
     },
   },
   // 💰 商人: 連鎖・通行料・施設・不労所得の経済圧殺。戦いは避ける。
@@ -76,7 +76,8 @@ const STYLES = {
         + (c.cost <= 70 ? 1 : 0),
       spells: new Set(["treasure", "taxcollect", "goldrush", "veinfind", "fx_market", "fx_manastorm", "r_plenty", "r_harvest", "alchemy", "revelation"]),
       itemW: c => (c.drainMagic ? 2 : 0) + (c.escape ? 1 : 0),
-      sig: () => ["trademarket", "miningtower", "lighthouse", "fortunecat", "veinfind", "taxcollect"],
+      // v34: 招福の宝蔵（黄金竜⇔招き猫）と市場の金庫番（金庫番⇔交易市場）が看板同士で絆を結ぶ
+      sig: () => ["trademarket", "miningtower", "lighthouse", "fortunecat", "golddragon", "veinfind", "taxcollect"],
     },
   },
   // 🃏 策士: 罠・妨害・足止めで相手の計画を崩す。地力は低い。
@@ -90,11 +91,12 @@ const STYLES = {
       creatureW: c => ((c.ab || []).some(a => ["capture", "mimic", "escaper", "trapper", "dispel"].includes(a)) ? 2 : 0)
         + ((c.ab || []).includes("first") ? 1 : 0),
       spells: new Set(["trap_pit", "trap_bolt", "trap_ambush", "trap_snatch", "trap_toll", "trap_sleep", "trap_gate",
+        "trap_mimic", "trap_poison",
         "nullfog", "silencefog", "gust", "ensnare", "cursedice", "mudswamp", "steal", "whisper", "freeze",
         "trapsweep", "timereverse", "deport"]),
       itemW: c => ((c.trapSynergy || c.stDebuff || c.nullify || c.escape || c.noCrit) ? 2 : 0)
         + ((c.grant || []).includes("capture") ? 2 : 0),
-      sig: () => ["trap_snatch", "trap_toll", "nullfog", "trickdagger", "hazecloak"],
+      sig: () => ["trap_snatch", "trap_toll", "nullfog", "trickdagger", "hazecloak", "kagemusha"], // v34: 影武者は強豪の切り札
     },
   },
   // 🏰 城主: 少数の土地を高Lvに固め、防衛アイテムで守り切る。足は遅い。
@@ -107,10 +109,10 @@ const STYLES = {
     deck: {
       creatureW: c => ((c.ab || []).some(a => ["immobile", "guard", "armor", "bulwark", "physreflect", "physnull", "capture"].includes(a)) ? 2 : 0)
         + (c.hp >= c.st + 15 ? 1 : 0),
-      spells: new Set(["sanctuary", "fortify", "growth", "blessing", "regen", "fx_bud", "r_ages", "miragefield", "r_purify"]),
+      spells: new Set(["sanctuary", "fortify", "growth", "blessing", "regen", "fx_bud", "r_ages", "miragefield", "r_purify", "repairwall"]),
       itemW: c => (c.hp >= 40 ? 2 : c.hp >= 20 ? 1 : 0)
         + ((c.reflect || (c.grant || []).some(a => ["guard", "armor", "endure"].includes(a))) ? 2 : 0),
-      sig: () => ["fortify", "sanctuary", "towershield"],
+      sig: () => ["fortify", "sanctuary", "towershield", "colossus"], // v34: 砦の巨人は鬼神級の看板（コスト上限で自然に出し分け）
     },
   },
   // 💨 疾走: 周回とダイス操作で速攻資産。土地に執着しない。
@@ -124,9 +126,9 @@ const STYLES = {
       creatureW: c => ((c.ab || []).some(a => ["fly", "ranged"].includes(a)) ? 2 : 0)
         + (c.cost <= 60 ? 1 : 0),
       spells: new Set(["holyword", "hyperdice", "recall", "teleport", "leap", "transport", "r_time",
-        "drawmist", "revelation", "deport", "timereverse"]),
+        "drawmist", "revelation", "deport", "timereverse", "fx_harvest"]),
       itemW: c => (c.escape ? 1 : 0),
-      sig: () => ["hyperdice", "holyword", "recall", "pegasus", "unicorn"],
+      sig: () => ["hyperdice", "holyword", "recall", "pegasus", "unicorn", "shinobi"], // v34: 疾風の忍が加勢
     },
   },
   // 🧚 精霊使い: 単属性に染めた連鎖と土地の加護。相性の輪の天敵が明確な弱点。
@@ -140,7 +142,7 @@ const STYLES = {
       counts: [9, 3, 3, 3], // 主属性に寄せた単色デッキ（既定は 6/6/3/3）
       creatureW: null, // biasは counts で強制済み。群れ持ちを好む（下の creatureWB で bias を参照）
       creatureWB: (c, bias) => (bias && c.element === bias ? 2 : 0) + ((c.ab || []).includes("pack") ? 1 : 0),
-      spells: new Set(["eleshift", "growth", "blessing", "fx_goddess", "resonancecall", "r_ages", "regen", "fx_bud"]),
+      spells: new Set(["eleshift", "growth", "blessing", "fx_goddess", "resonancecall", "r_ages", "regen", "fx_bud", "recruit"]),
       itemW: c => (c.id === "elementalorb" ? 1 : 0),
       sig: bias => ["eleshift", "fx_goddess"].concat(
         bias ? [{ fire: "blessfire", wood: "blesswood", earth: "blessearth", water: "blesswater" }[bias] || null].filter(Boolean) : []),

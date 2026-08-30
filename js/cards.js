@@ -634,6 +634,85 @@ const CARD_DB = [
   { id: "trapsweep",  name: "トラップスウィープ", type: "spell", set: 3, cost: 55, spell: "trapsweep", rarity: "uncommon", icon: "🧹", desc: "敵の🃏伏せ札1枚を選んで公開し、不発のまま取り除く（中身を暴いて無力化——罠師の報酬も出ない）" },
   { id: "braceup",    name: "見切りの構え",       type: "spell", set: 3, cost: 50, spell: "braceup", noCpu: true, rarity: "uncommon", icon: "🛡️", desc: "次の自分のバトルで、自軍クリーチャーは不屈を得る（倒される一撃を一度だけHP1で耐える。侵略でも防衛でも）" },
   { id: "mirrorpact", name: "雪辱の契約",         type: "spell", set: 3, cost: 75, spell: "mirrorpact", underdog: true, rarity: "rare", icon: "⚖️", desc: "【逆転: 総資産が首位の80%未満のときのみ】次に通行料を支払ったとき、その2倍を支払先から奪い返す（1回きり——高額地帯こそ狩り場に変わる）" },
+  // ============================================================
+  // ⚡ 第三弾・追補第2「群像と一擲」（v34・61種）
+  // テーマ: ①🎺トリオ絆＝個々はモブでも3枚揃えば化ける ②🪙一点突破のギャンブル
+  //         ③🗡戦型（v33）の看板カード拡充＝キャラの個性がデッキから見える
+  // 新能力ゼロ＝既存の仕組みの組み合わせだけで作る（シンプルだが奥深く）
+  // ============================================================
+  // --- 🎺トリオ絆クリーチャー9種（3組）: 素のスタッツはコスト相応＝揃えたときの上振れが報酬 ---
+  { id: "gobeldest",  name: "ゴブリン三兄弟・長男", type: "creature", element: "earth", set: 3, cost: 45, st: 35, hp: 25, ab: [] },
+  { id: "gobsecond",  name: "ゴブリン三兄弟・次男", type: "creature", element: "fire",  set: 3, cost: 40, st: 30, hp: 20, ab: ["assault"] },
+  { id: "gobthird",   name: "ゴブリン三兄弟・三男", type: "creature", element: "wood",  set: 3, cost: 35, st: 20, hp: 25, ab: ["lucky"] },
+  { id: "flamelet",   name: "火の小精霊ホムラ",     type: "creature", element: "fire",  set: 3, cost: 30, st: 25, hp: 20, ab: [] },
+  { id: "aqualet",    name: "水の小精霊シズク",     type: "creature", element: "water", set: 3, cost: 30, st: 20, hp: 25, ab: [] },
+  { id: "leaflet",    name: "木の小精霊コノハ",     type: "creature", element: "wood",  set: 3, cost: 30, st: 20, hp: 25, ab: [] },
+  { id: "lutist",     name: "旅楽団のリュート弾き", type: "creature", element: "wood",  set: 3, cost: 35, st: 20, hp: 30, ab: [] },
+  { id: "piper",      name: "旅楽団の笛吹き",       type: "creature", element: "water", set: 3, cost: 35, st: 20, hp: 30, ab: [] },
+  { id: "drummer",    name: "旅楽団の太鼓叩き",     type: "creature", element: "fire",  set: 3, cost: 40, st: 25, hp: 30, ab: [] },
+  // --- 🤝ペア絆クリーチャー3種（相方は下のBOND_DEFS参照） ---
+  { id: "hayate",     name: "早馬ハヤテ",           type: "creature", element: "fire",  set: 3, cost: 55, st: 35, hp: 30, ab: ["fly"] },
+  { id: "postpigeon", name: "伝書鳩ポストピジョン", type: "creature", element: "wood",  set: 3, cost: 30, st: 15, hp: 25, ab: ["fly"] },
+  { id: "vaultgolem", name: "金庫番ゴーレム",       type: "creature", element: "earth", set: 3, cost: 55, st: 20, hp: 50, ab: ["guard"] },
+  // --- 🪙一点突破（ギャンブル）クリーチャー6種: 極端なスタッツ＝当たれば爆発、外せば紙 ---
+  { id: "berserker",  name: "ベルセルク",           type: "creature", element: "fire",  set: 3, cost: 65, st: 55, hp: 20, ab: [] },
+  { id: "bulletbat",  name: "弾丸コウモリバレットバット", type: "creature", element: "fire", set: 3, cost: 40, st: 35, hp: 10, ab: ["first"] },
+  { id: "ramrhino",   name: "突角のラムライノ",     type: "creature", element: "earth", set: 3, cost: 70, st: 50, hp: 30, ab: ["assault"], rarity: "uncommon" },
+  { id: "bombrock",   name: "爆弾岩ボムロック",     type: "creature", element: "earth", set: 3, cost: 50, st: 45, hp: 20, ab: [] },
+  { id: "doubledge",  name: "諸刃の剣豪ダブルエッジ", type: "creature", element: "water", set: 3, cost: 65, st: 50, hp: 25, ab: ["lastward"] },
+  { id: "pistolshrimp", name: "テッポウエビ",       type: "creature", element: "water", set: 3, cost: 70, st: 45, hp: 15, ab: ["ranged"], rarity: "uncommon" },
+  // --- ⚔️武人の看板4種 ---
+  { id: "blademaster", name: "傭兵隊長ブレイドマスター", type: "creature", element: "earth", set: 3, cost: 95, st: 55, hp: 40, ab: ["weaponlove"], rarity: "uncommon" },
+  { id: "duelknight",  name: "デュエルナイト",      type: "creature", element: "water", set: 3, cost: 90, st: 45, hp: 40, ab: ["first", "weaponlove"], rarity: "rare" },
+  { id: "arenabeast",  name: "闘技獣アリーナビースト", type: "creature", element: "earth", set: 3, cost: 80, st: 35, hp: 45, ab: ["payback"], rarity: "uncommon" },
+  { id: "twinfang",    name: "双剣士ツインファング", type: "creature", element: "water", set: 3, cost: 100, st: 50, hp: 45, ab: ["double"], rarity: "rare" },
+  // --- 💰商人の看板5種 ---
+  { id: "caravanmouse", name: "行商ネズミのキャラバンマウス", type: "creature", element: "wood", set: 3, cost: 40, st: 20, hp: 30, ab: ["mine"] },
+  { id: "misergoblin",  name: "守銭奴ゴブリン",     type: "creature", element: "earth", set: 3, cost: 50, st: 25, hp: 35, ab: ["mine"] },
+  { id: "moneyfairy",   name: "集金人魚コインマーメイド", type: "creature", element: "water", set: 3, cost: 50, st: 25, hp: 30, ab: ["merchant"], rarity: "uncommon" },
+  { id: "golddragon",   name: "黄金竜ゴールドドラゴン", type: "creature", element: "earth", set: 3, cost: 130, st: 55, hp: 65, ab: ["mine", "merchant"], rarity: "rare" },
+  { id: "windmill",     name: "風車の製粉所",       type: "creature", element: "wood", set: 3, cost: 55, st: 0, hp: 45, ab: ["immobile", "mine"], structure: true, mineGain: 20, rarity: "uncommon" },
+  // --- 🃏策士の看板2種 ---
+  { id: "ikasamashi",  name: "イカサマ師",          type: "creature", element: "neutral", set: 3, cost: 80, st: 35, hp: 40, ab: ["dispel", "lucky"], rarity: "rare" },
+  { id: "kagemusha",   name: "影武者カゲムシャ",    type: "creature", element: "neutral", set: 3, cost: 105, st: 20, hp: 45, ab: ["mimic", "first"], rarity: "legendary" },
+  // --- 🏰城主の看板4種 ---
+  { id: "walllizard",  name: "城壁蜥蜴ウォールリザード", type: "creature", element: "earth", set: 3, cost: 55, st: 15, hp: 60, ab: ["guard"] },
+  { id: "barricadebeetle", name: "バリケードビートル", type: "creature", element: "wood", set: 3, cost: 65, st: 20, hp: 55, ab: ["armor"] },
+  { id: "gateogre",    name: "門番オーガ",          type: "creature", element: "water", set: 3, cost: 85, st: 35, hp: 60, ab: ["guard", "capture"], rarity: "uncommon" },
+  { id: "colossus",    name: "砦の巨人コロッサス",  type: "creature", element: "earth", set: 3, cost: 145, st: 50, hp: 95, ab: ["immobile", "bulwark"], rarity: "legendary" },
+  // --- 💨疾走の看板4種 ---
+  { id: "shinobi",     name: "疾風の忍シノビ",      type: "creature", element: "neutral", set: 3, cost: 85, st: 40, hp: 35, ab: ["first", "fly"], rarity: "rare" },
+  { id: "roadrunner",  name: "ロードランナー",      type: "creature", element: "wood",  set: 3, cost: 50, st: 30, hp: 30, ab: ["fly"] },
+  { id: "flyingfish",  name: "フライングフィッシュ", type: "creature", element: "water", set: 3, cost: 40, st: 25, hp: 25, ab: ["fly"] },
+  { id: "sparkswallow", name: "火の粉燕スパークスワロー", type: "creature", element: "fire", set: 3, cost: 45, st: 30, hp: 25, ab: ["fly"] },
+  // --- 🧚精霊使いの看板: 四大精霊サイクル（群れ＝数を並べる単色デッキの芯） ---
+  { id: "flamma",      name: "焔精フランマ",        type: "creature", element: "fire",  set: 3, cost: 60, st: 35, hp: 30, ab: ["pack"], rarity: "uncommon" },
+  { id: "silva",       name: "木精シルワ",          type: "creature", element: "wood",  set: 3, cost: 60, st: 30, hp: 35, ab: ["pack"], rarity: "uncommon" },
+  { id: "terralet",    name: "地精テルラ",          type: "creature", element: "earth", set: 3, cost: 60, st: 30, hp: 35, ab: ["pack"], rarity: "uncommon" },
+  { id: "unda",        name: "水精ウンダ",          type: "creature", element: "water", set: 3, cost: 60, st: 30, hp: 35, ab: ["pack"], rarity: "uncommon" },
+  // --- 🐺群れ・応援・分裂＝「モブが組み合わせで強くなる」追加枠6種 ---
+  { id: "starlingflock", name: "ムクドリの大群",    type: "creature", element: "wood",  set: 3, cost: 50, st: 25, hp: 25, ab: ["pack", "fly"] },
+  { id: "sardineswarm",  name: "イワシの大群",      type: "creature", element: "water", set: 3, cost: 40, st: 20, hp: 30, ab: ["pack"] },
+  { id: "antemperor",    name: "蟻帝アントエンペラー", type: "creature", element: "earth", set: 3, cost: 105, st: 55, hp: 50, ab: ["pack"], rarity: "rare" },
+  { id: "dondoko",       name: "祭囃子の精ドンドコ", type: "creature", element: "fire",  set: 3, cost: 70, st: 20, hp: 45, ab: ["cheer"], rarity: "uncommon" },
+  { id: "sporeshroom",   name: "胞子茸スポアシュルーム", type: "creature", element: "wood", set: 3, cost: 70, st: 20, hp: 35, ab: ["split"], rarity: "rare" },
+  { id: "rebelleader",   name: "反逆の旗頭レベルリーダー", type: "creature", element: "neutral", set: 3, cost: 110, st: 40, hp: 45, ab: ["rebel", "cheer"], rarity: "rare" },
+  // --- アイテム7種 ---
+  { id: "rampagesword", name: "ランページソード",   type: "item", set: 3, cost: 70, st: 55, hp: -25, rarity: "uncommon", desc: "バトル時 ST+55 / HP-25（守りを捨てた一点突破の大剣。ベルセルクが握れば一撃必殺）" },
+  { id: "gloriousmace", name: "栄光の戦鎚グロリアス", type: "item", set: 3, cost: 110, st: 50, hp: 0, grant: ["lucky"], rarity: "rare", desc: "ST+50・豪運を得る（会心率25%——当たれば1.5倍の大博打鎚）" },
+  { id: "masterguide",  name: "達人の指南書",       type: "item", set: 3, cost: 85, st: 20, hp: 0, grant: ["weaponlove"], rarity: "rare", desc: "ST+20・武芸を得る（この書自体が武具＝読めばその場でST/HP+15も乗る）" },
+  { id: "gateshield",   name: "不落の城盾",         type: "item", set: 3, cost: 105, st: 0, hp: 40, grant: ["endure"], rarity: "rare", desc: "HP+40・不屈を得る（倒される一撃を一度だけHP1で耐える城門の大盾）" },
+  { id: "foldingbow",   name: "折りたたみ弩フォールディングボウ", type: "item", set: 3, cost: 60, st: 15, hp: 0, returning: true, rarity: "uncommon", desc: "ST+15。使い切りにならず、バトル後に手札へ戻る（装備者が倒された場合は戻らない）" },
+  { id: "megurishield", name: "巡り盾リターンシールド", type: "item", set: 3, cost: 65, st: 0, hp: 20, returning: true, rarity: "uncommon", desc: "HP+20。使い切りにならず、バトル後に手札へ戻る（装備者が倒された場合は戻らない）" },
+  { id: "harmonyring",  name: "調和の指輪ハーモニクス", type: "item", set: 3, cost: 70, st: 5, hp: 5, resonantSt: 4, resonantHp: 4, rarity: "rare", desc: "ST+5/HP+5。装備者の能力1つにつき さらにST+4/HP+4（上限+32）＝多芸の万能指輪" },
+  // --- スペル7種 ---
+  { id: "fortunecoin", name: "運命のコイン",  type: "spell", set: 3, cost: 55, spell: "fortunecoin", rarity: "uncommon", icon: "🪙", desc: "コインを投げる——表なら+300G、裏なら-100G（イチかバチかの賭け金策）" },
+  { id: "repairwall",  name: "補修工事",      type: "spell", set: 3, cost: 55, spell: "repairwall", rarity: "uncommon", icon: "🧱", desc: "自分のLv1の土地1つをLv2にする（通常140Gの投資を55Gで＝安価な底上げ）" },
+  { id: "recruit",     name: "募兵",          type: "spell", set: 3, cost: 50, spell: "recruit", rarity: "uncommon", icon: "🪖", desc: "山札の上からめくり、最初に出たクリーチャー1体を手札に加える（残りは山札に戻して切り直す）" },
+  { id: "comeback",    name: "捲土重来",      type: "spell", set: 3, cost: 60, spell: "comeback", underdog: true, rarity: "uncommon", icon: "⚒️", desc: "【逆転: 総資産が首位の80%未満のときのみ】カードを2枚引き、+100G（土を巻き上げて再び来る）" },
+  { id: "fx_harvest",  name: "収穫祭の宴",    type: "spell", set: 3, cost: 90, spell: "fx_harvest", fx: true, rarity: "rare", icon: "🌾", desc: "【盤面】2Rの間、全員の周回ボーナス1.5倍（周回の多い者ほど実りが大きい祭）" },
+  { id: "trap_mimic",  name: "ミミックの宝箱", type: "spell", set: 3, cost: 65, spell: "settrap", trap: "stop", rarity: "uncommon", icon: "🎁", desc: "【伏せ札】自分の土地に設置。敵が停止した時に発動——宝箱が牙を剥き、その敵の手札から1枚奪う" },
+  { id: "trap_poison", name: "毒霧の罠",      type: "spell", set: 3, cost: 60, spell: "settrap", trap: "invade", rarity: "uncommon", icon: "☠️", desc: "【伏せ札】自分の土地に設置。侵略・侵攻された時に発動——毒の霧でバトルの前に侵略者へ15ダメージ＋ST-15" },
 ];
 
 const CARD_BY_ID = Object.fromEntries(CARD_DB.map(c => [c.id, c]));
@@ -699,6 +778,38 @@ const BOND_DEFS = [
   // --- 通行料の絆 ---
   { id: "kraken", with: ["lighthouse"], name: "灯火の漁場", kind: "toll", mult: 1.4,
     desc: "灯台が自領にいると、光に誘われた船が触腕に落ちる——この土地の通行料 ×1.4" },
+  // ============================================================
+  // 🎺 トリオ絆（v34・all:true）: 相方「全員」が自領に揃って初めて成立する三枚看板。
+  // 個々はモブ級の安カードだが、3枚揃えたときの効果はペア絆より一段大きい。
+  // battle系は3体それぞれに乗り、income/heal系は絆名の重複排除で1回だけ数える（従来どおり）
+  // ============================================================
+  { id: "gobeldest", with: ["gobsecond", "gobthird"], all: true, name: "ゴブリン三兄弟", kind: "battle", st: 20, hp: 20,
+    desc: "次男・三男が自領に揃うと、兄弟喧嘩で鍛えた連携が火を噴く——バトルで ST+20/HP+20" },
+  { id: "gobsecond", with: ["gobeldest", "gobthird"], all: true, name: "ゴブリン三兄弟", kind: "battle", st: 20, hp: 20,
+    desc: "長男・三男が自領に揃うと、兄弟喧嘩で鍛えた連携が火を噴く——バトルで ST+20/HP+20" },
+  { id: "gobthird", with: ["gobeldest", "gobsecond"], all: true, name: "ゴブリン三兄弟", kind: "battle", st: 20, hp: 20,
+    desc: "長男・次男が自領に揃うと、兄弟喧嘩で鍛えた連携が火を噴く——バトルで ST+20/HP+20" },
+  { id: "flamelet", with: ["aqualet", "leaflet"], all: true, name: "三精の環", kind: "income", gold: 50,
+    desc: "シズク・コノハと三精が自領に揃うと、環から魔力が湧く——自分のターン開始ごとに +50G" },
+  { id: "aqualet", with: ["flamelet", "leaflet"], all: true, name: "三精の環", kind: "income", gold: 50,
+    desc: "ホムラ・コノハと三精が自領に揃うと、環から魔力が湧く——自分のターン開始ごとに +50G" },
+  { id: "leaflet", with: ["flamelet", "aqualet"], all: true, name: "三精の環", kind: "income", gold: 50,
+    desc: "ホムラ・シズクと三精が自領に揃うと、環から魔力が湧く——自分のターン開始ごとに +50G" },
+  { id: "lutist", with: ["piper", "drummer"], all: true, name: "旅の楽団", kind: "heal", hp: 20,
+    desc: "笛と太鼓が自領に揃うと、演奏が完成する——自分のターン開始ごとに自軍全員 HP+20" },
+  { id: "piper", with: ["lutist", "drummer"], all: true, name: "旅の楽団", kind: "heal", hp: 20,
+    desc: "リュートと太鼓が自領に揃うと、演奏が完成する——自分のターン開始ごとに自軍全員 HP+20" },
+  { id: "drummer", with: ["lutist", "piper"], all: true, name: "旅の楽団", kind: "heal", hp: 20,
+    desc: "リュートと笛が自領に揃うと、演奏が完成する——自分のターン開始ごとに自軍全員 HP+20" },
+  // --- ペア絆の追加（v34） ---
+  { id: "hayate", with: ["postpigeon"], name: "早駆けの絆", kind: "dice", plus: 1,
+    desc: "伝書鳩が自領にいると、先触れを追って駆ける——自分のダイスの出目 +1" },
+  { id: "postpigeon", with: ["hayate"], name: "早駆けの絆", kind: "dice", plus: 1,
+    desc: "早馬ハヤテが自領にいると、蹄音を追って飛ぶ——自分のダイスの出目 +1" },
+  { id: "vaultgolem", with: ["trademarket"], name: "市場の金庫番", kind: "income", gold: 30,
+    desc: "交易市場が自領にいると、売上金を勘定して納める——自分のターン開始ごとに +30G" },
+  { id: "golddragon", with: ["fortunecat"], name: "招福の宝蔵", kind: "income", gold: 40,
+    desc: "招き猫が自領にいると、宝の山がさらに呼び込む——自分のターン開始ごとに +40G" },
 ];
 // CARD_DB へ流し込み（定義の不備はここで必ず気づけるようにコンソールへ出す）
 BOND_DEFS.forEach(b => {
@@ -785,6 +896,13 @@ function buildDeck(biasElement = null, maxCost = Infinity, style = null) {
       .filter(pc => pc && pc.type === "creature" &&
         LAND_ELEMENTS.includes(pc.element) && pc.cost <= maxCost && !deck.includes(pc.id));
     if (!partners.length) continue;
+    // 🎺トリオ絆（v34・all:true）: 全員揃わないと光らないので、足りない相方を全部差し込む
+    // （揃った3枚は互いのループでは partners が空になり二重差し込みは起きない）
+    if (c.bond.all) {
+      const slots = shuffle([...Array(creatureSlots).keys()].filter(s => s !== i));
+      partners.forEach((pc, k) => { if (k < slots.length) deck[slots[k]] = pc.id; });
+      continue;
+    }
     // 別のスロット（絆持ち本人以外）を1つ選んで相方に差し替える
     const slot = Math.floor(Math.random() * creatureSlots);
     if (slot === i) continue;
