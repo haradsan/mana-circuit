@@ -242,7 +242,10 @@ function showMatchIntro(g) {
   return showDialog({
     title: cpus.length > 1 ? "⚔ 三つ巴の対戦相手" : "⚔ 対戦相手",
     body: `<div class="vs-wrap">${blocks}</div>
-      <p class="vs-stage">${g.stage.icon} ${esc(g.stage.name)} ── 目標資産 <b>${RULES.target}G</b> を成して🏰城へ凱旋せよ</p>`,
+      <p class="vs-stage">${g.stage.icon} ${esc(g.stage.name)} ── 目標資産 <b>${RULES.target}G</b> を成して🏰城へ凱旋せよ</p>` +
+      // v35: 🎯この対戦の挑戦（missions.js）。開戦前に「今回はこれを狙う」を見せる
+      (g.missions && typeof missionListHTML === "function"
+        ? `<div class="vs-missions"><div class="cd-abs-t">🎯 今回の挑戦（達成1つにつき決着後にカード1枚）</div>${missionListHTML(g)}</div>` : ""),
     buttons,
   });
 }

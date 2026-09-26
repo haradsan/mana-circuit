@@ -30,6 +30,8 @@ async function startGame(stageIdx, opts = {}) {
     RULES.target = Math.round(RULES.target * 0.6 / 100) * 100;
     RULES.maxRounds = Math.min(RULES.maxRounds, 24);
   }
+  // v35: 🎯この対戦の挑戦を配る（人間が1人のときだけ）。目標値は目標資産から決めるので、トレーニングの短縮の後で
+  if (typeof missionsSetup === "function") missionsSetup(G);
   AI_PROFILE = resolveAIProfile(G.stage.ai); // ステージ既定の実効プロファイル（各CPUは p.aiProfile を優先）
   // v31: マス目の形・マス間の余白・道の描き方をステージごとに切り替え、
   //      viewBox には駒がはみ出すぶんの余白（BOARD_PAD）を確保する（端のマスの駒が切れないように）
@@ -67,6 +69,9 @@ async function startGame(stageIdx, opts = {}) {
   if (!G.hotseat && !G.players[0].isCPU) {
     setMessage("カードが配られた——");
     await handIntro(G);
+  }
+  if (G.missions) {
+    log(`🎯 今回の挑戦: ${G.missions.list.map(m => { const d = missionDef(m.id); return `${d.icon}${d.label}（${d.desc(m.v)}）`; }).join("／")}`, "sys", { toast: true });
   }
   gameLoop();
 }
@@ -111,8 +116,8 @@ async function showGameOver() {
     await playVictoryFx("VICTORY!", `🏆 ${G.winner.name}の勝利！`);
     const res = await showDialog({
       title: `🏆 ${G.winner.id === 0 ? "🔵" : "🔴"} ${G.winner.name}の勝ち！`,
-      body: `🔵 ${esc(G.players[0].name)}: 総資産 ${assetsOf(G, G.players[0])}G ／ 🔴 ${esc(G.players[1].name)}: 総資産 ${assetsOf(G, G.players[1])}G` +
-        `<br><br>（2人対戦では報酬カード・ステージ進行度は変化しません）`,
+      body: resultBoardHTML(G) + missionResultHTML(G) + // v35: 成績表＋🎯挑戦
+        `（2人対戦では報酬カード・ステージ進行度は変化しません）`,
       buttons: [
         { label: "🔁 同じ組み合わせでもう一度", value: "retry", primary: true },
         { label: "🗺 メニューへ", value: "menu" },
@@ -144,10 +149,11 @@ async function showGameOver() {
       const pack = grantWinCards(REWARD_WIN, set);
       if (pack) { gained = pack.length; await showPackReveal(pack, "🏆 シールド戦 勝利報酬！", `カードを${pack.length}枚手に入れた！（こちらはコレクションに入ります）`); }
     }
+    await grantMissionRewards(G); // v35: 🎯挑戦の達成ボーナス（勝敗に関係なく）
     const res = await showDialog({
       title: youWin ? "🏆 シールド戦を制覇！" : "💀 敗北…",
-      body: `${esc(G.winner.name)}の勝ち！ あなた ${assetsOf(G, G.players[0])}G ／ ${esc(G.players[1].name)} ${assetsOf(G, G.players[1])}G` +
-        (gained ? `<br><br>💚 カードを${gained}枚獲得しました` : "") + quoteHtml +
+      body: resultBoardHTML(G) + missionResultHTML(G) + // v35: 成績表＋🎯挑戦
+        (gained ? `💚 カードを${gained}枚獲得しました` : "") + quoteHtml +
         `<br><br>（シールド戦の開封プールは使い捨て・進行度は変化しません）`,
       buttons: [
         { label: "🔁 同じデッキでもう一度", value: "retry", primary: true },
@@ -162,9 +168,6 @@ async function showGameOver() {
   // 三つ巴: 勝てばカードを獲得（進行度は変化しない）。順位表を表示
   if (G.royale) {
     if (youWin) G.rewardSet = await chooseRewardSet();
-    const ranked = G.players.slice().sort((a, b) => assetsOf(G, b) - assetsOf(G, a));
-    const standings = ranked.map((p, i) =>
-      `${["🥇", "🥈", "🥉"][i]} ${P_ICONS[p.id]} ${esc(p.name)}: 総資産 ${assetsOf(G, p)}G`).join("<br>");
     setMessage(youWin ? "🏆 三つ巴を制覇！" : `💀 ${G.winner.name}の勝利…`);
     if (youWin) await playVictoryFx("VICTORY!", "⚔ 三つ巴を制覇！");
     let gained = 0;
@@ -181,10 +184,11 @@ async function showGameOver() {
       await showPackReveal(bonus, "🎪 ウィークリーボーナス！",
         `今週のルール「${G.weekly.name}」適用中の勝利ボーナス（+${bonus.length}枚）！`);
     }
+    await grantMissionRewards(G, G.rewardSet || null); // v35
     const res = await showDialog({
       title: youWin ? "🏆 三つ巴を制覇！" : "💀 敗北…",
-      body: `${esc(G.winner.name)}の勝ち！<br><br>${standings}` +
-        (gained ? `<br><br>💚 カードを${gained}枚獲得しました` : "") + quoteHtml,
+      body: resultBoardHTML(G) + missionResultHTML(G) + // v35: 成績表＋🎯挑戦（三つ巴の3人ぶん）
+        (gained ? `💚 カードを${gained}枚獲得しました` : "") + quoteHtml,
       buttons: [
         { label: "🔁 もう一度（乱入者は毎回ランダム）", value: "retry", primary: true },
         { label: "🗺 メニューへ", value: "menu" },
@@ -212,10 +216,11 @@ async function showGameOver() {
     } else if (!youWin && typeof resetTrainingStreak === "function") {
       resetTrainingStreak(); // 敗北で連勝リセット
     }
+    await grantMissionRewards(G); // v35
     const res = await showDialog({
       title: youWin ? "🎯 練習に勝利！" : "🎯 練習終了",
-      body: `${esc(G.winner.name)}の勝ち！ あなた ${assetsOf(G, G.players[0])}G ／ ${esc(G.players[1].name)} ${assetsOf(G, G.players[1])}G` +
-        (youWin ? `<br><br>💚 カードを${gained}枚獲得しました（📚アルバムで確認できます）` +
+      body: resultBoardHTML(G) + missionResultHTML(G) + // v35: 成績表＋🎯挑戦
+        (youWin ? `💚 カードを${gained}枚獲得しました（📚アルバムで確認できます）` +
           (streak >= 1 ? `<br>🔥 トレーニング${streak}連勝中！ ${TRAINING_STREAK_FOR_RARE}連勝からは毎回<b>レア以上1枚保証</b>` : "")
         : `<br><br>🔥 連勝は途切れた…（トレーニングの連勝ボーナスはリセット）`),
       buttons: [
@@ -251,6 +256,8 @@ async function showGameOver() {
       `今週のルール「${G.weekly.name}」適用中の勝利ボーナス（+${bonus.length}枚）！`);
   }
 
+  await grantMissionRewards(G, youWin ? rewardSet : null); // v35: 🎯挑戦の達成ボーナス（勝敗に関係なく）
+
   const buttons = [];
   if (youWin && hasNext) buttons.push({ label: `▶ 次のステージへ（${STAGES[nextIdx].name}）`, value: "next", primary: true });
   buttons.push({ label: "🔁 このステージをもう一度", value: "retry", primary: !(youWin && hasNext) });
@@ -258,7 +265,7 @@ async function showGameOver() {
 
   const res = await showDialog({
     title: youWin ? `🏆 STAGE ${G.stageIdx + 1} クリア！` : "💀 敗北…",
-    body: `${esc(G.winner.name)}の勝ち！<br>あなたの総資産: ${assetsOf(G, G.players[0])}G ／ ${esc(G.players[1].name)}: ${assetsOf(G, G.players[1])}G` +
+    body: resultBoardHTML(G) + missionResultHTML(G) + // v35: 成績表＋🎯挑戦
       (firstClear && hasNext ? `<br><br>🎉 <b>STAGE ${nextIdx + 1}「${esc(STAGES[nextIdx].name)}」が解放された！</b>` : "") +
       (youWin && !hasNext ? `<br><br>👑 <b>全ステージ制覇！ あなたは真のセプターだ！</b>` : "") +
       quoteHtml,
@@ -361,10 +368,11 @@ async function playTurn(p) {
   setMessage(`${p.name}のターン（ラウンド${G.round}${G.climax ? "・⚔決戦の刻" : ""}）`);
   turnStartTick(p); // 第二弾（v19）: 🌱成長・⛏採掘・🌿癒しの庭のターン開始処理
   renderAll(G);
+  await turnBanner(G, p); // v35: 手番の帯（ROUND ○ — ○○のターン）
   if (p.isCPU) {
     // ときどきキャラがつぶやく（存在感の演出・非ブロッキング）
     if (Math.random() < 0.22 && typeof cpuSay === "function") cpuSay(p, "taunt");
-    await sleep(CPU_WAIT);
+    await sleep(CPU_WAIT * 0.35); // 帯のぶん待ち時間は短く（テンポを落とさない）
   }
 
   // 1. ドロー（人間は山札からカードがめくれて手札へ吸い込まれる演出つき）
@@ -487,6 +495,7 @@ function boardEventTick(g) {
   addFx(g, ev.kind, null, BOARD_EVENT_ROUNDS);
   SFX.spell();
   log(`🗺 盤面イベント発生！ ${ev.label} — ${ev.desc}（${BOARD_EVENT_ROUNDS}ラウンドの間）`, "warn");
+  bigAnnounce(`🗺 ${ev.label}`, `${ev.desc}（${BOARD_EVENT_ROUNDS}ラウンド）`, "event"); // v35: 全員に関わる出来事は画面中央に大きく
   renderAll(g);
 }
 
@@ -579,6 +588,7 @@ function checkClimax() {
   SFX.spell();
   log(`⚔⚔⚔ 決戦の刻！ ${reach ? "目標資産の8割に迫る者が現れた" : "後半戦に突入"}——ここからは全員ドロー+1枚、` +
     `劣勢者（首位の80%未満）はスペル25%OFF、⚔️決戦スペルが解禁される！`, "warn");
+  bigAnnounce("⚔ 決戦の刻", "全員ドロー+1・劣勢者はスペル25%OFF・決戦スペル解禁", "climax"); // v35
   if (typeof BGM !== "undefined" && BGM.setTrack && BGM.track !== "boss") BGM.setTrack("boss");
   renderAll(G);
 }
@@ -588,6 +598,7 @@ function checkClimax() {
 function notifyReach() {
   if (G.over) return;
   checkClimax(); // ⚔️決戦の刻の発動チェック（v29・リーチとラウンド進行の両方をここで拾う）
+  if (typeof checkMissions === "function") checkMissions(G); // v35: 🎯挑戦の達成チェック
   G.players.forEach(p => {
     const reached = assetsOf(G, p) >= RULES.target;
     if (reached && !p.reached) {
@@ -754,6 +765,7 @@ async function castSpell(p, cardId) {
   beginLogToast();
   try {
     const ok = await castSpellEffect(p, cardId);
+    if (ok && typeof missionSpell === "function") missionSpell(G, p); // v35: 🎯挑戦の成績
     // ⚡共鳴（resonance・v29）: スペルの行使に成功するたび、盤上の自軍の共鳴クリーチャーが育つ
     if (ok && !G.over) resonanceTick(p);
     return ok;
@@ -2196,8 +2208,12 @@ async function movePlayer(p, steps) {
     p.cameFrom = cur.id; // 進行方向を記憶（次のターンもこの方向を保つ）
     p.pos = nextId;
     p.lastPath.push(p.pos);
+    // v35: 駒は前のマスから弧を描いて跳ねる（着地してから盤面を更新）。拡大中はカメラが駒を追う
+    ensureTileVisible(G.tiles[nextId]);
+    if (typeof SFX.hop === "function") SFX.hop();
+    await hopToken(G, p, cur.id, nextId);
     renderBoard(G);
-    await sleep(170);
+    await sleep(60);
     const tile = G.tiles[p.pos];
     if (tile.type === "GATE" && !p.gates.has(tile.id)) {
       p.gates.add(tile.id);
@@ -2206,6 +2222,7 @@ async function movePlayer(p, steps) {
       const gateGain = RULES.gateBonus * (rush ? 2 : 1);
       p.magic += gateGain;
       SFX.coin();
+      fxFloat(tile, `⛩+${gateGain}G`, "gain");
       log(`⛩️ ${p.name}は関門を通過 +${gateGain}G${rush ? "（💎黄金の脈で2倍！）" : ""}`);
       renderPanels(G);
     }
@@ -2255,6 +2272,7 @@ function arriveCastle(g, p, exact = true) {
     SFX.coin();
     if (bonus.comeback) log(`🔥 逆転の風が吹く！ 劣勢ボーナス1.5倍`, "warn");
     healAllCreatures(g, p); // 周回ボーナス＝魔力＋全回復（城の通過・停止どちらでも）
+    fxRing(g.tiles[0], "#ffd76a"); fxFloat(g.tiles[0], `周回！+${bonus.gold}G`, "gain", { scale: 1.15 }); // v35
     log(`🏰 ${p.name}は周回達成！ +${bonus.gold}G — 自軍クリーチャーのHPが全回復！`, "", { toast: true });
     if (typeof cpuSay === "function") cpuSay(p, "lap");
     result = "lap";
@@ -2294,6 +2312,7 @@ async function tileAction(p, tile) {
         got++;
         if (!p.isCPU) await animateDraw(CARD_BY_ID[d]);
       }
+      if (got) fxFloat(tile, `🎴+${got}`, "magic"); // v35
       log(`🎴 ${p.name}はカードマスで${got ? `${got}枚ドロー${n === 2 ? "（🏪市場開放）" : ""}` : "…山札切れ"}`);
       await enforceHandLimit(p);
       return false;
@@ -2302,6 +2321,7 @@ async function tileAction(p, tile) {
       // 💎黄金の脈（v32・盤面イベント）: 魔力マスの実入り2倍
       const rush = activeFx(G, "goldrush");
       const gain = RULES.magicTileG * (rush ? 2 : 1);
+      fxFloat(tile, `+${gain}G`, "gain"); // v35
       p.magic += gain;
       SFX.coin();
       log(`💎 ${p.name}は魔力マスで+${gain}G${rush ? "（💎黄金の脈で2倍！）" : ""}`);
@@ -2323,6 +2343,7 @@ async function tileAction(p, tile) {
       p.magic -= loss;
       SFX.hit();
       log(`🌋 ${p.name}はマグマで足止め… -${loss}G`, "warn");
+      if (loss) fxFloat(tile, `-${loss}G`, "loss"); // v35
       return false;
     }
     case "BOOST": {
@@ -2340,6 +2361,8 @@ async function tileAction(p, tile) {
       SFX.dice();
       log(`🎰 ${p.name}は運命のルーレットを回した——`);
       await sleep(550);
+      // v35: 結果で魔力が動いたら、その額をマスの上に浮かべる（どの結果でも同じ仕組みで出す）
+      const fortuneBefore = p.magic;
       const r = Math.random();
       if (r < 0.10) {
         p.magic += 300; SFX.coin();
@@ -2418,6 +2441,8 @@ async function tileAction(p, tile) {
         p.magic -= loss; SFX.hit();
         log(`💨 はずれ… -${loss}G`, "warn");
       }
+      const fortuneGain = p.magic - fortuneBefore;
+      if (fortuneGain) fxFloat(tile, `${fortuneGain > 0 ? "+" : ""}${fortuneGain}G`, fortuneGain > 0 ? "gain" : "loss");
       renderPanels(G);
       return false;
     }
@@ -2428,6 +2453,7 @@ async function tileAction(p, tile) {
       healAllCreatures(G, p);
       p.magic += 60;
       SFX.coin();
+      fxFloat(tile, "⛲+60G", "good"); // v35
       log(`⛲ ${p.name}は癒しの泉で安らいだ +60G${wounded ? `・負傷クリーチャー${wounded}体が全回復！` : ""}`, "", { toast: true });
       return false;
     }
@@ -2611,6 +2637,7 @@ async function summonFlow(p, tile) {
   tile.creature = { cardId, hp: c.hp };
   SFX.summon();
   log(`${p.name}は${c.name}を召喚し、${tileName(tile)}を確保した`);
+  fxRing(tile, PLAYER_COLORS[p.id]); fxFloat(tile, "召喚！", "info"); // v35
   renderAll(G);
   return true;
 }
@@ -2674,6 +2701,7 @@ async function ownLandFlow(p, tile) {
     p.magic -= cost;
     tile.level++;
     log(`${p.name}は${tileName(tile)}をLv${tile.level}に強化した（-${cost}G）`);
+    fxRing(tile, "#ffd76a"); fxFloat(tile, `Lv${tile.level}！`, "gain"); SFX.coin(); // v35
   } else if (decision.action === "swap") {
     const c = CARD_BY_ID[decision.cardId];
     if (c.cost > p.magic) {
@@ -2835,6 +2863,9 @@ async function enemyLandFlow(p, tile) {
     return false;
   }
   log(`${p.name}は通行料${toll}Gを${owner.name}に支払う`, "", { toast: true });
+  if (typeof missionToll === "function") missionToll(G, owner, toll);
+  fxFloat(tile, `-${toll}G`, "loss", { scale: toll >= 300 ? 1.3 : 1 }); // v35: 払った額をマスの上に
+  if (toll >= 300) { fxRing(tile, PLAYER_COLORS[owner.id]); SFX.coin(); }
   await forcePay(G, p, toll, owner, log, landSellChooser(p)); // 払いきれなければ城で再起（敗北はしない）
   applyTollPayback(p, owner, toll); // ⚖️雪辱の契約（v30）: 支払った直後に2倍を奪い返す
   // 高額の通行料をせしめた相手キャラはほくそ笑む（存在感の演出）
@@ -2990,9 +3021,9 @@ async function fightFor(p, tile, attCard, attItem, battleOpts = {}) {
   // ⏩スキップが押されたら残りのログを一括表示して即座に決着へ（UI.battleSkip）
   const result = resolveBattle(attCard, tile, attItem, defItem,
     { rng: true, g: G, attackerId: p.id, ...spellBuffs, ...trapFx, defTrapSynergy, ...battleOpts });
-  openBattleView(G, p.name, attCard, attItem, tile, defItem);
-  await sleep(600);
-  await playBattleLines(result.log);
+  openBattleView(G, p, attCard, attItem, tile, defItem, { attGrown: battleOpts.attGrown || 0 });
+  await sleep(700);
+  await playBattleLines(result.log, 700, result.ev); // v35: 構造化イベントでHPバー・ダメージ数字を動かす
   // 吸奪武器（グリードファング＝drainMagic）: バトルで奪った魔力をここで実際に移動する
   // （resolveBattle は状態非破壊のため。相手の所持魔力が上限）
   if (result.attDrain) {
@@ -3011,6 +3042,7 @@ async function fightFor(p, tile, attCard, attItem, battleOpts = {}) {
   }
   await sleep(UI.battleSkip ? 250 : 900);
   closeBattleView();
+  if (typeof missionBattle === "function") missionBattle(G, p, defender, result); // v35: 🎯挑戦の成績
   // 🛠工匠・🪃戻る武具（v29）: 防衛側が守り切っていれば、装備したアイテムは使い切りにならず手札へ戻る
   if (defItemId && !result.escaped && !result.attackerWins && tile.creature) {
     const defC = CARD_BY_ID[tile.creature.cardId];
@@ -3061,6 +3093,7 @@ async function doInvade(p, tile, cardId, itemId = null) {
     }
     tile.owner = p.id;
     tile.creature = { cardId, hp: woundedHp(result.attHp, result.attExtra, c.hp) }; // 戦闘後HP残量で駐留
+    renderBoard(G); fxRing(tile, PLAYER_COLORS[p.id]); fxFloat(tile, "制圧！", "good", { scale: 1.1 }); // v35
     grantWarfire(p); // 🔥狼煙台（戦意）: 侵略勝利ボーナス（v19）
     if (!defNulled) applyBattleLandEffects(tile, defCid, false); // 🔥焦土＝落ちた土地も痩せる
   } else {
@@ -3085,6 +3118,7 @@ async function doInvade(p, tile, cardId, itemId = null) {
     const toll = tollOf(G, tile);
     if (toll > 0) {
       log(`${p.name}は侵略に失敗し、通行料${toll}Gを${defender.name}に支払う`, "warn");
+      if (typeof missionToll === "function") missionToll(G, defender, toll);
       await forcePay(G, p, toll, defender, log, landSellChooser(p)); // 払いきれなければ城で再起
       applyTollPayback(p, defender, toll); // ⚖️雪辱の契約（v30）: 侵略失敗の通行料も倍返しの対象
       renderAll(G);
@@ -3511,7 +3545,21 @@ function showHelp() {
   return showDialog({
     passive: true,
     title: "❓ 遊び方",
-    body: `
+    body: helpAccordion(HELP_HTML()),
+    buttons: [{ label: "閉じる", value: "close", primary: true }],
+  });
+}
+// v35: 遊び方は1枚の長い文章だったので、段落（空行区切り）ごとに開閉できる見出しへ組み替える。
+// 見出しは各段落の最初の太字。最初の段落（勝利条件）だけ開いた状態で出す
+function helpAccordion(html) {
+  return `<div class="help-acc">` + html.split(/<br>\s*<br>/).map((chunk, i) => {
+    const m = chunk.match(/<b>([^<]{1,40})<\/b>/);
+    const title = m ? m[1].replace(/[:：]$/, "") : "その他";
+    return `<details class="help-sec"${i === 0 ? " open" : ""}><summary>${title}</summary><div class="help-body">${chunk}</div></details>`;
+  }).join("") + `</div>`;
+}
+function HELP_HTML() {
+  return `
       <b>勝利条件</b>: 総資産（魔力＋土地価値）がステージの目標に達した状態で🏰城に到達（凱旋）する。
       目標に達すると<b>⚑凱旋リーチ</b>が表示される。ラウンド上限で決着しない場合は総資産の多い方が勝ち。<br>
       <b>💸 魔力が尽きても敗北にはならない</b>: 支払いきれないときは土地を売却し、それでも足りなければ
@@ -3527,7 +3575,7 @@ function showHelp() {
       同じ相手でも後のステージほど強くなる（見習い→駆け出し→一人前→強豪→鬼神）。<br><br>
       <b>ターンの流れ</b>: カードを1枚引く → （任意で手札のスペルをクリックして使用・1回まで）→ 🎲ダイスで移動<br>
       <b>🧭 移動は進行方向へ（v24）</b>: コマは<b>今の進行方向を保って</b>進む＝<b>逆走はできない</b>。
-      分かれ道・交差点では背後以外の<b>行く手を選べる</b>（ルートプレビュー付きダイアログ）。
+      分かれ道・交差点では背後以外の<b>行く手を選べる</b>（盤面で光っているマスをタップ）。
       ゲーム開始直後・💫テレポート・🌀ワープ・城への帰還などの直後は方向が未確定＝どの方向へも出発できる。<br>
       <b>🔄 逆方向へ進むには</b>: <b>時流逆転</b>（スペル。自分に使えば来た道を戻れる／相手に使えば高額地帯へ押し返せる）か、
       🎰運命マスの<b>時空の渦</b>（イベント）で進行方向が反転したときだけ。相手から強制的に反転させられることもある。<br>
@@ -3717,9 +3765,14 @@ function showHelp() {
       <b>🔔 ポップアップ通知</b>: <b>スペルの効果・特性の発動・機能停止（スペル封じ・足止め・無力化など）・
       通行料・魔力不足</b>など「影響のあった出来事」は、📜ログと同じ文言を画面上部に短く表示してすぐ消える。
       <b>ログを閉じたまま遊んでも見落とさない</b>ための表示で、盤面やダイアログの操作を邪魔することはない。<br>
-      <b>🎵 BGM</b>: ヘッダーの🎵でBGMのON/OFF（効果音と同じくオフラインで自動生成。🔊は効果音の切替）。`,
-    buttons: [{ label: "閉じる", value: "close", primary: true }],
-  });
+      <b>🎵 BGM</b>: ヘッダーの🎵でBGMのON/OFF（効果音と同じくオフラインで自動生成。🔊は効果音の切替）。<br><br>
+      <b>✨ v35の見た目と操作</b>: 盤面にはステージごとの<b>地形</b>が敷かれ、領地には<b>駐留クリーチャーの姿</b>が立つ。
+      隣り合う自分の土地どうしの道は<b>自分の色に灯る</b>（🏰援護で守りが固くなっている目印）。
+      スマホの全体表示ではマス目の細かい文字を隠して<b>通行料の札・レベルの粒</b>を大きく見せ、拡大すると詳しい表示に戻る。<br>
+      <b>🃏 カードの確認</b>: 手札のカードを<b>タップ</b>すると詳細が開く（使えるスペルはタップで使用）。
+      どこのカードでも<b>長押し</b>すれば詳細を確認できる（召喚・侵略のカード選択の前にも）。<br>
+      <b>⚔ バトル画面</b>: 両者の<b>ST と HPバー</b>がバトル中の実効値で動く（強化は札で表示・被弾で赤いダメージ数字）。
+      ログの計算式は「📊 計算式」で表示／非表示を切り替えられる。`;
 }
 
 // ---------- 起動 ----------

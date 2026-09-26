@@ -10,14 +10,15 @@
 "use strict";
 
 // ---------- パレット（属性ごとの背景・光・シルエット色） ----------
+// lit … シルエット上端の色（v35: 上から光が当たったような立体感を出す。sil へ向かって暗くなる）
 const ART_PAL = {
-  fire:    { bg1: "#5c2317", bg2: "#1d0d09", glow: "#ffb37c", sil: "#200c07", line: "#ff7a45" },
-  wood:    { bg1: "#27511b", bg2: "#0e1c0a", glow: "#a8e97c", sil: "#0e1a08", line: "#6cc24a" },
-  earth:   { bg1: "#523d1e", bg2: "#1a130a", glow: "#eec27c", sil: "#181005", line: "#c89a55" },
-  water:   { bg1: "#1c3a62", bg2: "#0a1626", glow: "#8cc8ff", sil: "#081120", line: "#4da3ff" },
-  neutral: { bg1: "#3d3654", bg2: "#161221", glow: "#d9d2f2", sil: "#120e1e", line: "#a49ac9" },
-  item:    { bg1: "#4d3d20", bg2: "#191307", glow: "#ffd76a", sil: "#171004", line: "#d9a94e" },
-  spell:   { bg1: "#402457", bg2: "#150c1f", glow: "#d9a6ff", sil: "#150a20", line: "#b06fd6" },
+  fire:    { bg1: "#5c2317", bg2: "#1d0d09", glow: "#ffb37c", sil: "#200c07", line: "#ff7a45", lit: "#5a2414" },
+  wood:    { bg1: "#27511b", bg2: "#0e1c0a", glow: "#a8e97c", sil: "#0e1a08", line: "#6cc24a", lit: "#284a1a" },
+  earth:   { bg1: "#523d1e", bg2: "#1a130a", glow: "#eec27c", sil: "#181005", line: "#c89a55", lit: "#4a3515" },
+  water:   { bg1: "#1c3a62", bg2: "#0a1626", glow: "#8cc8ff", sil: "#081120", line: "#4da3ff", lit: "#1c3558" },
+  neutral: { bg1: "#3d3654", bg2: "#161221", glow: "#d9d2f2", sil: "#120e1e", line: "#a49ac9", lit: "#3a3252" },
+  item:    { bg1: "#4d3d20", bg2: "#191307", glow: "#ffd76a", sil: "#171004", line: "#d9a94e", lit: "#4a3810" },
+  spell:   { bg1: "#402457", bg2: "#150c1f", glow: "#d9a6ff", sil: "#150a20", line: "#b06fd6", lit: "#3c1f52" },
 };
 
 // ---------- 共通defs（グラデーション類）: 起動時に1回だけbodyへ注入 ----------
@@ -35,8 +36,26 @@ function artDefsSVG() {
       <stop offset="0%" stop-color="${p.bg1}" stop-opacity="0.75"/>
       <stop offset="100%" stop-color="${p.bg2}" stop-opacity="0.95"/></linearGradient>`;
   }).join("");
+  // v35: シルエットの立体感（上から光が当たる）と背後の光輪（シルエットを背景から浮かせる）。
+  // 上端をわずかに明るくしたグラデーションで塗ると、同じシルエットでも「塊」に見える
+  const silGrads = Object.entries(ART_PAL).map(([k, p]) =>
+    `<linearGradient id="agSil-${k}" x1="0" y1="0" x2="0" y2="1">
+       <stop offset="0%" stop-color="${p.lit || p.sil}"/><stop offset="100%" stop-color="${p.sil}"/>
+     </linearGradient>
+     <radialGradient id="agHalo-${k}" cx="50%" cy="50%" r="50%">
+       <stop offset="0%" stop-color="${p.glow}" stop-opacity="0.55"/>
+       <stop offset="45%" stop-color="${p.glow}" stop-opacity="0.18"/>
+       <stop offset="100%" stop-color="${p.glow}" stop-opacity="0"/>
+     </radialGradient>
+     <linearGradient id="agFloor-${k}" x1="0" y1="0" x2="0" y2="1">
+       <stop offset="0%" stop-color="${p.glow}" stop-opacity="0"/>
+       <stop offset="100%" stop-color="${p.glow}" stop-opacity="0.22"/>
+     </linearGradient>`).join("");
   return `<svg id="global-art-defs" width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
-    ${bgGrads}${tileGrads}
+    ${bgGrads}${tileGrads}${silGrads}
+    <radialGradient id="agVig" cx="50%" cy="45%" r="75%">
+      <stop offset="55%" stop-color="#000" stop-opacity="0"/><stop offset="100%" stop-color="#000" stop-opacity="0.55"/>
+    </radialGradient>
     <linearGradient id="agGold" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#ffe9a0"/><stop offset="55%" stop-color="#d9a94e"/><stop offset="100%" stop-color="#8a6620"/>
     </linearGradient>
@@ -893,46 +912,173 @@ const ITEM_ART = {
   harmonyring: { arch: "charm" },
 };
 
-// ---------- 背景シーン（属性の魔力が満ちる空間＋魔法陣＋地面の影） ----------
-function _sceneBG(palKey, p) {
+// ---------- 決定論の小さな乱数（v35） ----------
+// カードidから種を作り、背景の粒（火の粉・木の葉・泡…）の配置をカードごとに変える。
+// 同じカードは何度描いても同じ絵になる（再描画でチラつかない）
+function _artHash(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function _artRng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const _r1 = v => Math.round(v * 10) / 10;
+
+// ---------- 属性ごとの背景モチーフ（v35） ----------
+// v34までは全属性が「同じ魔法陣＋点4つ」だったため、カードが並ぶと単調に見えた。
+// 属性ごとに“その土地の空気”を描き分ける: 🔥火の粉と炎の舌／🌳木洩れ日と木の葉／⛰️遠い稜線と地層／
+// 💧波と泡／⚪ルーン環と星屑／アイテム＝金の光条／スペル＝魔法陣と符号。
+// lite=true はアルバム等の小さな表示用（粒を減らして描画を軽くする）
+const ART_MOTIF = {
+  fire(p, R, lite) {
+    let s = `<rect x="0" y="44" width="120" height="26" fill="url(#agFloor-fire)"/>`;
+    const n = lite ? 3 : 5;
+    for (let i = 0; i < n; i++) {           // 足元から立ちのぼる炎の舌
+      const x = 8 + i * (104 / (n - 1)) + (R() - 0.5) * 10, h = 12 + R() * 14;
+      s += `<path d="M${_r1(x - 6)} 70 C${_r1(x - 7)} ${_r1(70 - h * 0.5)} ${_r1(x + 2)} ${_r1(70 - h * 0.6)} ${_r1(x)} ${_r1(70 - h)} ` +
+        `C${_r1(x + 5)} ${_r1(70 - h * 0.55)} ${_r1(x + 8)} ${_r1(70 - h * 0.35)} ${_r1(x + 6)} 70 Z" fill="${p.line}" opacity="${_r1(0.1 + R() * 0.1)}"/>`;
+    }
+    for (let i = 0; i < (lite ? 4 : 9); i++) // 舞い上がる火の粉
+      s += `<circle cx="${_r1(R() * 120)}" cy="${_r1(4 + R() * 46)}" r="${_r1(0.5 + R() * 1.1)}" fill="${i % 3 ? p.glow : "#fff3c4"}" opacity="${_r1(0.35 + R() * 0.5)}"/>`;
+    return s;
+  },
+  wood(p, R, lite) {
+    let s = "";
+    for (let i = 0; i < 3; i++) {           // 斜めに差し込む木洩れ日
+      const x = 10 + i * 34 + R() * 12;
+      s += `<path d="M${_r1(x)} 0 L${_r1(x + 12)} 0 L${_r1(x + 40)} 70 L${_r1(x + 22)} 70 Z" fill="#eaffc8" opacity="${_r1(0.04 + R() * 0.04)}"/>`;
+    }
+    for (let i = 0; i < (lite ? 3 : 7); i++) { // 舞う木の葉
+      const x = R() * 120, y = 4 + R() * 50, a = Math.round(R() * 180);
+      s += `<ellipse cx="${_r1(x)}" cy="${_r1(y)}" rx="${_r1(1.6 + R() * 1.4)}" ry="${_r1(0.8 + R() * 0.5)}" transform="rotate(${a} ${_r1(x)} ${_r1(y)})" fill="${p.glow}" opacity="${_r1(0.25 + R() * 0.35)}"/>`;
+    }
+    for (let x = 2; x < 120; x += lite ? 9 : 5) // 足元の草
+      s += `<path d="M${_r1(x)} 70 L${_r1(x + 1.5 + R() * 2)} ${_r1(61 - R() * 6)} L${_r1(x + 3)} 70 Z" fill="${p.line}" opacity="0.22"/>`;
+    return s;
+  },
+  earth(p, R) {
+    const y0 = 40 + R() * 6;                 // 遠い稜線（2重）
+    const ridge = (base, amp, op, col) => {
+      let d = `M0 ${_r1(base)}`;
+      for (let x = 0; x <= 120; x += 15) d += ` L${x} ${_r1(base - R() * amp)}`;
+      return `<path d="${d} L120 70 L0 70 Z" fill="${col}" opacity="${op}"/>`;
+    };
+    let s = ridge(y0 - 8, 14, 0.35, p.bg1) + ridge(y0 + 6, 8, 0.55, "#120c05");
+    s += `<path d="M0 ${_r1(y0 + 16)} Q60 ${_r1(y0 + 12)} 120 ${_r1(y0 + 17)}" fill="none" stroke="${p.line}" stroke-opacity="0.18" stroke-width="0.8"/>`;
+    for (let i = 0; i < 4; i++) {            // 浮かぶ小石
+      const x = 8 + R() * 104, y = 6 + R() * 26, r = 1.2 + R() * 1.6;
+      s += `<path d="M${_r1(x - r)} ${_r1(y)} L${_r1(x)} ${_r1(y - r)} L${_r1(x + r)} ${_r1(y + r * 0.3)} L${_r1(x + r * 0.2)} ${_r1(y + r)} Z" fill="${p.glow}" opacity="${_r1(0.2 + R() * 0.2)}"/>`;
+    }
+    return s;
+  },
+  water(p, R, lite) {
+    let s = "";
+    for (let i = 0; i < 4; i++) {            // うねる波（横に流れる曲線）
+      const y = 12 + i * 15 + R() * 4, a = 2 + R() * 2;
+      s += `<path d="M-4 ${_r1(y)} Q10 ${_r1(y - a)} 24 ${_r1(y)} T52 ${_r1(y)} T80 ${_r1(y)} T108 ${_r1(y)} T136 ${_r1(y)}" fill="none" stroke="${p.glow}" stroke-opacity="${_r1(0.08 + i * 0.03)}" stroke-width="1"/>`;
+    }
+    for (let i = 0; i < (lite ? 3 : 7); i++) // 立ちのぼる泡
+      s += `<circle cx="${_r1(R() * 120)}" cy="${_r1(4 + R() * 56)}" r="${_r1(0.8 + R() * 1.6)}" fill="none" stroke="${p.glow}" stroke-width="0.6" opacity="${_r1(0.3 + R() * 0.4)}"/>`;
+    s += `<ellipse cx="${_r1(30 + R() * 60)}" cy="8" rx="30" ry="5" fill="#cfe8ff" opacity="0.06"/>`; // 水面から射す光
+    return s;
+  },
+  neutral(p, R, lite) {
+    let s = `<circle cx="60" cy="40" r="30" fill="none" stroke="${p.glow}" stroke-opacity="0.1" stroke-width="5" stroke-dasharray="1.2 3.4"/>`;
+    s += `<circle cx="60" cy="40" r="34" fill="none" stroke="${p.glow}" stroke-opacity="0.08" stroke-width="0.8"/>`;
+    for (let i = 0; i < (lite ? 4 : 9); i++)  // 星屑
+      s += `<circle cx="${_r1(R() * 120)}" cy="${_r1(R() * 56)}" r="${_r1(0.4 + R() * 0.8)}" fill="#fff" opacity="${_r1(0.3 + R() * 0.5)}"/>`;
+    return s;
+  },
+  item(p, R) {
+    let s = "";
+    const n = 10, a0 = R() * 36;
+    for (let i = 0; i < n; i++) {            // 宝物から放たれる金の光条
+      const a = (a0 + i * 360 / n) * Math.PI / 180, b = a + 0.12;
+      s += `<path d="M60 36 L${_r1(60 + Math.cos(a) * 80)} ${_r1(36 + Math.sin(a) * 80)} L${_r1(60 + Math.cos(b) * 80)} ${_r1(36 + Math.sin(b) * 80)} Z" fill="${p.glow}" opacity="0.06"/>`;
+    }
+    return s;
+  },
+  spell(p, R) {
+    let s = "";
+    for (let i = 0; i < 12; i++) {           // 魔法陣の外周に刻まれた符号
+      const a = (i * 30 + R() * 6) * Math.PI / 180;
+      const x = 60 + Math.cos(a) * 30, y = 36 + Math.sin(a) * 30;
+      s += `<path d="M${_r1(x - 1.5)} ${_r1(y)} L${_r1(x)} ${_r1(y - 2)} L${_r1(x + 1.5)} ${_r1(y)}" fill="none" stroke="${p.glow}" stroke-width="0.7" opacity="0.45"/>`;
+    }
+    return s;
+  },
+};
+
+// ---------- 背景シーン（属性の魔力が満ちる空間＋属性モチーフ＋地面の影） ----------
+function _sceneBG(palKey, p, seedKey = "", lite = false) {
+  const R = _artRng(_artHash(seedKey + palKey));
+  const motif = ART_MOTIF[palKey] ? ART_MOTIF[palKey](p, R, lite) : "";
   return `
     <rect x="0" y="0" width="120" height="70" fill="url(#agBG-${palKey})"/>
-    <circle cx="60" cy="42" r="27" fill="none" stroke="${p.glow}" stroke-opacity="0.15" stroke-width="1.5" stroke-dasharray="3 4"/>
-    <circle cx="60" cy="42" r="32" fill="none" stroke="${p.glow}" stroke-opacity="0.07" stroke-width="1"/>
-    ${_spark(p, 16, 14, 1, 0.5)}${_spark(p, 102, 20, 1.2, 0.45)}${_spark(p, 90, 58, 0.9, 0.4)}${_spark(p, 24, 52, 0.9, 0.4)}
-    <ellipse cx="60" cy="63" rx="44" ry="6.5" fill="#000" opacity="0.35"/>`;
+    ${motif}
+    <circle cx="60" cy="42" r="27" fill="none" stroke="${p.glow}" stroke-opacity="0.12" stroke-width="1.2" stroke-dasharray="3 4"/>
+    <ellipse cx="60" cy="63" rx="40" ry="6" fill="#000" opacity="0.4"/>`;
+}
+
+// ---------- クリーチャーの立ち姿（v35: 光輪＋縁取りの光＋上から光の当たるシルエット） ----------
+// カードのアートと盤面のマス（ui.js tileSVG）で共用する。座標は 120×70 のシーン基準。
+// ①背後の光輪でシルエットを背景から浮かせる ②同じ形を太い光の線で先に描いて“縁の光”にする
+// ③本体は上端が明るいグラデーションで塗る＝同じシルエットでも塊として読める
+function creatureFigureSVG(c, opts = {}) {
+  const palKey = ART_PAL[c.element] ? c.element : "neutral";
+  const p = ART_PAL[palKey];
+  const spec = CREATURE_ART[c.id] || { arch: "beast" };
+  const draw = ARCH[spec.arch] || ARCH.beast;
+  const shape = draw(p, spec.o || {});
+  const halo = opts.noHalo ? "" : `<ellipse cx="60" cy="38" rx="40" ry="30" fill="url(#agHalo-${palKey})"/>`;
+  return `${halo}
+    <g fill="none" stroke="${p.glow}" stroke-width="${opts.rim || 2.6}" stroke-opacity="0.42" stroke-linejoin="round">${shape}</g>
+    <g fill="url(#agSil-${palKey})" stroke="${p.line}" stroke-opacity="0.6" stroke-width="1" stroke-linejoin="round">${shape}</g>`;
 }
 
 // ---------- カードのアート（種類で出し分け） ----------
-function cardArtSVG(c) {
+// opts.lite … アルバムのミニ表示など（背景の粒を減らす）
+function cardArtSVG(c, opts = {}) {
   let palKey, inner;
+  const lite = !!opts.lite;
   if (c.type === "creature") {
     palKey = ART_PAL[c.element] ? c.element : "neutral";
-    const p = ART_PAL[palKey];
-    const spec = CREATURE_ART[c.id] || { arch: "beast" };
-    const draw = ARCH[spec.arch] || ARCH.beast;
-    inner = `<g fill="${p.sil}" stroke="${p.line}" stroke-opacity="0.5" stroke-width="1" stroke-linejoin="round">${draw(p, spec.o || {})}</g>`;
+    inner = creatureFigureSVG(c);
   } else if (c.type === "item") {
     palKey = "item";
     const p = ART_PAL.item;
     const spec = ITEM_ART[c.id] || { arch: "sword" };
     const draw = ITEM_ARCH[spec.arch] || ITEM_ARCH.sword;
-    inner = `<circle cx="60" cy="36" r="22" fill="${p.glow}" opacity="0.14"/>
-      <g fill="#241a08" stroke="${p.glow}" stroke-opacity="0.6" stroke-width="1" stroke-linejoin="round">${draw(p, spec.o || {})}</g>`;
+    const shape = draw(p, spec.o || {});
+    inner = `<ellipse cx="60" cy="36" rx="30" ry="26" fill="url(#agHalo-item)"/>
+      <g fill="none" stroke="${p.glow}" stroke-width="2.4" stroke-opacity="0.35" stroke-linejoin="round">${shape}</g>
+      <g fill="url(#agSil-item)" stroke="${p.glow}" stroke-opacity="0.7" stroke-width="1" stroke-linejoin="round">${shape}</g>
+      ${_spark(p, 34, 14, 1.2)}${_spark(p, 88, 22, 1.4)}${_spark(p, 80, 54, 1)}`;
   } else {
     // スペル: 魔法陣の中央に象徴アイコン
     palKey = "spell";
     const p = ART_PAL.spell;
     inner = `
+      <ellipse cx="60" cy="36" rx="34" ry="30" fill="url(#agHalo-spell)"/>
       <circle cx="60" cy="36" r="24" fill="none" stroke="${p.glow}" stroke-width="1.4" opacity="0.75"/>
       <circle cx="60" cy="36" r="19" fill="none" stroke="${p.glow}" stroke-width="0.8" stroke-dasharray="4 3" opacity="0.6"/>
       <path d="M60 14 L79 47 L41 47 Z" fill="none" stroke="${p.glow}" stroke-width="0.8" opacity="0.4"/>
       <path d="M60 58 L41 25 L79 25 Z" fill="none" stroke="${p.glow}" stroke-width="0.8" opacity="0.4"/>
-      <circle cx="60" cy="36" r="10" fill="${p.glow}" opacity="0.18"/>
+      <circle cx="60" cy="36" r="10" fill="${p.glow}" opacity="0.2"/>
       <text x="60" y="43" text-anchor="middle" font-size="19">${c.icon || "✨"}</text>
       ${_spark(p, 36, 14, 1.4)}${_spark(p, 86, 18, 1.2)}${_spark(p, 84, 56, 1.2)}`;
   }
-  return `<svg viewBox="0 0 120 70" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${_sceneBG(palKey, ART_PAL[palKey])}${inner}</svg>`;
+  return `<svg viewBox="0 0 120 70" preserveAspectRatio="xMidYMid slice" aria-hidden="true">` +
+    `${_sceneBG(palKey, ART_PAL[palKey], c.id, lite)}${inner}` +
+    `<rect x="0" y="0" width="120" height="70" fill="url(#agVig)"/></svg>`;
 }
 
 // ============================================================

@@ -37,6 +37,10 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   const rng = !!opts.rng;
   let defCard = CARD_BY_ID[tile.creature.cardId];
   const log = [];
+  // 演出用の構造化イベント（v35）: 「ログの何行目で何が起きたか」。バトル画面（ui.js playBattleLines）が
+  // HPバー・ダメージ数字・会心の演出をログの文面に頼らず正確に動かすために使う（勝敗の計算には一切関与しない）
+  const ev = [];
+  const mark = e => ev.push({ at: log.length - 1, ...e });
   // 🤝絆（v31）の判定は「模倣で差し替わる前の本来のカード」で行う（写し身は相方を持たない）
   const attOrig = attCard, defOrig = defCard;
 
@@ -195,12 +199,14 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
     if (attHp <= 0 && attAb.has("endure") && !attEndured) {
       attEndured = true; attHp = 1;
       log.push(`🛡 ${attCard.name}の不屈！ 倒れる寸前で踏みとどまった（HP1）`);
+      mark({ t: "endure", side: "att" });
     }
   };
   const defEndureCheck = () => {
     if (defHp <= 0 && defAb.has("endure") && !defEndured) {
       defEndured = true; defHp = 1;
       log.push(`🛡 ${defCard.name}の不屈！ 倒れる寸前で踏みとどまった（HP1）`);
+      mark({ t: "endure", side: "def" });
     }
   };
 
@@ -208,6 +214,7 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   if (opts.attPreDmg) {
     attHp -= opts.attPreDmg;
     log.push(`⚡ ${opts.trapName || "罠"}の直撃！ ${attCard.name}に${opts.attPreDmg}ダメージ（残りHP ${Math.max(0, attHp)}）`);
+    mark({ t: "hit", by: "trap", target: "att", dmg: opts.attPreDmg, remain: Math.max(0, attHp) });
     attEndureCheck(); // 🛡不屈は罠の必殺（即死圏の直撃）も一度だけ見切る
   }
   if (attTrapSt) log.push(`🃏 ${opts.trapName || "罠"}の効果！ ${attCard.name}のST${attTrapSt}`);
@@ -277,12 +284,12 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   let attLastwardOn = false, defLastwardOn = false;
   const attStOf = () => {
     const on = attAb.has("lastward") && !attScroll && attHp <= attStartHp / 2;
-    if (on && !attLastwardOn) { attLastwardOn = true; log.push(`🔥 ${attCard.name}の背水！ 追い詰められてST+${LASTWARD_ST}`); }
+    if (on && !attLastwardOn) { attLastwardOn = true; log.push(`🔥 ${attCard.name}の背水！ 追い詰められてST+${LASTWARD_ST}`); mark({ t: "stup", side: "att", plus: LASTWARD_ST }); }
     return attSt + (on ? LASTWARD_ST : 0);
   };
   const defStOf = () => {
     const on = defAb.has("lastward") && !defScroll && defHp <= defStartHp / 2;
-    if (on && !defLastwardOn) { defLastwardOn = true; log.push(`🔥 ${defCard.name}の背水！ 追い詰められてST+${LASTWARD_ST}`); }
+    if (on && !defLastwardOn) { defLastwardOn = true; log.push(`🔥 ${defCard.name}の背水！ 追い詰められてST+${LASTWARD_ST}`); mark({ t: "stup", side: "def", plus: LASTWARD_ST }); }
     return defSt + (on ? LASTWARD_ST : 0);
   };
 
@@ -318,6 +325,8 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   const critReach = !attBlocked && !canOneShot && !attNoCrit && (defCanEndure
     ? (attAb.has("double") && critHitOnce > 0 && critHitOnce >= defHp)
     : critHitOnce * (attAb.has("double") ? 2 : 1) >= defHp);
+  // 演出用: バフ込みの実効ST/HP（バトル画面はここで数値を「素のカード値」から切り替える）
+  mark({ t: "init", att: { st: attSt, hp: attHp }, def: { st: defSt, hp: defHp }, attMagic, defMagic });
   if (attBlocked) {
     log.push(`📊【式】決着: ${defCard.name}の${defAb.has("physnull") ? "物理無効" : "物理反射"}により侵略の物理攻撃は通らない → 占領不可${defAb.has("physreflect") ? "（攻撃はそっくり跳ね返る）" : ""}${defBlocked ? "　※反撃も通らない（両者無傷）" : ""}`);
   } else {
@@ -329,57 +338,70 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
 
   // 一撃を計算（会心込み）。物理無効/物理反射（対象の能力）と魔法攻撃（攻撃側）・硬殻をここで解決する。
   // { remain: 対象の残HP, dmg: 与えたダメージ, bounced: 物理反射で攻撃側へ跳ね返ったダメージ } を返す
-  const strike = (name, st, ab, isMagic, noCrit, critRate, targetName, targetAb, targetHp, mul = 1) => {
-    let dmg = st;
+  // by … 攻撃する側（"att"/"def"）。演出用のイベントに使うだけで計算には関与しない（v35）
+  const strike = (name, st, ab, isMagic, noCrit, critRate, targetName, targetAb, targetHp, mul = 1, by = "att") => {
+    const target = by === "att" ? "def" : "att";
+    let dmg = st, crit = false;
     if (rng && !noCrit && Math.random() < critRate) {
       dmg = Math.floor(st * 1.5);
+      crit = true;
       log.push(`💫 ${name}の会心の一撃！！`);
+      mark({ t: "crit", by });
     }
     dmg *= mul; // 💢倍返し（v30）: 被弾後の攻撃はダメージ2倍（会心とも重なる）
     if (!isMagic && targetAb.has("physnull")) {
       log.push(`🌫 ${targetName}の物理無効！ ${name}の攻撃はすり抜けた（0ダメージ）`);
+      mark({ t: "block", by, target, kind: "null" });
       return { remain: targetHp, dmg: 0, bounced: 0 };
     }
     if (!isMagic && targetAb.has("physreflect")) {
       log.push(`🪞 ${targetName}の物理反射！ ${name}の攻撃がそっくり跳ね返る`);
+      mark({ t: "block", by, target, kind: "reflect" });
       return { remain: targetHp, dmg: 0, bounced: dmg };
     }
     if (targetAb.has("armor") && dmg > 0) {
       const cut = Math.min(ARMOR_REDUCE, dmg);
       dmg -= cut;
       log.push(`🪨 ${targetName}の硬殻！ ダメージを${cut}軽減`);
-      if (dmg <= 0) { log.push(`${name}の攻撃は${targetName}の殻に阻まれた（0ダメージ）`); return { remain: targetHp, dmg: 0, bounced: 0 }; }
+      if (dmg <= 0) {
+        log.push(`${name}の攻撃は${targetName}の殻に阻まれた（0ダメージ）`);
+        mark({ t: "block", by, target, kind: "armor" });
+        return { remain: targetHp, dmg: 0, bounced: 0 };
+      }
     }
     const remain = targetHp - dmg;
     log.push(`${name}の${isMagic ? "魔法攻撃" : "攻撃"}！ ${targetName}に${dmg}ダメージ（残りHP ${Math.max(0, remain)}）`);
+    mark({ t: "hit", by, target, dmg, remain: Math.max(0, remain), crit, magic: !!isMagic });
     return { remain, dmg, bounced: 0 };
   };
   // 反射（ミラーシールド）: 攻撃を受けた側が、受けたダメージの一部を攻撃側へ跳ね返す
-  const reflectBack = (targetReflect, dmg, attackerName, reflectorName, attackerHp) => {
+  const reflectBack = (targetReflect, dmg, attackerName, reflectorName, attackerHp, attackerSide = "att") => {
     if (targetReflect <= 0 || dmg <= 0) return attackerHp;
     const rf = Math.floor(dmg * targetReflect);
     if (rf <= 0) return attackerHp;
     // v23: 反射持ちアイテムはミラーシールドの他にスパイクメイルもあるため、装備名を出さない汎用文言にする
     log.push(`🪞 ${reflectorName}の装備が攻撃を弾く！ ${attackerName}に${rf}ダメージ反射`);
+    mark({ t: "hit", by: "reflect", target: attackerSide, dmg: rf, remain: Math.max(0, attackerHp - rf) });
     return attackerHp - rf;
   };
   // 物理反射の跳ね返りダメージを攻撃側へ適用（strikeのbounced）
-  const applyBounce = (bounced, strikerName, strikerHp) => {
+  const applyBounce = (bounced, strikerName, strikerHp, strikerSide = "att") => {
     if (!bounced) return strikerHp;
     const remain = strikerHp - bounced;
     log.push(`${strikerName}は跳ね返った${bounced}ダメージを受けた！（残りHP ${Math.max(0, remain)}）`);
+    mark({ t: "hit", by: "reflect", target: strikerSide, dmg: bounced, remain: Math.max(0, remain) });
     return remain;
   };
   // 吸収（absorb・v19）: 与えたダメージの半分だけ回復（バトル開始時のHPが上限）
   const attAbsorb = (dmg) => {
     if (!attAb.has("absorb") || dmg <= 0 || attHp <= 0) return;
     const heal = Math.min(Math.floor(dmg / 2), attStartHp - attHp);
-    if (heal > 0) { attHp += heal; log.push(`🩸 ${attCard.name}の吸収！ HPを${heal}回復（残りHP ${attHp}）`); }
+    if (heal > 0) { attHp += heal; log.push(`🩸 ${attCard.name}の吸収！ HPを${heal}回復（残りHP ${attHp}）`); mark({ t: "heal", side: "att", amount: heal, hp: attHp }); }
   };
   const defAbsorb = (dmg) => {
     if (!defAb.has("absorb") || dmg <= 0 || defHp <= 0) return;
     const heal = Math.min(Math.floor(dmg / 2), defStartHp - defHp);
-    if (heal > 0) { defHp += heal; log.push(`🩸 ${defCard.name}の吸収！ HPを${heal}回復（残りHP ${defHp}）`); }
+    if (heal > 0) { defHp += heal; log.push(`🩸 ${defCard.name}の吸収！ HPを${heal}回復（残りHP ${defHp}）`); mark({ t: "heal", side: "def", amount: heal, hp: defHp }); }
   };
   // 与えたダメージの累計（吸奪武器 drainMagic の強奪額計算用。無効・反射で0なら加算されない）
   let attDealt = 0, defDealt = 0;
@@ -388,54 +410,56 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   let attPaybackOn = false, defPaybackOn = false;
   const attMulOf = () => {
     const on = attAb.has("payback") && defDealt > 0;
-    if (on && !attPaybackOn) { attPaybackOn = true; log.push(`💢 ${attCard.name}の倍返し！ 受けた痛みを倍にして叩き返す（以後ダメージ2倍）`); }
+    if (on && !attPaybackOn) { attPaybackOn = true; log.push(`💢 ${attCard.name}の倍返し！ 受けた痛みを倍にして叩き返す（以後ダメージ2倍）`); mark({ t: "rage", side: "att" }); }
     return on ? 2 : 1;
   };
   const defMulOf = () => {
     const on = defAb.has("payback") && attDealt > 0;
-    if (on && !defPaybackOn) { defPaybackOn = true; log.push(`💢 ${defCard.name}の倍返し！ 受けた痛みを倍にして叩き返す（以後ダメージ2倍）`); }
+    if (on && !defPaybackOn) { defPaybackOn = true; log.push(`💢 ${defCard.name}の倍返し！ 受けた痛みを倍にして叩き返す（以後ダメージ2倍）`); mark({ t: "rage", side: "def" }); }
     return on ? 2 : 1;
   };
   // 侵略側の手番（1回）。連撃持ちなら相手が生き残っている限りもう1撃（合計2撃）
   const attTurn = () => {
-    let r = strike(attCard.name, attStOf(), attAb, attMagic, attNoCrit, attCritRate, defCard.name, defAb, defHp, attMulOf());
+    let r = strike(attCard.name, attStOf(), attAb, attMagic, attNoCrit, attCritRate, defCard.name, defAb, defHp, attMulOf(), "att");
     defHp = r.remain;
     defEndureCheck(); // 🛡不屈＝致命の一撃をHP1で見切る（連撃の2撃目には耐えられない）
     attDealt += r.dmg;
-    attHp = applyBounce(r.bounced, attCard.name, attHp); // 防衛側の物理反射
-    attHp = reflectBack(defReflect, r.dmg, attCard.name, defCard.name, attHp); // 防衛側が反射
+    attHp = applyBounce(r.bounced, attCard.name, attHp, "att"); // 防衛側の物理反射
+    attHp = reflectBack(defReflect, r.dmg, attCard.name, defCard.name, attHp, "att"); // 防衛側が反射
     attEndureCheck();
     attAbsorb(r.dmg);
     if (defHp > 0 && attHp > 0 && attAb.has("double")) {
       log.push(`🐲 ${attCard.name}の連撃！`);
-      r = strike(attCard.name, attStOf(), attAb, attMagic, attNoCrit, attCritRate, defCard.name, defAb, defHp, attMulOf());
+      mark({ t: "double", side: "att" });
+      r = strike(attCard.name, attStOf(), attAb, attMagic, attNoCrit, attCritRate, defCard.name, defAb, defHp, attMulOf(), "att");
       defHp = r.remain;
       defEndureCheck();
       attDealt += r.dmg;
-      attHp = applyBounce(r.bounced, attCard.name, attHp);
-      attHp = reflectBack(defReflect, r.dmg, attCard.name, defCard.name, attHp);
+      attHp = applyBounce(r.bounced, attCard.name, attHp, "att");
+      attHp = reflectBack(defReflect, r.dmg, attCard.name, defCard.name, attHp, "att");
       attEndureCheck();
       attAbsorb(r.dmg);
     }
   };
   // 防衛側の手番（1回）。連撃持ちなら同様に2撃目
   const defTurn = () => {
-    let r = strike(defCard.name, defStOf(), defAb, defMagic, defNoCrit, defCritRate, attCard.name, attAb, attHp, defMulOf());
+    let r = strike(defCard.name, defStOf(), defAb, defMagic, defNoCrit, defCritRate, attCard.name, attAb, attHp, defMulOf(), "def");
     attHp = r.remain;
     attEndureCheck();
     defDealt += r.dmg;
-    defHp = applyBounce(r.bounced, defCard.name, defHp); // 侵略側の物理反射
-    defHp = reflectBack(attReflect, r.dmg, defCard.name, attCard.name, defHp); // 侵略側が反射
+    defHp = applyBounce(r.bounced, defCard.name, defHp, "def"); // 侵略側の物理反射
+    defHp = reflectBack(attReflect, r.dmg, defCard.name, attCard.name, defHp, "def"); // 侵略側が反射
     defEndureCheck();
     defAbsorb(r.dmg);
     if (attHp > 0 && defHp > 0 && defAb.has("double")) {
       log.push(`🐲 ${defCard.name}の連撃！`);
-      r = strike(defCard.name, defStOf(), defAb, defMagic, defNoCrit, defCritRate, attCard.name, attAb, attHp, defMulOf());
+      mark({ t: "double", side: "def" });
+      r = strike(defCard.name, defStOf(), defAb, defMagic, defNoCrit, defCritRate, attCard.name, attAb, attHp, defMulOf(), "def");
       attHp = r.remain;
       attEndureCheck();
       defDealt += r.dmg;
-      defHp = applyBounce(r.bounced, defCard.name, defHp);
-      defHp = reflectBack(attReflect, r.dmg, defCard.name, attCard.name, defHp);
+      defHp = applyBounce(r.bounced, defCard.name, defHp, "def");
+      defHp = reflectBack(attReflect, r.dmg, defCard.name, attCard.name, defHp, "def");
       defEndureCheck();
       defAbsorb(r.dmg);
     }
@@ -449,6 +473,7 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
     log.push(`💥 ${attCard.name}は罠に倒れ、バトルは始まらなかった…`);
   } else if (defFirst) {
     log.push(`🛡 ${defCard.name}の先制攻撃！`);
+    mark({ t: "first", side: "def" });
     defTurn();
     if (attHp > 0 && defHp > 0) attTurn();
   } else {
@@ -459,10 +484,13 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   const attackerWins = defHp <= 0;
   if (attackerWins) {
     log.push(`💥 ${defCard.name}は倒された！ ${attCard.name}が土地を奪取！`);
+    mark({ t: "end", result: "attWin" });
   } else if (attHp <= 0) {
     log.push(`💥 ${attCard.name}は倒された… 侵略失敗！`);
+    mark({ t: "end", result: "defWin" });
   } else {
     log.push(`⚖ 両者生存。侵略失敗！ ${attCard.name}は撤退した`);
+    mark({ t: "end", result: "draw" });
   }
   // 吸奪（drainMagic・v17）＋💸魔力強奪（siphon・v25の能力）: 与えたダメージ×倍率の魔力を相手から強奪する。
   // 武器の倍率と能力の等倍は加算される（グリードファング×2 ＋ 魔力強奪×1 ＝ ダメージ×3）
@@ -475,6 +503,7 @@ function resolveBattle(attCard, tile, attItem = null, defItem = null, opts = {})
   if (attDrain) log.push(`💰 ${drainSrc(attItemEff, attAb, attCard.name)}！ 与えたダメージ${attDealt}×${attMul}＝${attDrain}Gを強奪！`);
   if (defDrain) log.push(`💰 ${drainSrc(defItemEff, defAb, defCard.name)}！ 与えたダメージ${defDealt}×${defMul}＝${defDrain}Gを強奪！`);
   return {
+    ev, // v35: 演出用の構造化イベント（ui.js のバトル画面が使う）
     attackerWins, log, attHp, defHp, attExtra, defExtra, attDrain, defDrain,
     // 転生（rebirth・v19）: 倒されたとき捨札ではなく手札に戻る（アイテム由来の付与も含めた実効判定）
     attRebirth: attAb.has("rebirth"),

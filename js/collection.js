@@ -328,10 +328,11 @@ function albumTile(c, count) {
   const rar = cardRarity(c), rm = RARITY_META[rar];
   // 所持カードはミニアート（造形）を表示、未収集はシルエットの「？」
   const art = owned && typeof cardArtSVG === "function"
-    ? `<div class="at-art">${cardArtSVG(c)}</div>`
+    ? `<div class="at-art">${cardArtSVG(c, { lite: true })}</div>` // v35: 小さな表示なので背景の粒は控えめに
     : `<div class="at-icon">${owned ? cardIconOf(c) : "❔"}</div>`;
   // 所持カードはクリックで詳細ポップアップ（ステータス＋特性の説明・v22）
-  return `<div class="album-tile rar-${rar} ${owned ? "clickable" : "locked"}" ${owned ? `data-detail="${c.id}"` : ""}
+  const kind = c.type === "creature" ? `el-${c.element}` : c.type; // v35: 額縁の色＝カードと同じ属性色
+  return `<div class="album-tile ${kind} rar-${rar} ${owned ? "clickable" : "locked"}" ${owned ? `data-detail="${c.id}"` : ""}
     title="${esc(owned ? rm.label + "／" + deckTip(c) + "／クリックで詳細" : "未収集")}">
     <div class="at-rarity" style="color:${rm.color}">${rm.stars}</div>
     ${art}

@@ -56,8 +56,12 @@ function applyBoardViewBox(g) {
   if (!svg || !g || !g.tiles.length) return;
   const w = (Math.max(...g.tiles.map(t => t.x)) + 1) * CELL;
   const h = (Math.max(...g.tiles.map(t => t.y)) + 1) * CELL;
-  svg.setAttribute("viewBox", `${-BOARD_PAD} ${-BOARD_PAD} ${w + BOARD_PAD * 2} ${h + BOARD_PAD * 2}`);
+  const vb = `${-BOARD_PAD} ${-BOARD_PAD} ${w + BOARD_PAD * 2} ${h + BOARD_PAD * 2}`;
+  svg.setAttribute("viewBox", vb);
   svg.style.aspectRatio = `${w + BOARD_PAD * 2} / ${h + BOARD_PAD * 2}`;
+  // v35: 背景側のSVG（地形・道・回路）も同じ座標系にそろえる
+  const bg = document.getElementById("board-bg");
+  if (bg) bg.setAttribute("viewBox", vb);
 }
 
 // ---------- マス目の形（パス生成） ----------
@@ -209,125 +213,242 @@ function tilePx(tile) { const m = (CELL - TILE) / 2; return { x: tile.x * CELL +
 // タイルの中心座標（v31: 中身は全て中心からの相対配置で描く＝どんな形でも同じ並びで読める）
 function tileCenter(tile) { return { cx: tile.x * CELL + CELL / 2, cy: tile.y * CELL + CELL / 2 }; }
 
-// ステージの背景紋章（v31）: 盤面の下に薄く敷く「その土地らしさ」。
-// ステージのアイコンを大きく透かし、テーマ色の光を落とし、外周に額縁を描く。
-// 盤面を見た瞬間に「前と違うステージだ」と分かるようにするためのレイヤー（マスの視認性は落とさない濃度）
+// ステージの背景（v31→v35）: 盤面の下に敷く「その土地らしさ」。
+// v35: 巨大な透かし絵文字をやめ、ステージごとの地形（scenery.js＝草むら・溶岩の亀裂・波紋・歯車…）を
+// 額縁の内側いっぱいに敷いた。額縁とステージ銘板は v31 のまま（どのステージか盤面だけで分かる）
 function boardBackdropSVG(g) {
   const w = (Math.max(...g.tiles.map(t => t.x)) + 1) * CELL;
   const h = (Math.max(...g.tiles.map(t => t.y)) + 1) * CELL;
   const th = g.stage.theme || {};
   const glow = th.glow || "#2a2440", dot = th.dot || "#5c5480";
   const P = BOARD_PAD - 6;
-  let s = `<g class="board-bg" pointer-events="none">`;
-  s += `<rect x="${-P}" y="${-P}" width="${w + P * 2}" height="${h + P * 2}" rx="26" fill="${glow}" opacity="0.18"/>`;
-  s += `<rect x="${-P}" y="${-P}" width="${w + P * 2}" height="${h + P * 2}" rx="26" fill="none" stroke="${dot}" stroke-width="2" opacity="0.42"/>`;
-  s += `<rect x="${-P + 7}" y="${-P + 7}" width="${w + P * 2 - 14}" height="${h + P * 2 - 14}" rx="20" fill="none" stroke="${dot}" stroke-width="1" opacity="0.2" stroke-dasharray="10 8"/>`;
-  // 中央に巨大な紋章（ステージアイコン）。マスの背後なので濃度は最小限
-  s += `<text x="${w / 2}" y="${h / 2 + Math.min(w, h) * 0.14}" font-size="${Math.min(w, h) * 0.42}" text-anchor="middle" opacity="0.05">${g.stage.icon}</text>`;
+  const cid = `bclip-${g.stage.id}`;
+  let s = `<defs><clipPath id="${cid}"><rect x="${-P}" y="${-P}" width="${w + P * 2}" height="${h + P * 2}" rx="26"/></clipPath>` +
+    `<radialGradient id="bvig-${g.stage.id}" cx="50%" cy="50%" r="70%">` +
+    `<stop offset="0%" stop-color="${glow}" stop-opacity="0.55"/><stop offset="70%" stop-color="${glow}" stop-opacity="0.18"/>` +
+    `<stop offset="100%" stop-color="#000" stop-opacity="0.35"/></radialGradient></defs>`;
+  s += `<g class="board-bg" pointer-events="none">`;
+  s += `<rect x="${-P}" y="${-P}" width="${w + P * 2}" height="${h + P * 2}" rx="26" fill="url(#bvig-${g.stage.id})"/>`;
+  s += `<g clip-path="url(#${cid})">${typeof scenerySVG === "function" ? scenerySVG(g, w, h) : ""}</g>`;
+  s += `<rect x="${-P}" y="${-P}" width="${w + P * 2}" height="${h + P * 2}" rx="26" fill="none" stroke="${dot}" stroke-width="2.4" opacity="0.5"/>`;
+  s += `<rect x="${-P + 7}" y="${-P + 7}" width="${w + P * 2 - 14}" height="${h + P * 2 - 14}" rx="20" fill="none" stroke="${dot}" stroke-width="1" opacity="0.22" stroke-dasharray="10 8"/>`;
   // 上の余白にステージ名の銘板（どのステージを遊んでいるか盤面だけで分かる）
-  s += `<text x="${-P + 10}" y="${-P + 22}" font-size="20" fill="${dot}" opacity="0.75" font-weight="bold">${esc(g.stage.icon + " STAGE " + (g.stageIdx + 1) + "　" + g.stage.name)}</text>`;
+  s += `<text x="${-P + 12}" y="${-P + 22}" font-size="19" fill="${dot}" opacity="0.8" font-weight="bold" stroke="#000" stroke-width="3" stroke-opacity="0.35" paint-order="stroke">${esc(g.stage.icon + " STAGE " + (g.stageIdx + 1) + "　" + g.stage.name)}</text>`;
   s += `</g>`;
   return s;
 }
 
-function renderBoard(g) {
-  const svg = document.getElementById("board");
-  let html = boardBackdropSVG(g);
-  // マナの回路（マスをつなぐ道）: タイルの下層に描く。太い道＋中央を流れる魔力の点線。
-  // 色・太さ・流れの粒はステージ（theme / look）で変わり、盤面ごとの雰囲気を出す
+// マナの回路（マスをつなぐ道）: タイルの下層に描く静的レイヤー。
+// v35: 道の縁に影を足して「盤面に刻まれた溝」に見せ、中央の魔力の点線は道の向き（正規ルート）へゆっくり流れる
+function roadsSVG(g) {
   const th = g.stage.theme || {};
   const pathCol = th.path || "#241e33", dotCol = th.dot || "#5c5480";
+  const period = String(ROAD_DASH).split(/[ ,]+/).map(Number).reduce((a, b) => a + (b || 0), 0) || 11;
+  let under = "", base = "", flow = "";
   g.tiles.forEach(tile => {
     const a = tileCenter(tile);
     tile.next.forEach(nid => {
       const b = tileCenter(g.tiles[nid]);
-      html += `<line x1="${a.cx}" y1="${a.cy}" x2="${b.cx}" y2="${b.cy}" stroke="${pathCol}" stroke-width="${ROAD_W}" stroke-linecap="round"/>`;
-      html += `<line x1="${a.cx}" y1="${a.cy}" x2="${b.cx}" y2="${b.cy}" stroke="${dotCol}" stroke-width="2.5" stroke-dasharray="${ROAD_DASH}" stroke-linecap="round" opacity="0.9"/>`;
+      const ln = `x1="${a.cx}" y1="${a.cy}" x2="${b.cx}" y2="${b.cy}"`;
+      under += `<line ${ln} stroke="#000" stroke-opacity="0.45" stroke-width="${ROAD_W + 6}" stroke-linecap="round"/>`;
+      base += `<line ${ln} stroke="${pathCol}" stroke-width="${ROAD_W}" stroke-linecap="round"/>`;
+      flow += `<line ${ln} stroke="${dotCol}" stroke-width="2.6" stroke-dasharray="${ROAD_DASH}" stroke-linecap="round" opacity="0.9"/>`;
     });
   });
-  g.tiles.forEach(tile => { html += tileSVG(g, tile); });
-  // プレイヤー駒はいちばん最後＝常に最前面（マス目の情報が駒の下に隠れるのは許容。
-  // 隠れた情報は🔍マス情報で確認できる、という原さんの整理に従う）
-  html += tokensSVG(g);
-  svg.innerHTML = html;
+  // 点線は1つの <g> ごと流す（線ごとにアニメを持たせない＝描画負荷を増やさない）
+  return `${under}${base}<g class="road-flow">` +
+    `<animate attributeName="stroke-dashoffset" from="0" to="${-period * 2}" dur="2.4s" repeatCount="indefinite"/>${flow}</g>`;
 }
 
-// マス1つぶんの描画（v31: 外形は形状パス・中身は中心からの相対配置）
+// 🔗 領地の回路（v35）: 同じプレイヤーの土地どうしが隣り合っている道を、そのプレイヤーの色で灯す。
+// 隣接する自領は防衛時に🏰援護（ST+10ずつ）を与え合う＝「繋がった領地ほど固い」を盤面の上で見せる
+function linksSVG(g) {
+  let s = "";
+  g.tiles.forEach(a => {
+    if (a.type !== "LAND" || a.owner === null || a.owner === undefined) return;
+    a.next.forEach(nid => {
+      const b = g.tiles[nid];
+      if (!b || b.type !== "LAND" || b.owner !== a.owner) return;
+      const p = tileCenter(a), q = tileCenter(b), col = PLAYER_COLORS[a.owner];
+      const ln = `x1="${p.cx}" y1="${p.cy}" x2="${q.cx}" y2="${q.cy}"`;
+      s += `<line ${ln} stroke="${col}" stroke-opacity="0.3" stroke-width="${_n(ROAD_W * 0.9)}" stroke-linecap="round"/>`;
+      s += `<line ${ln} class="lk-flow" stroke="${col}" stroke-width="3.2" stroke-dasharray="4 10" stroke-linecap="round"/>`;
+    });
+  });
+  return s;
+}
+
+// 盤面のレイヤー（v35）。v34までは1歩ごとに盤面SVGを丸ごと innerHTML で描き直していたため、
+// ①駒を滑らかに動かせない ②地形を敷くと再描画が重くなる、という制約があった。
+//   bl-bg（額縁＋地形）・bl-road（道）… ステージが変わったときだけ描く
+//   bl-link（領地の回路）                … 所有が変わったときだけ差し替える
+//   bl-tiles（マス目）                   … マス1つずつ前回の描画と比べ、変わったマスだけ差し替える
+//   bl-fx（浮かぶ数字・波紋）             … 演出が自分で出して自分で消す（再描画の影響を受けない）
+//   bl-tok（駒）                         … 駒の移動アニメ中は触らない
+// 背景（地形・道・回路）は index.html の #board-bg（盤面の真下に重ねた別のSVG）へ描く。
+// 地形の粒や回路の流れが動いても、マス目側のSVGを描き直さずに済む（スマホの描画負荷対策）。
+// #board-bg が無いページ（preview-board.html）では全レイヤーを #board に描く。
+function boardLayer(svg, name) { return svg ? svg.querySelector(`:scope > g.bl-${name}`) : null; }
+function boardStaticKey(g) { return [g.stage.id, g.tiles.length, TILE, TILE_SHAPE, ROAD_W, ROAD_DASH].join("|"); }
+const SVG_NS = "http://www.w3.org/2000/svg";
+function renderBoard(g) {
+  const svg = document.getElementById("board");
+  if (!svg || !g) return;
+  const bgSvg = document.getElementById("board-bg");
+  const key = boardStaticKey(g);
+  if (svg._blKey !== key || !boardLayer(svg, "tiles") || (bgSvg && !boardLayer(bgSvg, "road"))) {
+    const back = `<g class="bl-bg">${boardBackdropSVG(g)}</g><g class="bl-road" pointer-events="none">${roadsSVG(g)}</g>` +
+      `<g class="bl-link" pointer-events="none"></g>`;
+    const fore = `<g class="bl-tiles"></g><g class="bl-fx" pointer-events="none"></g><g class="bl-tok" pointer-events="none"></g>`;
+    if (bgSvg) { bgSvg.innerHTML = back; svg.innerHTML = fore; }
+    else svg.innerHTML = back + fore;
+    svg._blKey = key;
+    svg._tileHtml = [];
+    svg._linkHtml = null;
+    svg._tokHtml = null;
+    updateBoardLod();
+  }
+  // 領地の回路
+  const linkLayer = boardLayer(bgSvg || svg, "link");
+  const lh = linksSVG(g);
+  if (linkLayer && svg._linkHtml !== lh) { linkLayer.innerHTML = lh; svg._linkHtml = lh; }
+  // マス目: 変わったマスだけ差し替える
+  const tl = boardLayer(svg, "tiles");
+  const cache = svg._tileHtml;
+  if (tl.childElementCount !== g.tiles.length) {
+    tl.innerHTML = g.tiles.map(t => (cache[t.id] = tileSVG(g, t))).join("");
+  } else {
+    g.tiles.forEach((t, i) => {
+      const h = tileSVG(g, t);
+      if (cache[t.id] === h) return;
+      cache[t.id] = h;
+      const tmp = document.createElementNS(SVG_NS, "g");
+      tmp.innerHTML = h;
+      if (tmp.firstElementChild) tl.replaceChild(tmp.firstElementChild, tl.children[i]);
+    });
+  }
+  // 駒はいちばん上＝常に最前面（移動アニメ中は動かしている本人を上書きしない）
+  if (!UI.tokenHop) {
+    const tok = boardLayer(svg, "tok");
+    const th = tokensSVG(g);
+    if (svg._tokHtml !== th) { tok.innerHTML = th; svg._tokHtml = th; }
+  }
+}
+
+// ---------- 盤面の表示密度（v35・LOD） ----------
+// スマホでは盤面全体を画面幅に収めるとマス1つが50px前後になり、v34のマス目の文字（7px相当）は読めなかった。
+// マスの実寸が小さいときは body の代わりに #board へ .lod-lo を付け、細かい文字（名前・ST/HP・属性チップ）を隠して
+// 「クリーチャーの姿・レベルの粒・通行料」だけを大きく見せる。拡大すると自動で詳細表示に戻る。
+const LOD_PX_PER_UNIT = 0.7; // 盤面座標1単位あたりの表示px（＝マス目の文字の縮尺）がこれ未満なら簡略表示
+function updateBoardLod() {
+  const svg = document.getElementById("board");
+  if (!svg) return;
+  const vb = svg.viewBox && svg.viewBox.baseVal;
+  const rect = svg.getBoundingClientRect();
+  if (!vb || !vb.width || !rect.width) return;
+  const lo = rect.width / vb.width < LOD_PX_PER_UNIT; // 詳細表示の文字（11.5単位）が約8px未満になる縮尺
+  svg.classList.toggle("lod-lo", lo);
+  UI.boardLo = lo;
+}
+
+// 土地の縁の色（未所有のとき）: 属性がひと目で分かるよう、属性色を暗めに
+const LAND_EDGE = { fire: "#9a4a30", wood: "#4a7a34", earth: "#8a6a3a", water: "#3a62a0" };
+// 文字の縁取り（地の絵に重ねても読めるように）
+const _txtEdge = (u, k = 3) => ` stroke="#0b0814" stroke-width="${_n(k * u)}" stroke-linejoin="round" paint-order="stroke"`;
+
+// マス1つぶんの描画（v31: 外形は形状パス・中身は中心からの相対配置／v35: 駐留クリーチャーの姿＋LOD）
 function tileSVG(g, tile) {
   const { cx, cy } = tileCenter(tile);
   const S = TILE, u = S / 90;              // u＝基準サイズ(90)からの倍率。中身の座標・文字サイズに掛ける
   const isLand = tile.type === "LAND";
+  const owned = tile.owner !== null && tile.owner !== undefined;
   const shapeD = (size) => tileShapeD(tile, cx, cy, size);
   const fill = isLand ? `url(#tg-${tile.element})`
     : tile.type === "CASTLE" ? "url(#tg-castle)"
     : tile.type === "MAGMA" ? "#5a2418"
     : "url(#tg-special)";
-  const stroke = tile.owner !== null ? PLAYER_COLORS[tile.owner]
-    : tile.type === "CASTLE" ? "#c9a755" : "#5a5470";
-  const sw = tile.owner !== null ? 4 : tile.type === "CASTLE" ? 2.5 : 1.5;
-  let html = `<g class="tile" data-tile="${tile.id}">`;
+  const stroke = owned ? PLAYER_COLORS[tile.owner]
+    : tile.type === "CASTLE" ? "#c9a755" : isLand ? (LAND_EDGE[tile.element] || "#5a5470") : "#5a5470";
+  const sw = owned ? 4 : tile.type === "CASTLE" ? 2.5 : isLand ? 2 : 1.5;
+  let html = `<g class="tile${owned ? " owned" : ""}" data-tile="${tile.id}">`;
+  // 盤面から少し浮いた石板に見せる影（v35）
+  html += `<path d="${shapeD(S)}" transform="translate(0 ${_n(3.5 * u)})" fill="#000" opacity="0.42"/>`;
   // 所有地はプレイヤー色のオーラで一目で分かるように（マス目と同じ形で一回り大きく）
-  if (tile.owner !== null) {
-    html += `<path d="${shapeD(S + 7)}" fill="none" stroke="${PLAYER_COLORS[tile.owner]}" stroke-width="7" opacity="0.22"/>`;
+  if (owned) {
+    html += `<path d="${shapeD(S + 8)}" fill="none" stroke="${PLAYER_COLORS[tile.owner]}" stroke-width="7" opacity="0.26"/>`;
   }
   html += `<path class="tshape" d="${shapeD(S)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>`;
   // 内側のハイライト線（マス目の立体感。外形と同じ形で少し内側に）＋形ごとの飾り（稜線・葉脈・歯車の軸）
-  html += `<path d="${shapeD(S - 6)}" fill="none" stroke="#fff" stroke-opacity="${tile.type === "CASTLE" ? 0.12 : 0.06}" stroke-width="1" stroke-linejoin="round"/>`;
+  html += `<path d="${shapeD(S - 6)}" fill="none" stroke="#fff" stroke-opacity="${tile.type === "CASTLE" ? 0.14 : 0.08}" stroke-width="1.2" stroke-linejoin="round"/>`;
   html += tileDecorSVG(tile, cx, cy, S);
 
   // ---- 中身 ----
-  // v31: マス目が四角とは限らなくなったので、中身は「中央に積む横帯」に組み替えた。
-  //   1段目 [属性チップ] #番号 Lv3   … 上ほど幅を使わない＝六角・円・結晶でも角が飛び出さない
-  //   2段目 ●●●○○（レベルのピップ）
-  //   3段目 (属性バッジ) クリーチャー名
-  //   4段目 ST・HP
-  //   5段目 通行料
-  // 角に置いていた要素（属性チップ・Lv・#番号）を1段目へ集約したのがv30からの変更点。
-  // さらに形ごとの content 率で中心方向へ縮め、どの形でも枠内に収める。
+  // v35: 中央にクリーチャーの姿（カードと同じ絵）を置き、文字は縁取りつきで重ねる。
+  //   .t-hi … 詳細表示のときだけ（属性チップ・Lv・名前・ST/HP・#番号・マスの名前）
+  //   .t-lo … 簡略表示（スマホの全体表示）のときだけ（大きな通行料・大きな紋章）
+  //   どちらでもない要素（クリーチャーの姿・レベルの粒）は常に出す
   const k = tileContentScale(tile);
   let inner = "";
   if (isLand) {
-    inner += `<rect x="${_n(cx - 28 * u)}" y="${_n(cy - 37 * u)}" width="${_n(22 * u)}" height="${_n(18 * u)}" rx="${_n(5.5 * u)}" fill="${ELEMENTS[tile.element].color}cc"/>`;
-    inner += `<text x="${_n(cx - 17 * u)}" y="${_n(cy - 24 * u)}" font-size="${_n(13 * u)}" text-anchor="middle">${ELEMENTS[tile.element].icon}</text>`;
-    inner += `<text x="${_n(cx)}" y="${_n(cy - 25 * u)}" font-size="${_n(9.5 * u)}" fill="#9a92b5" text-anchor="middle">#${tile.id}</text>`;
-    inner += `<text x="${_n(cx + 29 * u)}" y="${_n(cy - 24 * u)}" font-size="${_n(13 * u)}" fill="#cfc9e0" text-anchor="end" font-weight="bold">Lv${tile.level}</text>`;
-    const PIP_N = LAND_VALUE.length, pipGap = 8.6 * u, pipR = 3.2 * u;
-    const pipStartX = cx - (PIP_N - 1) * pipGap / 2, pipY = cy - 11 * u;
+    const PIP_N = LAND_VALUE.length, pipGap = 9 * u, pipR = 3.6 * u;
+    const pipStartX = cx - (PIP_N - 1) * pipGap / 2, pipY = cy - 33 * u;
+    inner += `<g class="t-hi">` +
+      `<rect x="${_n(cx - 39 * u)}" y="${_n(cy - 42 * u)}" width="${_n(19 * u)}" height="${_n(16 * u)}" rx="${_n(5 * u)}" fill="${ELEMENTS[tile.element].color}dd"/>` +
+      `<text x="${_n(cx - 29.5 * u)}" y="${_n(cy - 30 * u)}" font-size="${_n(11.5 * u)}" text-anchor="middle">${ELEMENTS[tile.element].icon}</text>` +
+      `<text x="${_n(cx + 39 * u)}" y="${_n(cy - 29.5 * u)}" font-size="${_n(11.5 * u)}" fill="#e8e2f5" text-anchor="end" font-weight="bold"${_txtEdge(u)}>Lv${tile.level}</text></g>`;
+    let pips = "";
     for (let lv = 1; lv <= PIP_N; lv++) {
       const on = lv <= tile.level;
-      inner += `<circle cx="${_n(pipStartX + (lv - 1) * pipGap)}" cy="${_n(pipY)}" r="${_n(pipR)}" fill="${on ? "#ffd76a" : "#453f5c"}"${on ? ' stroke="#8a6a12" stroke-width="0.6"' : ""}/>`;
+      pips += `<circle cx="${_n(pipStartX + (lv - 1) * pipGap)}" cy="${_n(pipY)}" r="${_n(pipR)}" fill="${on ? "#ffd76a" : "#2a2438"}" stroke="${on ? "#7a5a10" : "#5a5470"}" stroke-width="${_n(0.8 * u)}"/>`;
     }
+    inner += pips;
     if (tile.creature) {
       const c = CARD_BY_ID[tile.creature.cardId];
-      const ce = ELEMENTS[c.element];
       const cur = tile.creature.hp ?? c.hp;
-      const wounded = cur < c.hp;
-      const hpStr = wounded ? `${cur}/${c.hp}` : `${c.hp}`;
-      const hpFill = wounded ? "#ff8a6a" : "#ffe08a"; // 傷ついていれば赤み
-      // クリーチャーの属性は「丸いバッジ」（＝土地チップの角丸と形で区別）
-      inner += `<circle cx="${_n(cx - 24 * u)}" cy="${_n(cy + 3 * u)}" r="${_n(9.5 * u)}" fill="${ce.color}" stroke="#fff" stroke-width="${_n(1.4 * u)}"/>`;
-      inner += `<text x="${_n(cx - 24 * u)}" y="${_n(cy + 7 * u)}" font-size="${_n(11 * u)}" text-anchor="middle">${ce.icon}</text>`;
-      // 名前・ST/HPは長さが読めない（岩帝テラガイア＝長い名前／HP148/155＝7桁）ので、
-      // 幅が上限を超えるときだけ textLength で詰める＝どんなカードでもマス目からはみ出さない
-      const nm = c.name.slice(0, 5);
-      inner += `<text x="${_n(cx + 7 * u)}" y="${_n(cy + 7 * u)}" font-size="${_n(11.5 * u)}" fill="#fff" text-anchor="middle" font-weight="bold"${fitTextAttr(nm, 11.5 * u, 48 * u)}>${esc(nm)}</text>`;
+      const mx = (typeof maxHpOf === "function") ? maxHpOf(tile.creature) : c.hp;
+      const wounded = cur < mx;
+      // クリーチャーの姿（120×70のシーンを縮小してマスの中央へ）
+      const fs = 0.7 * u;
+      inner += `<g transform="translate(${_n(cx - 60 * fs)} ${_n(cy - 3 * u - 38 * fs)}) scale(${_n(fs * 1000) / 1000})">${creatureFigureSVG(c, { rim: 3.2 })}</g>`;
+      // 名前・ST/HP（詳細表示のみ）。長いときだけ textLength で詰める
+      const nm = c.name.slice(0, 6);
+      const hpStr = wounded ? `${cur}/${mx}` : `${cur}`;
       const stHp = `ST${c.st} HP${hpStr}`;
-      inner += `<text x="${_n(cx)}" y="${_n(cy + 24 * u)}" text-anchor="middle"${fitTextAttr(stHp, 15 * u, 58 * u)}>` +
-        `<tspan font-size="${_n(11.5 * u)}" fill="#c9c2da">ST${c.st}</tspan>` +
-        `<tspan font-size="${_n(16 * u)}" font-weight="bold" fill="${hpFill}"> HP${hpStr}</tspan></text>`;
+      inner += `<g class="t-hi">` +
+        `<text x="${_n(cx)}" y="${_n(cy + 15 * u)}" font-size="${_n(10.5 * u)}" fill="#fff" text-anchor="middle" font-weight="bold"${_txtEdge(u)}${fitTextAttr(nm, 10.5 * u, 62 * u)}>${esc(nm)}</text>` +
+        `<text x="${_n(cx)}" y="${_n(cy + 27.5 * u)}" text-anchor="middle"${_txtEdge(u)}${fitTextAttr(stHp, 13 * u, 66 * u)}>` +
+        `<tspan font-size="${_n(10.5 * u)}" fill="#ffc0a0" font-weight="bold">ST${c.st}</tspan>` +
+        `<tspan font-size="${_n(13 * u)}" font-weight="bold" fill="${wounded ? "#ff8a6a" : "#a8f0b8"}"> HP${hpStr}</tspan></text></g>`;
+      // 負傷は簡略表示でも分かるように、姿の右上に赤い滴を出す
+      if (wounded) inner += `<g class="t-lo"><circle cx="${_n(cx + 26 * u)}" cy="${_n(cy - 18 * u)}" r="${_n(7 * u)}" fill="#c0392b" stroke="#fff" stroke-width="${_n(1.4 * u)}"/>` +
+        `<text x="${_n(cx + 26 * u)}" y="${_n(cy - 14.5 * u)}" font-size="${_n(10 * u)}" fill="#fff" text-anchor="middle" font-weight="bold">!</text></g>`;
+    } else {
+      // 空き地: 属性の紋章をうっすら（簡略表示では大きく）
+      inner += `<text class="t-hi" x="${_n(cx)}" y="${_n(cy + 10 * u)}" font-size="${_n(26 * u)}" text-anchor="middle" opacity="0.42">${ELEMENTS[tile.element].icon}</text>`;
+      inner += `<text class="t-lo" x="${_n(cx)}" y="${_n(cy + 14 * u)}" font-size="${_n(38 * u)}" text-anchor="middle" opacity="0.62">${ELEMENTS[tile.element].icon}</text>`;
+      inner += `<text class="t-hi" x="${_n(cx)}" y="${_n(cy + 33 * u)}" font-size="${_n(9.5 * u)}" fill="#b8b0cc" text-anchor="middle">#${tile.id}</text>`;
     }
-    if (tile.owner !== null) {
-      inner += `<text x="${_n(cx)}" y="${_n(cy + 37 * u)}" font-size="${_n(12.5 * u)}" fill="${PLAYER_COLORS[tile.owner]}" text-anchor="middle" font-weight="bold">${tollOf(g, tile)}G</text>`;
+    if (owned) {
+      // 通行料の札（所有者の色）。簡略表示では大きな札にする
+      const toll = `${tollOf(g, tile)}G`, pc = PLAYER_COLORS[tile.owner];
+      const hiW = Math.max(38, approxTextW(toll, 12) + 10) * u, loW = Math.max(52, approxTextW(toll, 19) + 10) * u;
+      inner += `<g class="t-hi"><rect x="${_n(cx - hiW / 2)}" y="${_n(cy + 30 * u)}" width="${_n(hiW)}" height="${_n(14 * u)}" rx="${_n(7 * u)}" fill="${pc}" stroke="#0b0814" stroke-width="${_n(1.2 * u)}"/>` +
+        `<text x="${_n(cx)}" y="${_n(cy + 40.8 * u)}" font-size="${_n(11.5 * u)}" fill="#0b0814" text-anchor="middle" font-weight="bold">${toll}</text></g>`;
+      inner += `<g class="t-lo"><rect x="${_n(cx - loW / 2)}" y="${_n(cy + 20 * u)}" width="${_n(loW)}" height="${_n(22 * u)}" rx="${_n(8 * u)}" fill="${pc}" stroke="#0b0814" stroke-width="${_n(1.6 * u)}"/>` +
+        `<text x="${_n(cx)}" y="${_n(cy + 37 * u)}" font-size="${_n(18.5 * u)}" fill="#0b0814" text-anchor="middle" font-weight="bold"${fitTextAttr(toll, 18.5 * u, loW - 6 * u)}>${toll}</text></g>`;
     }
   } else {
     // 特別マスは大きな紋章＋名前。形そのものも種類ごとに違う（TYPE_SHAPE）
     const iconSize = (tile.type === "CASTLE" ? 32 : 28) * u;
-    inner += `<text x="${_n(cx)}" y="${_n(cy - 25 * u)}" font-size="${_n(9.5 * u)}" fill="#9a92b5" text-anchor="middle">#${tile.id}</text>`;
-    inner += `<text x="${_n(cx)}" y="${_n(cy + 6 * u)}" font-size="${_n(iconSize)}" text-anchor="middle">${TILE_ICONS[tile.type]}</text>`;
+    inner += `<text class="t-hi" x="${_n(cx)}" y="${_n(cy - 25 * u)}" font-size="${_n(9.5 * u)}" fill="#9a92b5" text-anchor="middle">#${tile.id}</text>`;
+    // 紋章の後ろに光（城は金・それ以外はマスの種類の色）
+    inner += `<circle cx="${_n(cx)}" cy="${_n(cy - 2 * u)}" r="${_n(22 * u)}" fill="${SPECIAL_GLOW[tile.type] || "#b9a3ff"}" opacity="0.16"/>`;
+    inner += `<text class="t-hi" x="${_n(cx)}" y="${_n(cy + 6 * u)}" font-size="${_n(iconSize)}" text-anchor="middle">${TILE_ICONS[tile.type]}</text>`;
+    inner += `<text class="t-lo" x="${_n(cx)}" y="${_n(cy + 13 * u)}" font-size="${_n(iconSize * 1.35)}" text-anchor="middle">${TILE_ICONS[tile.type]}</text>`;
     if (tile.type === "MAGIC") {
       inner += `<text x="${_n(cx + 20 * u)}" y="${_n(cy - 20 * u)}" font-size="${_n(10 * u)}" text-anchor="middle">✨<animate attributeName="opacity" values="1;0.2;1" dur="1.8s" repeatCount="indefinite"/></text>`;
     }
-    inner += `<text x="${_n(cx)}" y="${_n(cy + 28 * u)}" font-size="${_n(11.5 * u)}" fill="#b8b2cc" text-anchor="middle">${TILE_LABELS[tile.type]}</text>`;
+    inner += `<text class="t-hi" x="${_n(cx)}" y="${_n(cy + 28 * u)}" font-size="${_n(11.5 * u)}" fill="#d8d0ec" text-anchor="middle" font-weight="bold"${_txtEdge(u, 2.5)}>${TILE_LABELS[tile.type]}</text>`;
   }
   html += k === 1 ? inner
     : `<g transform="translate(${_n(cx * (1 - k))} ${_n(cy * (1 - k))}) scale(${k})">${inner}</g>`;
@@ -338,15 +459,15 @@ function tileSVG(g, tile) {
   if (ov) {
     const ovIcon = ov.kind === "sanctuary" ? "🛡️" : ov.kind === "snare" ? "🕸️" : ov.kind === "block" ? "🚧" : "✨";
     const ovColor = ov.kind === "sanctuary" ? "#8ecbff" : ov.kind === "snare" ? "#c9a0ff" : ov.kind === "block" ? "#ffb84d" : "#ddd";
-    html += `<path d="${shapeD(S)}" fill="none" stroke="${ovColor}" stroke-width="3" stroke-dasharray="7 5" opacity="0.9" stroke-linejoin="round"/>`;
-    html += `<text x="${cx}" y="${cy - 28 * u}" font-size="${15 * u}" text-anchor="middle">${ovIcon}</text>`;
+    html += `<path d="${shapeD(S)}" fill="${ovColor}" fill-opacity="0.08" stroke="${ovColor}" stroke-width="3" stroke-dasharray="7 5" opacity="0.95" stroke-linejoin="round"/>`;
+    html += `<text x="${cx}" y="${_n(cy - 24 * u)}" font-size="${_n(17 * u)}" text-anchor="middle">${ovIcon}</text>`;
   }
   // 🃏 伏せ札（v29）: 「何かが伏せてある」ことは全員に見える（中身は所有者のみ＝マス情報で確認）
   if (tile.trap && tile.owner === tile.trap.owner) {
-    const tx = cx + 28 * u, ty = cy - 37 * u;
+    const tx = cx + 27 * u, ty = cy - 40 * u;
     html += `<g opacity="0.95"><animate attributeName="opacity" values="0.95;0.55;0.95" dur="2.4s" repeatCount="indefinite"/>` +
-      `<rect x="${tx}" y="${ty}" width="${11 * u}" height="${15 * u}" rx="2" fill="#2a2140" stroke="${PLAYER_COLORS[tile.trap.owner]}" stroke-width="1.6"/>` +
-      `<text x="${tx + 5.5 * u}" y="${ty + 11.5 * u}" font-size="${9 * u}" text-anchor="middle" fill="#d9a6ff">?</text></g>`;
+      `<rect x="${_n(tx)}" y="${_n(ty)}" width="${_n(13 * u)}" height="${_n(17 * u)}" rx="2" fill="#2a2140" stroke="${PLAYER_COLORS[tile.trap.owner]}" stroke-width="1.8"/>` +
+      `<text x="${_n(tx + 6.5 * u)}" y="${_n(ty + 12.5 * u)}" font-size="${_n(10 * u)}" text-anchor="middle" fill="#d9a6ff" font-weight="bold">?</text></g>`;
   }
   // 矢印表示（v23）: ➡一方通行マスの唯一の出口／三叉路以上の合流マスの行き先
   const arrow = (nt, fill2, big) => {
@@ -355,7 +476,7 @@ function tileSVG(g, tile) {
     const L = (big ? 1.45 : 1) * u;
     return `<polygon points="${_n(ax + dx * 7 * L)},${_n(ay + dy * 7 * L)} ` +
       `${_n(ax - dx * 4 * L - dy * 6 * L)},${_n(ay - dy * 4 * L - dx * 6 * L)} ` +
-      `${_n(ax - dx * 4 * L + dy * 6 * L)},${_n(ay - dy * 4 * L + dx * 6 * L)}" fill="${fill2}" opacity="0.95"` +
+      `${_n(ax - dx * 4 * L + dy * 6 * L)},${_n(ay - dy * 4 * L + dx * 6 * L)}" fill="${fill2}" stroke="#0b0814" stroke-width="1" opacity="0.95"` +
       (big ? `><animate attributeName="opacity" values="1;0.45;1" dur="1.6s" repeatCount="indefinite"/></polygon>` : "/>");
   };
   if (tile.onewayTo != null) {
@@ -366,10 +487,10 @@ function tileSVG(g, tile) {
   }
   // 選択対象マスの強調（スペル対象／領地売却／侵攻先など）。盤面から直接クリックして選べる
   if (UI.selectableTiles && UI.selectableTiles.has(tile.id)) {
-    html += `<path d="${shapeD(S + 5)}" fill="none" stroke="#ffe066" stroke-width="5" stroke-linejoin="round">` +
+    html += `<path d="${shapeD(S + 5)}" fill="#ffe066" fill-opacity="0.12" stroke="#ffe066" stroke-width="5" stroke-linejoin="round">` +
       `<animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite"/></path>`;
-    html += `<rect x="${cx - 19}" y="${cy - 15}" width="38" height="28" rx="8" fill="#ffe066" opacity="0.96"/>`;
-    html += `<text x="${cx}" y="${cy + 6}" font-size="18" fill="#1a1526" text-anchor="middle" font-weight="bold">#${tile.id}</text>`;
+    html += `<rect x="${_n(cx - 21)}" y="${_n(cy - 16)}" width="42" height="30" rx="8" fill="#ffe066" stroke="#0b0814" stroke-width="1.5" opacity="0.97"/>`;
+    html += `<text x="${cx}" y="${_n(cy + 6)}" font-size="19" fill="#1a1526" text-anchor="middle" font-weight="bold">#${tile.id}</text>`;
   }
   // 🧭 進む方向の候補（v31）: 移動中に選べる行き先を大きな矢印＋光る枠で示す（ダイアログは出さない）
   if (UI.dirChoice && UI.dirChoice.ids.has(tile.id)) {
@@ -378,6 +499,11 @@ function tileSVG(g, tile) {
   html += `</g>`;
   return html;
 }
+// 特別マスの紋章の後ろの光（v35）
+const SPECIAL_GLOW = {
+  CASTLE: "#ffd76a", GATE: "#ff8a6a", CARD: "#d9a6ff", MAGIC: "#8ecbff", WARP: "#b9a3ff",
+  MAGMA: "#ff6a2a", BOOST: "#a8f0b8", FORTUNE: "#ffd76a", SPRING: "#8ee0ff",
+};
 
 // ============================================================
 // プレイヤー駒（v31・原さん要望「駒のディテールを上げる・見切れたり見えなくなったりしない」）
@@ -452,6 +578,109 @@ function playerTokenSVG(g, p, cx, cy) {
   return s;
 }
 
+// ---------- 盤面の見本（v35） ----------
+// 出陣確認で「これから挑む盤面」をそのまま小さく見せる（形・分かれ道・特別マス・地形）。
+// 実際の対戦と同じ tileSVG / roadsSVG / boardBackdropSVG で描くが、対戦の状態（G）には一切触れない。
+// マス目の寸法（TILE など）は一時的にそのステージの値へ切り替えて、描き終えたら元に戻す
+function boardThumbSVG(stageIdx) {
+  const stage = STAGES[stageIdx];
+  if (!stage) return "";
+  const saved = { TILE, TILE_SHAPE, ROAD_W, ROAD_DASH };
+  try {
+    applyStageLook(stage);
+    const tiles = buildBoard(stage);
+    const g = { stage, stageIdx, tiles, players: [], round: 1, fxList: [], current: -1, over: true };
+    const w = (Math.max(...tiles.map(t => t.x)) + 1) * CELL;
+    const h = (Math.max(...tiles.map(t => t.y)) + 1) * CELL;
+    const savedSel = UI.selectableTiles, savedDir = UI.dirChoice;
+    UI.selectableTiles = null; UI.dirChoice = null;
+    const body = boardBackdropSVG(g) + roadsSVG(g) + tiles.map(t => tileSVG(g, t)).join("");
+    UI.selectableTiles = savedSel; UI.dirChoice = savedDir;
+    return `<svg class="board-thumb lod-lo" viewBox="${-BOARD_PAD} ${-BOARD_PAD} ${w + BOARD_PAD * 2} ${h + BOARD_PAD * 2}" aria-hidden="true">${body}</svg>`;
+  } catch (e) {
+    console.error("[ui] 盤面の見本を描けなかった", e);
+    return "";
+  } finally {
+    TILE = saved.TILE; TILE_SHAPE = saved.TILE_SHAPE; ROAD_W = saved.ROAD_W; ROAD_DASH = saved.ROAD_DASH;
+  }
+}
+
+// ============================================================
+// 駒の移動アニメ・盤面の演出（v35・原さん要望「UI/UXのクオリティ向上」）
+// ------------------------------------------------------------
+// v34までは1歩ごとに盤面を描き直して駒が「瞬間移動」していた。v35では駒のSVGだけを
+// 前のマスから次のマスへ弧を描いて跳ねさせ、着地してから盤面を更新する。
+// アニメは requestAnimationFrame で描くが、完了は setTimeout で必ず来る＝
+// タブが裏に回って rAF が止まっても対戦（CPU戦・自動テスト）は止まらない。
+// ============================================================
+UI.tokenHop = false;
+function hopToken(g, p, fromId, toId) {
+  const svg = document.getElementById("board");
+  const el = svg && svg.querySelector(`g.bl-tok g.token[data-token="${p.id}"]`);
+  const dur = 200 * GAME_SPEED;
+  if (!el || dur < 30 || document.hidden || fromId === toId) return Promise.resolve();
+  const a = tileCenter(g.tiles[fromId]), b = tileCenter(g.tiles[toId]);
+  const dx = b.cx - a.cx, dy = b.cy - a.cy, H = TILE * 0.32;
+  UI.tokenHop = true;
+  return new Promise(res => {
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = now => {
+      const t = Math.min(1, (now - t0) / dur);
+      const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // ease-in-out
+      el.setAttribute("transform", `translate(${_n(dx * e)} ${_n(dy * e - H * Math.sin(Math.PI * t))})`);
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    setTimeout(() => {
+      cancelAnimationFrame(raf);
+      el.setAttribute("transform", `translate(${_n(dx)} ${_n(dy)})`);
+      UI.tokenHop = false;
+      res();
+    }, dur + 16);
+  });
+}
+
+// 盤面の演出レイヤー（bl-fx）に一時的な図形を足す。life(ms) 後に自分で消える＝再描画の影響を受けない
+function boardFx(html, life = 1500) {
+  const svg = document.getElementById("board");
+  const layer = boardLayer(svg, "fx");
+  if (!layer) return;
+  const grp = document.createElementNS(SVG_NS, "g");
+  grp.innerHTML = html;
+  layer.appendChild(grp);
+  setTimeout(() => grp.remove(), life);
+}
+// マスの上に浮かび上がって消える文字（+120G・Lv UP! など）。簡略表示では大きめに出す
+const FX_COLORS = { gain: "#ffe07a", loss: "#ff7a6a", info: "#e8e2f5", good: "#9ef0b0", magic: "#d9a6ff" };
+function fxFloat(tile, text, kind = "gain", opts = {}) {
+  if (!tile || typeof G === "undefined" || !G) return;
+  const { cx, cy } = tileCenter(tile);
+  const fs = (UI.boardLo ? 30 : 21) * (opts.scale || 1);
+  const col = opts.color || FX_COLORS[kind] || kind;
+  const y = cy - TILE * 0.28 + (opts.dy || 0);
+  boardFx(`<text class="fx-float" x="${_n(cx)}" y="${_n(y)}" font-size="${_n(fs)}" fill="${col}" text-anchor="middle" font-weight="900"` +
+    ` stroke="#0b0814" stroke-width="${_n(fs * 0.22)}" stroke-linejoin="round" paint-order="stroke"` +
+    (opts.delay ? ` style="animation-delay:${opts.delay}ms"` : "") + `>${esc(text)}</text>`, 1600 + (opts.delay || 0));
+}
+// マスから広がる光の輪（召喚・レベルアップ・制圧など）
+function fxRing(tile, color = "#ffd76a") {
+  if (!tile) return;
+  const { cx, cy } = tileCenter(tile);
+  boardFx(`<path class="fx-ring" d="${tileShapeD(tile, cx, cy, TILE)}" fill="none" stroke="${color}" stroke-width="6"/>` +
+    `<path class="fx-ring fx-ring2" d="${tileShapeD(tile, cx, cy, TILE)}" fill="${color}" fill-opacity="0.25" stroke="none"/>`, 1000);
+}
+// 拡大中に、動いている駒のマスが画面外なら見える位置までスクロールする（カメラの追従）
+function ensureTileVisible(tile) {
+  const wrap = document.getElementById("board-wrap");
+  if (!wrap || !tile || wrap.scrollWidth <= wrap.clientWidth + 4 && wrap.scrollHeight <= wrap.clientHeight + 4) return;
+  const el = document.querySelector(`#board g.tile[data-tile="${tile.id}"]`);
+  if (!el) return;
+  const r = el.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+  const m = 24;
+  if (r.left < w.left + m || r.right > w.right - m || r.top < w.top + m || r.bottom > w.bottom - m) scrollBoardTo(tile);
+}
+
 // ---------- 現状順位（standings） ----------
 // 勝利条件は「総資産 → 城へ凱旋」なので、順位は総資産（魔力＋所有地の価値）の多い順で決める。
 // 同額は同順位（1位・1位・3位）。ラウンド上限による資産勝負の判定と同じ基準。
@@ -518,6 +747,8 @@ function renderPanels(g) {
         ${face}<span class="ps-name" style="color:${PLAYER_COLORS[p.id]}">${esc(p.name)}</span>
         ${reached ? `<span class="p-reach" title="目標資産に到達！ 城へ凱旋すれば勝利">⚑凱旋</span>` : ""}
         ${under ? `<span class="p-under" title="劣勢（総資産が首位の${Math.round(COMEBACK_RATIO * 100)}%未満）＝⚒逆転スペルが使える／🔥反骨がST+20/HP+20／周回ボーナス1.5倍${g.climax ? "／スペル25%OFF" : ""}">🔥劣勢</span>` : ""}
+        ${g.missions && g.missions.pid === p.id && typeof missionProgressText === "function"
+          ? `<span class="p-mission${g.missions.list.every(m => m.done) ? " all" : ""}" title="🎯この対戦の挑戦（情報窓をタップで内容）">${missionProgressText(g)}</span>` : ""}
       </div>
       <div class="ps-mid">
         <span class="ps-magic" title="手持ちの魔力">💎${p.magic}G</span>
@@ -531,6 +762,7 @@ function renderPanels(g) {
         <span title="山札の残り">🎴${p.deck.length}</span>
         <span class="ps-gap">${rankGapText(rows, me)}</span>
       </div>`;
+    watchPanelChanges(g, p, el);
   });
   const diff = DIFFICULTIES[loadDifficulty()];
   const mode = g.hotseat ? "🎮 2人対戦" : g.royale ? `⚔ 三つ巴｜${diff.icon}${diff.label}` : `難易度 ${diff.icon}${diff.label}`;
@@ -548,6 +780,65 @@ function renderPanels(g) {
     (bev ? `｜${bev.label}` : "") +
     `｜🥇 ${leader}`;
   document.getElementById("round-info").classList.toggle("climax", !!g.climax);
+}
+
+// ---------- 魔力の増減・連鎖の成立を知らせる（v35） ----------
+// 情報窓の数字は描き直されるだけで、いくら増えた／減ったのかは見逃しやすかった。
+// 前回の描画から魔力が動いたら、情報窓の魔力の上に「+120」「-80」を浮かべる（通行料の受け取りも一目で分かる）。
+// 同じ属性の自領が2つ以上に増えたら（＝🔗連鎖で通行料が上がった）、その属性の自領を光らせて知らせる。
+UI.panelWatch = null;
+function watchPanelChanges(g, p, el) {
+  if (!UI.panelWatch || UI.panelWatch.g !== g) UI.panelWatch = { g, magic: {}, chain: {} };
+  const w = UI.panelWatch;
+  const prev = w.magic[p.id];
+  if (prev !== undefined && prev !== p.magic) moneyDelta(el, p.magic - prev);
+  w.magic[p.id] = p.magic;
+  const chains = w.chain[p.id] || (w.chain[p.id] = {});
+  LAND_ELEMENTS.forEach(e => {
+    const n = chainCount(g, p.id, e);
+    const before = chains[e];
+    chains[e] = n;
+    if (before === undefined || n <= before || n < 2 || g.over) return;
+    toast(`🔗 ${p.name}の${ELEMENTS[e].icon}${ELEMENTS[e].name}の連鎖×${n}！ 通行料×${chainMult(n).toFixed(1)}`, "sys");
+    g.tiles.filter(t => t.type === "LAND" && t.owner === p.id && t.element === e).forEach(t => fxRing(t, ELEMENTS[e].color));
+  });
+}
+function moneyDelta(el, d) {
+  if (!el || !d || el.offsetParent === null) return;
+  const anchor = el.querySelector(".ps-magic") || el;
+  const r = anchor.getBoundingClientRect();
+  const pop = document.createElement("div");
+  pop.className = `money-delta ${d > 0 ? "up" : "down"}`;
+  pop.textContent = `${d > 0 ? "+" : ""}${d}G`;
+  pop.style.left = `${r.left + r.width / 2}px`;
+  pop.style.top = `${r.top}px`;
+  document.body.appendChild(pop);
+  setTimeout(() => pop.remove(), 1400);
+}
+
+// ---------- 決着の成績表（v35） ----------
+// 決着ダイアログの「あなたの総資産: 3002G ／ 相手: 3107G」という1行を、順位・総資産のバー・
+// 領地数・周回数の並んだ成績表にする（誰がどれだけ差をつけたかが一目で分かる）
+function resultBoardHTML(g) {
+  // 勝者（凱旋した人・ラウンド上限なら資産首位）を先頭に👑、以降は総資産の順。
+  // ※凱旋が勝利条件なので、総資産で上回っていても勝者とは限らない＝メダルではなく順番で見せる
+  const rows = standingsOf(g).slice().sort((a, b) =>
+    (g.winner && b.id === g.winner.id) - (g.winner && a.id === g.winner.id) || b.assets - a.assets);
+  rows.forEach((r, i) => { r.place = i + 1; });
+  const top = Math.max(1, ...rows.map(r => r.assets), RULES.target);
+  return `<div class="result-board">` + rows.map(r => {
+    const p = g.players[r.id];
+    const ch = (typeof charOf === "function") ? charOf(p) : null;
+    const face = ch ? charPortraitSVG(ch, 34) : `<span class="rb-emoji">${P_ICONS[p.id]}</span>`;
+    const lands = ownedLands(g, p.id).length;
+    const win = g.winner && g.winner.id === p.id;
+    return `<div class="rb-row${win ? " win" : ""}" style="--pc:${PLAYER_COLORS[p.id]}">` +
+      `<span class="rb-rank">${win ? "👑" : `${r.place}<small>位</small>`}</span><span class="rb-face">${face}</span>` +
+      `<span class="rb-main"><span class="rb-name">${esc(p.name)}${win ? `<span class="rb-win">WIN</span>` : ""}</span>` +
+      `<span class="rb-bar"><i style="width:${Math.min(100, r.assets / top * 100).toFixed(1)}%"></i><em style="left:${Math.min(100, RULES.target / top * 100).toFixed(1)}%" title="目標資産"></em></span>` +
+      `<span class="rb-sub">🏞 領地${lands}　🔄 ${p.laps}周　💎 魔力${p.magic}G</span></span>` +
+      `<span class="rb-assets">${r.assets}<small>G</small></span></div>`;
+  }).join("") + `<div class="rb-note">目標資産 ${RULES.target}G（バーの縦線）</div></div>`;
 }
 
 // ---------- プレイヤー詳細ポップアップ（v27） ----------
@@ -597,6 +888,8 @@ function showPlayerDetail(pid) {
       ${row("関門", `${gates}（${p.gates.size} / ${needed}）`)}
       ${row("周回", `${p.laps} 周`)}
       ${row("手札 / 山札 / 捨札", `${p.hand.length}枚 / ${p.deck.length}枚 / ${p.discard.length}枚`)}
+      ${G.missions && G.missions.pid === pid && typeof missionListHTML === "function"
+        ? `<div class="ip-lands"><div class="cd-abs-t">🎯 この対戦の挑戦（達成1つにつき決着後にカード1枚）</div>${missionListHTML(G)}</div>` : ""}
       <div class="ip-lands"><div class="cd-abs-t">🏞 所有地 ${lands.length}か所（合計 ${landTotal}G）</div>${landHtml}</div>
       <div class="cd-hint">クリックで閉じる</div>
     </div>`;
@@ -644,11 +937,13 @@ function cardHTML(c, opts = {}) {
   const abil = (c.ab || []).map(a => `<span class="ab">${ABILITY_INFO[a].name}</span>`).join("")
     // 🤝絆（v31）: 相方が盤上にいるときだけ働く効果。対戦中は成立していれば光らせる
     + (c.bond ? `<span class="ab bond${bondLit(c) ? " lit" : ""}" title="🤝${esc(c.bond.name)}（相方: ${esc(bondPartnerNames(c))}）&#10;${esc(c.bond.desc)}">🤝${esc(c.bond.name)}</span>` : "");
+  // v35: ST/HPは「剣」「盾」の宝石バッジ（TCGの定番配置＝左下が攻撃・右下が体力）
   const body = c.type === "creature"
-    ? `<div class="c-stats"><span class="c-st">ST ${c.st}</span><span class="c-hp">HP ${c.hp}</span></div><div class="c-ab">${abil}</div>`
+    ? `<div class="c-ab">${abil}</div><div class="c-stats"><span class="c-st" title="ST（攻撃力）"><small>ST</small>${c.st}</span><span class="c-hp" title="HP（体力）"><small>HP</small>${c.hp}</span></div>`
     : `<div class="c-desc">${esc(c.desc)}</div>`;
   const elemIcon = c.type === "creature" ? ELEMENTS[c.element].icon
     : c.type === "item" ? (c.st > 0 ? "⚔️" : "🛡️") : "✨";
+  const typeLabel = c.type === "creature" ? `${ELEMENTS[c.element].name}` : c.type === "item" ? "アイテム" : "スペル";
   const rm = RARITY_META[rar];
   // v31: 使用条件つきのカードは「⚒逆転／⚔決戦」の帯を出し、いま使えるなら光らせる
   const gate = opts.gate;
@@ -656,15 +951,16 @@ function cardHTML(c, opts = {}) {
   const gateHtml = gate
     ? `<span class="c-gate ${gate.ok ? "on" : "off"}" title="${esc(gate.why)}">${gate.icon}${gate.label}${gate.ok ? "" : "…"}</span>`
     : "";
-  // 額縁＋アート窓＋コスト宝珠＋魔力の光沢（.c-shine）で「魔力の込められたカード」を表現
+  // v35: 額縁（属性色のグラデーション枠）＋アート窓（属性の紋章・条件帯を内側に）＋名札＋宝石バッジ。
+  // レジェンドはホロ箔（.c-foil）、レアは銀の光沢で一目で格が分かる
   return `<div class="${cls.join(" ")}" data-card="${c.id}" title="${esc(c.type === 'spell' ? c.desc : (c.ab || []).map(a => ABILITY_INFO[a].name + ': ' + ABILITY_INFO[a].desc).join(' / '))}">
-    <div class="c-art">${typeof cardArtSVG === "function" ? cardArtSVG(c) : ""}</div>${gateHtml}
+    <div class="c-art">${typeof cardArtSVG === "function" ? cardArtSVG(c) : ""}${gateHtml}
+      <span class="c-elem" title="${c.type === "creature" ? ELEMENTS[c.element].name + "属性" : typeLabel}">${elemIcon}</span></div>
     <span class="c-cost" title="コスト ${c.cost}G">${c.cost}</span>
     <span class="c-rarity" style="color:${rm.color}" title="${rm.label}">${rm.stars}</span>
-    <span class="c-elem" title="${c.type === "creature" ? ELEMENTS[c.element].name + "属性" : c.type === "item" ? "アイテム" : "スペル"}">${elemIcon}</span>
     <div class="c-name">${esc(c.name)}</div><div class="c-body">${body}</div>
     ${opts.ribbon ? `<span class="c-ribbon ${opts.ribbonCls || ""}">${opts.ribbon}</span>` : ""}
-    <div class="c-shine"></div></div>`;
+    ${rar === "legendary" ? `<div class="c-foil"></div>` : ""}<div class="c-shine"></div></div>`;
 }
 
 // 属性相性（4すくみ）の関係を返す: "adv"=meが有利 / "dis"=meが不利 / "even"=互角 / "none"=無属性が絡む（輪の外）
@@ -804,6 +1100,49 @@ function updateHandArrows() {
   prev.disabled = hand.scrollLeft <= 2;
   next.disabled = hand.scrollLeft >= hand.scrollWidth - hand.clientWidth - 2;
 }
+// ---------- カードを確かめる（v35） ----------
+// スマホには「マウスを乗せて説明を見る」が無く、手札の能力の説明を対戦中に読む手段が無かった。
+//   ・手札のカードをタップ … 使えるスペル以外なら詳細ポップアップ（使えるスペルはタップ＝使用のまま）
+//   ・どこのカードでも長押し（0.45秒） … 詳細ポップアップ（ダイアログで選ぶ前に確かめられる）。
+//     長押しの直後の「クリック」は捨てる＝長押しで誤って選んでしまわない
+function initCardInspect() {
+  document.getElementById("hand")?.addEventListener("click", e => {
+    const card = e.target.closest && e.target.closest(".card[data-card]");
+    if (!card || card.classList.contains("castable") || card.classList.contains("facedown")) return;
+    if (UI._longPressFired) return;
+    showCardDetail(card.dataset.card);
+  });
+  let timer = null, startX = 0, startY = 0;
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  document.addEventListener("pointerdown", e => {
+    UI._longPressFired = false; // 新しい操作の始まり＝前の長押しの名残りを消す
+    cancel();
+    const card = e.target.closest && e.target.closest(".card[data-card]");
+    if (!card || card.closest("#card-pop") || (e.pointerType === "mouse" && e.button !== 0)) return;
+    startX = e.clientX; startY = e.clientY;
+    timer = setTimeout(() => {
+      timer = null;
+      UI._longPressFired = true;
+      if (navigator.vibrate) { try { navigator.vibrate(12); } catch (err) { /* 無視 */ } }
+      showCardDetail(card.dataset.card);
+    }, 450);
+  }, { passive: true });
+  document.addEventListener("pointermove", e => {
+    if (timer && Math.hypot(e.clientX - startX, e.clientY - startY) > 10) cancel(); // スクロールは長押しにしない
+  }, { passive: true });
+  document.addEventListener("pointerup", cancel, { passive: true });
+  document.addEventListener("pointercancel", cancel, { passive: true });
+  // 長押しで詳細を開いた直後のクリックは、選択として扱わない（捕捉フェーズで止める）
+  document.addEventListener("click", e => {
+    if (!UI._longPressFired) return;
+    UI._longPressFired = false;
+    e.stopPropagation(); e.preventDefault(); // 開いたばかりの詳細ポップアップも閉じない
+  }, true);
+  // 長押しでブラウザのメニュー（画像保存など）が出ないように
+  document.addEventListener("contextmenu", e => {
+    if (e.target.closest && e.target.closest(".card[data-card]")) e.preventDefault();
+  });
+}
 function initHandArrows() {
   const hand = document.getElementById("hand");
   const step = () => {
@@ -906,6 +1245,7 @@ function applyZoom() {
   if (svg) svg.style.setProperty("--zoom", BOARD_ZOOM.toFixed(2));
   const lbl = document.getElementById("zoom-label");
   if (lbl) lbl.textContent = `${Math.round(BOARD_ZOOM * 100)}%`;
+  updateBoardLod(); // v35: 拡大するとマス目の詳細表示に切り替わる
 }
 function zoomBoard(delta) {
   BOARD_ZOOM = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, +(BOARD_ZOOM + delta).toFixed(2)));
@@ -1025,6 +1365,7 @@ function syncHudMetrics() {
   if (wrap && wrap.clientHeight > 80) {
     root.style.setProperty("--board-base", `${Math.round(wrap.clientHeight - 8)}px`);
   }
+  updateBoardLod(); // 盤面の実寸が変わったら表示密度も測り直す
 }
 
 // ---------- 🗺 マップ確認モード ----------
@@ -1079,6 +1420,7 @@ function initHudWindows() {
   });
   applyHudPrefs();
   initHandArrows();
+  initCardInspect(); // v35: 手札タップ・長押しでカード詳細
 }
 
 // ---------- ログ ----------
@@ -1156,7 +1498,8 @@ function showDialog(opts) {
     const box = document.getElementById("dialog");
     const restoreBtn = document.getElementById("peek-restore");
     let html = `<h2>${esc(opts.title)}</h2>`;
-    if (opts.body) html += `<p class="dlg-body">${opts.body}</p>`;
+    // v35: 本文に表（成績表・遊び方の見出し等）を入れられるよう <div>（<p> の中の <div> はブラウザが <p> を閉じてしまう）
+    if (opts.body) html += `<div class="dlg-body">${opts.body}</div>`;
     if (opts.cards && opts.cards.length) {
       html += `<div class="dlg-cards">` +
         opts.cards.map(ci => cardHTML(ci.card, { disabled: ci.disabled, selectable: !ci.disabled, ribbon: ci.ribbon, ribbonCls: ci.ribbonCls })).join("") +
@@ -1303,12 +1646,12 @@ function showStageSelect(opts = {}) {
     const wOn = weeklyEnabled();
     // 世界観ヘッダー（紋章＋題字＋口上＋状態チップ）
     const chips = arr => `<div class="ss-chips">${arr.filter(Boolean).map(t => `<span class="ss-chip">${t}</span>`).join("")}</div>`;
-    const hero = (title, flavor, chipArr) => `
+    const hero = (title, flavor, chipArr, flavorCls = "") => `
       <div class="ss-hero">
         <div class="ss-crest">${typeof TITLE_EMBLEM_SVG !== "undefined" ? TITLE_EMBLEM_SVG : ""}</div>
         <div class="ss-hero-main">
           <h2>${title}</h2>
-          <p class="ss-flavor">${flavor}</p>
+          <p class="ss-flavor ${flavorCls}">${flavor}</p>
           ${chips(chipArr)}
         </div>
       </div>`;
@@ -1338,28 +1681,57 @@ function showStageSelect(opts = {}) {
       : hero("✦ 遠征の書 — 旅路を選べ ✦",
         `大地に張り巡らされた魔力の回路。クリーチャーを従えて土地を繋ぎ、連鎖で通行料を吊り上げ、
          目標資産を成して🏰城へ帰還せよ。初クリアの<b>カードパック</b>と勝利の<b>カード</b>で、自分だけのデッキを組み上げろ。`,
-        [`👤 <b>${esc(currentProfileName())}</b>`, `⚙ 難易度: <b>${diff.icon} ${diff.label}</b>`, weeklyChip, mlChip]);
-    const buttons = (versus || training || royale || sealed)
+        [`👤 <b>${esc(currentProfileName())}</b>`, `⚙ 難易度: <b>${diff.icon} ${diff.label}</b>`, weeklyChip, mlChip], "hub-flavor");
+    const hub = !(versus || training || royale || sealed); // 遠征（通常）＝ホーム画面。タブで各機能へ
+    const buttons = !hub
       ? (training || royale || sealed ? `<button class="btn" data-value="difficulty">⚙ 難易度: ${diff.icon}${diff.label}</button>` : "") +
         `<button class="btn" data-value="back">← 戻る</button>`
-      : `<button class="btn" data-value="profile">👤 ${esc(currentProfileName())}</button>
-         <button class="btn" data-value="difficulty">⚙ 難易度: ${diff.icon}${diff.label}</button>
-         <button class="btn" data-value="matchlen">⏱ 決着: ${ml.icon}${ml.label}</button>
-         <button class="btn" data-value="album">📚 アルバム（${distinctOwned()}/${CARD_DB.length}）</button>
-         <button class="btn" data-value="deck">🛠 デッキ構築</button>
-         <button class="btn" data-value="workshop">♻️ 交換所（🎟${shardCount()}）</button>
-         <button class="btn" data-value="training">🎯 トレーニング</button>
-         <button class="btn" data-value="royale">⚔ 三つ巴</button>
-         <button class="btn" data-value="sealed">🎁 シールド戦</button>
-         <button class="btn" data-value="versus">🎮 2人対戦</button>
-         <button class="btn" data-value="weekly">🎪 週替り: ${wr.icon}${esc(wr.name)}${wOn ? "" : "（OFF）"}</button>
-         <button class="btn" data-value="help">❓ 遊び方</button>`;
+      : "";
+    // v35: ホーム画面のタブ（v34までは12個のボタンが一覧の下に折り返して並び、スマホでは画面外にはみ出していた）。
+    //   🗺遠征＝ステージ一覧 ／ ⚔対戦モード ／ 🃏カード ／ ⚙設定。戻ってきたときは最後に開いていたタブを出す
+    const tile = (value, icon, label, sub, extra = "") =>
+      `<button class="hub-tile" data-value="${value}"><span class="ht-icon">${icon}</span>` +
+      `<span class="ht-main"><b>${label}</b><small>${sub}</small></span>${extra}</button>`;
+    const hubTabs = [
+      { key: "stages", icon: "🗺", label: "遠征" },
+      { key: "modes", icon: "⚔", label: "対戦モード" },
+      { key: "cards", icon: "🃏", label: "カード" },
+      { key: "settings", icon: "⚙", label: "設定" },
+    ];
+    const hubPanels = {
+      modes: tile("training", "🎯", "トレーニング", `練習対戦。勝てばカード${REWARD_TRAINING}枚（何度でも）`, streak >= 1 ? `<span class="ht-badge">🔥${streak}連勝</span>` : "") +
+        tile("royale", "⚔", "三つ巴", `あなた・ステージの主・乱入者の3人戦。勝てばカード${REWARD_WIN + REWARD_ROYALE_BONUS}枚`) +
+        tile("sealed", "🎁", "シールド戦", "その場で開封したカードだけで組んで1戦。誰でも対等の腕くらべ") +
+        tile("versus", "🎮", "2人対戦", "1台の端末を交互に操作する人間同士の対戦") +
+        tile("weekly", wr.icon, `週替り: ${esc(wr.name)}`, wOn ? "今週の特殊ルール（ON）" : "今週の特殊ルール（OFF）", `<span class="ht-badge ${wOn ? "on" : ""}">${wOn ? "ON" : "OFF"}</span>`),
+      cards: tile("album", "📚", "アルバム", `集めたカード ${distinctOwned()} / ${CARD_DB.length}種`) +
+        tile("deck", "🛠", "デッキ構築", "30枚のデッキを組む（5つまで保存）") +
+        tile("workshop", "♻️", "ポイント交換所", `余ったカードを🎟に替えてパックを買う（🎟${shardCount()}）`),
+      settings: tile("profile", "👤", `プレイヤー: ${esc(currentProfileName())}`, "5人まで切替（コレクション・進行度は別々）") +
+        tile("difficulty", diff.icon, `難易度: ${diff.label}`, "CPUの積極性・デッキ・資金力") +
+        tile("matchlen", ml.icon, `決着: ${ml.label}`, "目標資産とラウンド上限の長さ") +
+        tile("help", "❓", "遊び方", "ルール・マス・特性・スペルの説明"),
+    };
     overlay.classList.add("show");
     const close = v => { overlay.classList.remove("show"); resolve(v); };
 
     // --- ステージ一覧（「← ステージを選び直す」でここへ戻ってくる） ---
     function renderList() {
-      box.innerHTML = `${header}<div class="stage-list">${rows}</div><div class="dlg-buttons">${buttons}</div>`;
+      if (!hub) {
+        box.innerHTML = `${header}<div class="stage-list">${rows}</div><div class="dlg-buttons">${buttons}</div>`;
+      } else {
+        const cur = UI.hubTab || "stages";
+        box.innerHTML = `${header}<div class="hub-tabs" role="tablist">` +
+          hubTabs.map(t => `<button class="hub-tab${t.key === cur ? " on" : ""}" data-tab="${t.key}" role="tab">${t.icon}<span>${t.label}</span></button>`).join("") +
+          `</div>` +
+          (cur === "stages" ? `<div class="stage-list hub-list">${rows}</div>` : `<div class="hub-grid">${hubPanels[cur]}</div>`);
+        box.querySelectorAll(".hub-tab").forEach(b => b.addEventListener("click", () => {
+          UI.hubTab = b.dataset.tab;
+          if (typeof SFX !== "undefined" && SFX.flip) SFX.flip();
+          renderList();
+        }));
+        box.querySelectorAll(".hub-tile").forEach(b => b.addEventListener("click", () => close(b.dataset.value)));
+      }
       box.scrollTop = 0;
       box.querySelectorAll(".stage-btn:not(.locked)").forEach(btn =>
         btn.addEventListener("click", () => pick(Number(btn.dataset.idx))));
@@ -1405,6 +1777,7 @@ function showStageSelect(opts = {}) {
             </div>
           </div>
           <p class="sc-desc">${esc(s.desc)}</p>
+          <div class="sc-board" title="この盤面の見本（形・分かれ道・特別マス）">${boardThumbSVG(idx)}</div>
           ${ch && !versus ? `<p class="sc-quote">「${esc((ch.lines.greet && ch.lines.greet[0]) || "")}」</p>` : ""}
           ${st && !versus ? `<div class="sc-style" style="border-color:${ch ? ch.color + "66" : "var(--gold)"}">
             <div class="sc-style-head">${st.icon} 戦型: <b>${st.label}</b>${tier ? `（${tier}）` : ""} — ${esc(st.plan)}</div>
@@ -1413,7 +1786,7 @@ function showStageSelect(opts = {}) {
           </div>` : ""}
           <div class="ss-chips sc-facts">${facts.filter(Boolean).map(t => `<span class="ss-chip">${t}</span>`).join("")}</div>
         </div>
-        <div class="dlg-buttons">
+        <div class="dlg-buttons sc-actions">
           <button class="btn primary" data-go>⚔ この盤面で挑む</button>
           <button class="btn" data-reselect>← ステージを選び直す</button>
         </div>`;
@@ -1483,24 +1856,53 @@ function showMatchLengthPicker() {
 }
 
 // ---------- バトル演出（フルスクリーンのカットイン・スキップ可） ----------
-// 侵略側が左から、防衛側が右から突撃してくるカットイン。攻撃のたびにカードが突進し、
-// 被弾側が揺れる。「⏩ スキップ」で残りのログを一括表示して即座に決着へ進める。
+// v35で作り直した（原さん要望「戦闘アニメーションのクオリティ向上」）。
+// v34までは「2枚のカード＋実況ログ」で、どちらがどれだけ削られたかはログを読まないと分からなかった。
+// v35では両者に ST と HPバー（格闘ゲーム式＝被弾すると白い残像が遅れて縮む）を付け、
+//   ・攻撃 … 突進 → 斬撃（魔法攻撃は光弾が飛ぶ）→ 被弾側が揺れて赤いダメージ数字
+//   ・会心 … 画面が金色に光って揺れ、数字が大きく金色に
+//   ・物理無効／反射／硬殻 … 盾の「無効！」「反射！」
+//   ・強化 … 行の中の ST+○/HP+○ を拾って、その側に小さな札で出す（📊式で実効値に数字が伸びる）
+//   ・決着 … 敗者が崩れ落ち、中央に「制圧！」「防衛成功！」「撤退」の大見出し
+// 動きの根拠は resolveBattle が返す構造化イベント（result.ev）＝ログの文面に頼らない。
+// ev が無い古い呼び出しでも、従来どおりログの文面から最低限の動きは付く。
 UI.battleSkip = false;
-UI.battleCtx = null; // { attName, defName } — ログ行からどちらの攻撃かを判定する
+UI.battleCtx = null; // { attName, defName, stats, ev } — 表示中のバトルの状態
+const BATTLE_FORMULA_KEY = "mana-circuit-formula";
 
-function openBattleView(g, attackerName, attCard, attItem, tile, defItem) {
+function openBattleView(g, attacker, attCard, attItem, tile, defItem, opts = {}) {
   closePassiveDialog(); // 🔍マス情報などが開いていたら閉じてから（上書きでbusyカウンタが狂うのを防ぐ）
   const defCard = CARD_BY_ID[tile.creature.cardId];
+  const attP = typeof attacker === "object" ? attacker : null;
+  const attackerName = attP ? attP.name : String(attacker);
+  const defP = g.players[tile.owner];
   const defBonus = attCard.ab.includes("pierce") ? 0 : landHpBonus(tile, defCard);
   const support = landSupportSt(g, tile);
   const dCur = tile.creature.hp ?? defCard.hp;
+  const dMax = (typeof maxHpOf === "function") ? maxHpOf(tile.creature) : defCard.hp;
+  const aGrow = (opts.attGrown || 0) * 5, dGrow = Math.min(5, tile.creature.grown || 0) * 5;
   UI.battleSkip = false;
-  UI.battleCtx = { attName: attCard.name, defName: defCard.name };
+  // 表示中の数値（イベントで書き換わる）。maxは「HPバーの満タン」＝防衛側は傷のぶんだけ最初から欠けて見える
+  UI.battleCtx = {
+    attName: attCard.name, defName: defCard.name,
+    stats: {
+      att: { st: attCard.st + aGrow, hp: attCard.hp + aGrow, max: attCard.hp + aGrow },
+      def: { st: defCard.st + dGrow, hp: dCur, max: dMax, wound: Math.max(0, dMax - dCur) },
+    },
+  };
   const cutin = document.getElementById("battle-cutin");
-  const fighter = (c, item, extraHp, side, extraMods = "") => `
-    <div class="fighter ${side === "att" ? "bc-att" : "bc-def"}" id="bc-${side}">
-      <div class="f-side">${side === "att" ? "⚔ 侵略" : "🛡 防衛"}</div>
-      ${cardHTML(c)}
+  const S = UI.battleCtx.stats;
+  const fighter = (c, item, extraHp, side, p, extraMods = "") => `
+    <div class="fighter ${side === "att" ? "bc-att" : "bc-def"}" id="bc-${side}" style="--pc:${p ? PLAYER_COLORS[p.id] : "#b8b0cc"}">
+      <div class="f-side">${side === "att" ? "⚔ 侵略" : "🛡 防衛"}<span class="f-owner">${p ? esc(p.name) : ""}</span></div>
+      <div class="f-card">${cardHTML(c)}<i class="f-slash"></i><i class="f-shield"></i><div class="f-pops"></div></div>
+      <div class="f-stats">
+        <span class="f-st" title="このバトルでの攻撃力"><small>ST</small><b class="f-stv">${S[side].st}</b></span>
+        <span class="f-hp" title="このバトルでの体力">
+          <span class="f-hpbar"><i class="f-hplag"></i><i class="f-hpfill"></i></span>
+          <span class="f-hpnum"><small>HP</small><b class="f-hpv">${S[side].hp}</b></span>
+        </span>
+      </div>
       <div class="f-mods">
         ${item ? `<span class="f-mod">${item.st > 0 ? "⚔️" : "🛡️"} ${esc(item.name)}</span>` : ""}
         ${extraHp > 0 ? `<span class="f-mod">🏞 土地HP+${extraHp}</span>` : ""}
@@ -1525,80 +1927,285 @@ function openBattleView(g, attackerName, attCard, attItem, tile, defItem) {
   const elemChip = e => `<span class="be-elem" style="--ec:${ELEMENTS[e].color}">${ELEMENTS[e].icon} ${ELEMENTS[e].name}</span>`;
   const elemBanner = `<div class="bc-elems">
       ${elemChip(attCard.element)}${relBanner}${elemChip(defCard.element)}
-      <div class="bc-wheel">${elemWheelHTML([attCard.element, defCard.element].filter(e => e !== "neutral"))}</div>
     </div>`;
   const defMods =
     (support > 0 ? `<span class="f-mod">🏰 援護ST+${support}</span>` : "") +
-    (dCur < defCard.hp ? `<span class="f-mod">🩹 HP残${dCur}</span>` : "") +
+    (dCur < dMax ? `<span class="f-mod f-wound">🩹 HP残${dCur}</span>` : "") +
     (defCard.ab.includes("capture") ? `<span class="f-mod">🕸️ 捕縛</span>` : "") +
     elemMod(rel === "adv" ? "dis" : rel === "dis" ? "adv" : rel) +
     typeMods(defCard, defItem);
+  let showFormula = false;
+  try { showFormula = localStorage.getItem(BATTLE_FORMULA_KEY) === "1"; } catch (e) { /* 無視 */ }
+  cutin.className = `bc-land-${tile.element}`;
   cutin.innerHTML = `
     <div class="bc-flash" id="bc-flash"></div>
-    <div class="bc-inner">
-      <h2 class="bc-title">⚔ バトル！ <small>${esc(ELEMENTS[tile.element].name)}の土地 Lv${tile.level}</small></h2>
+    <div class="bc-inner" id="bc-inner">
+      <h2 class="bc-title"><span class="bc-title-main">⚔ BATTLE</span>
+        <small>${ELEMENTS[tile.element].icon} ${esc(ELEMENTS[tile.element].name)}の土地 Lv${tile.level}</small></h2>
       ${elemBanner}
       <div class="battle-arena">
-        ${fighter(attCard, attItem, 0, "att", elemMod(rel) + typeMods(attCard, attItem))}
+        ${fighter(attCard, attItem, 0, "att", attP, elemMod(rel) + typeMods(attCard, attItem))}
         <div class="vs">VS</div>
-        ${fighter(defCard, defItem, defBonus, "def", defMods)}
+        ${fighter(defCard, defItem, defBonus, "def", defP, defMods)}
+        <div class="bc-callout" id="bc-callout"></div>
       </div>
-      <div id="battle-log"></div>
-      <div class="bc-actions"><button id="battle-skip" class="btn small" title="残りの演出を飛ばして決着まで進めます">⏩ 演出をスキップ</button></div>
+      <div id="battle-log" class="${showFormula ? "" : "hide-formula"}"></div>
+      <div class="bc-actions">
+        <button id="bc-formula" class="btn small${showFormula ? " on" : ""}" title="バトルログに実効ST/HPの計算式（📊）を表示／非表示">📊 計算式</button>
+        <button id="battle-skip" class="btn small" title="残りの演出を飛ばして決着まで進めます">⏩ 演出をスキップ</button>
+      </div>
     </div>`;
   cutin.classList.remove("hidden", "bc-out");
+  _battleSetBars("att", true);
+  _battleSetBars("def", true);
   document.getElementById("battle-skip").addEventListener("click", () => {
     UI.battleSkip = true;
     cutin.classList.add("bc-skipping");
   });
+  document.getElementById("bc-formula").addEventListener("click", e => {
+    const logEl = document.getElementById("battle-log");
+    const on = logEl.classList.toggle("hide-formula") === false;
+    e.currentTarget.classList.toggle("on", on);
+    try { localStorage.setItem(BATTLE_FORMULA_KEY, on ? "1" : "0"); } catch (err) { /* 無視 */ }
+    logEl.scrollTop = logEl.scrollHeight;
+  });
 }
 
-// ログ行に応じたカットインの動き（突進・被弾・会心フラッシュ・撃破）
+// ST/HPの表示とHPバーを UI.battleCtx.stats に合わせる。instant=true なら残像も即座に合わせる
+function _battleSetBars(side, instant = false) {
+  const el = document.getElementById(`bc-${side}`);
+  const s = UI.battleCtx && UI.battleCtx.stats[side];
+  if (!el || !s) return;
+  const pct = s.max > 0 ? Math.max(0, Math.min(100, s.hp / s.max * 100)) : 0;
+  el.querySelector(".f-stv").textContent = s.st;
+  el.querySelector(".f-hpv").textContent = Math.max(0, s.hp);
+  const fill = el.querySelector(".f-hpfill"), lag = el.querySelector(".f-hplag");
+  fill.style.width = `${pct}%`;
+  fill.classList.toggle("low", pct <= 30);
+  if (instant) { lag.style.transition = "none"; lag.style.width = `${pct}%`; void lag.offsetWidth; lag.style.transition = ""; }
+  else setTimeout(() => { lag.style.width = `${pct}%`; }, 380);
+}
+// 数字が伸びた／縮んだことを札で見せる（f-pops に浮かんで消える）
+function _battlePop(side, text, cls = "") {
+  const el = document.getElementById(`bc-${side}`);
+  const host = el && el.querySelector(".f-pops");
+  if (!host) return;
+  const pop = document.createElement("span");
+  pop.className = `f-pop ${cls}`;
+  pop.textContent = text;
+  // 同時に複数出たときに重ならないよう、少しずつ左右にずらす
+  const n = host.childElementCount;
+  pop.style.setProperty("--dx", `${((n % 3) - 1) * 26}px`);
+  host.appendChild(pop);
+  setTimeout(() => pop.remove(), 1500);
+}
+const FIGHTER_ANIMS = ["bc-lunge-r", "bc-lunge-l", "bc-hurt", "bc-dead", "bc-win", "bc-retreat"];
+function _battlePulse(el, cls) {
+  if (!el) return;
+  // 戦士の動きは1つずつ（前の動きのクラスが残っていると、CSSの後勝ちで新しい動きが出ないため）
+  if (el.classList.contains("fighter")) el.classList.remove(...FIGHTER_ANIMS);
+  el.classList.remove(cls);
+  void el.offsetWidth; // アニメを再発火させるためのリフロー
+  el.classList.add(cls);
+}
+function _battleCallout(text, cls = "") {
+  const el = document.getElementById("bc-callout");
+  if (!el) return;
+  el.className = `bc-callout ${cls}`;
+  el.textContent = text;
+  _battlePulse(el, "show");
+}
+// 魔法攻撃: 攻撃側から相手へ光弾を飛ばす（Web Animations。無ければ何もしない）
+function _battleBolt(from, to) {
+  const a = document.querySelector(`#bc-${from} .f-card`), b = document.querySelector(`#bc-${to} .f-card`);
+  const arena = document.querySelector("#battle-cutin .battle-arena");
+  if (!a || !b || !arena || typeof arena.animate !== "function") return;
+  const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(), rr = arena.getBoundingClientRect();
+  const bolt = document.createElement("i");
+  bolt.className = "bc-bolt";
+  bolt.style.left = `${ra.left + ra.width / 2 - rr.left}px`;
+  bolt.style.top = `${ra.top + ra.height * 0.4 - rr.top}px`;
+  arena.appendChild(bolt);
+  const dx = (rb.left + rb.width / 2) - (ra.left + ra.width / 2), dy = (rb.top - ra.top);
+  bolt.animate([{ transform: "translate(-50%,-50%) scale(0.4)", opacity: 0.2 },
+    { transform: `translate(calc(-50% + ${dx * 0.5}px), calc(-50% + ${dy * 0.5 - 30}px)) scale(1.1)`, opacity: 1, offset: 0.5 },
+    { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.4)`, opacity: 0.9 }],
+    { duration: 300, easing: "ease-in" });
+  setTimeout(() => bolt.remove(), 320);
+}
+
+// 構造化イベント1つぶんの演出
+function _battleEvent(e) {
+  const S = UI.battleCtx && UI.battleCtx.stats;
+  if (!S) return;
+  const flash = document.getElementById("bc-flash");
+  const inner = document.getElementById("bc-inner");
+  const other = s => (s === "att" ? "def" : "att");
+  switch (e.t) {
+    case "init": {
+      // バフ込みの実効値へ。上がったぶんは札で見せる
+      ["att", "def"].forEach(side => {
+        const n = e[side];
+        const dSt = n.st - S[side].st, dHp = n.hp - S[side].hp;
+        if (dSt) _battlePop(side, `ST${dSt > 0 ? "+" : ""}${dSt}`, dSt > 0 ? "buff" : "debuff");
+        if (dHp) setTimeout(() => _battlePop(side, `HP${dHp > 0 ? "+" : ""}${dHp}`, dHp > 0 ? "heal" : "debuff"), 140);
+        S[side].st = n.st;
+        S[side].hp = n.hp;
+        S[side].max = n.hp + (S[side].wound || 0);
+        _battleSetBars(side, true);
+        _battlePulse(document.querySelector(`#bc-${side} .f-stats`), "bump");
+      });
+      break;
+    }
+    case "hit": {
+      const tgt = e.target, by = e.by;
+      if (by === "att" || by === "def") {
+        const lunge = by === "att" ? "bc-lunge-r" : "bc-lunge-l";
+        _battlePulse(document.getElementById(`bc-${by}`), lunge);
+        if (e.magic) { _battleBolt(by, tgt); if (!UI.battleSkip) SFX.magic(); }
+        else if (!UI.battleSkip) SFX.slash();
+      }
+      setTimeout(() => {
+        const tEl = document.getElementById(`bc-${tgt}`);
+        _battlePulse(tEl, "bc-hurt");
+        _battlePulse(tEl && tEl.querySelector(".f-slash"), e.magic ? "burst" : "go");
+        _battlePulse(flash, e.crit ? "go-crit" : "go");
+        if (e.crit) _battlePulse(inner, "bc-shake");
+        _battlePop(tgt, `-${e.dmg}`, e.crit ? "dmg crit" : "dmg");
+        S[tgt].hp = e.remain;
+        _battleSetBars(tgt);
+        if (!UI.battleSkip && (by === "reflect" || by === "trap")) SFX.hit();
+      }, by === "att" || by === "def" ? 170 : 0);
+      break;
+    }
+    case "crit":
+      _battleCallout("CRITICAL!!", "crit");
+      if (!UI.battleSkip) SFX.crit();
+      break;
+    case "block": {
+      const tEl = document.getElementById(`bc-${e.target}`);
+      _battlePulse(document.getElementById(`bc-${e.by}`), e.by === "att" ? "bc-lunge-r" : "bc-lunge-l");
+      setTimeout(() => {
+        _battlePulse(tEl && tEl.querySelector(".f-shield"), "go");
+        _battlePop(e.target, e.kind === "reflect" ? "反射！" : e.kind === "armor" ? "硬殻！" : "無効！", "block");
+        if (!UI.battleSkip) SFX.block();
+      }, 170);
+      break;
+    }
+    case "heal":
+      S[e.side].hp = e.hp;
+      _battlePop(e.side, `+${e.amount}`, "heal");
+      _battleSetBars(e.side);
+      break;
+    case "endure":
+      S[e.side].hp = 1;
+      _battlePop(e.side, "不屈！", "gold");
+      _battleSetBars(e.side);
+      break;
+    case "stup":
+      S[e.side].st += e.plus;
+      _battlePop(e.side, `背水 ST+${e.plus}`, "rage");
+      _battleSetBars(e.side);
+      _battlePulse(document.querySelector(`#bc-${e.side} .f-stats`), "bump");
+      break;
+    case "rage":
+      _battlePop(e.side, "倍返し！", "rage");
+      break;
+    case "double":
+      _battlePop(e.side, "連撃！", "gold");
+      break;
+    case "first":
+      _battlePop(e.side, "先制！", "gold");
+      break;
+    case "end": {
+      const att = document.getElementById("bc-att"), def = document.getElementById("bc-def");
+      if (e.result === "attWin") { _battlePulse(def, "bc-dead"); _battlePulse(att, "bc-win"); _battleCallout("制圧！", "win-att"); }
+      else if (e.result === "defWin") { _battlePulse(att, "bc-dead"); _battlePulse(def, "bc-win"); _battleCallout("防衛成功！", "win-def"); }
+      else { _battlePulse(att, "bc-retreat"); _battleCallout("撤退…", "draw"); }
+      if (!UI.battleSkip) SFX.ko();
+      break;
+    }
+  }
+}
+
+// 強化の行（ST+20 など）から、どちら側の何がいくつ上がったかを札にする（ev が無い行の見せ方）
+function _battleBuffLine(line) {
+  const ctx = UI.battleCtx || {};
+  if (line.startsWith("📊") || !/(ST|HP)[+-]\d+/.test(line)) return;
+  let side = null;
+  const a = ctx.attName, d = ctx.defName;
+  if (a !== d) {
+    if (line.includes(a) && !line.includes(d)) side = "att";
+    else if (line.includes(d) && !line.includes(a)) side = "def";
+  }
+  if (!side && line.includes("侵略側")) side = "att";
+  if (!side) return;
+  const icon = (line.match(/^\S+/) || [""])[0];
+  const parts = [];
+  const st = line.match(/ST([+-]\d+)/), hp = line.match(/HP\+(\d+)/);
+  if (st) parts.push(`ST${st[1]}`);
+  if (hp) parts.push(`HP+${hp[1]}`);
+  if (parts.length) _battlePop(side, `${icon.length <= 3 ? icon + " " : ""}${parts.join(" ")}`, st && st[1].startsWith("-") ? "debuff" : "buff");
+}
+
+// ev が無い呼び出し（互換）のための、ログの文面による最低限の動き
 function _battleLineFx(line) {
   const ctx = UI.battleCtx || {};
   const att = document.getElementById("bc-att");
   const def = document.getElementById("bc-def");
   const flash = document.getElementById("bc-flash");
-  const pulse = (el, cls) => {
-    if (!el) return;
-    el.classList.remove(cls);
-    void el.offsetWidth; // アニメを再発火させるためのリフロー
-    el.classList.add(cls);
-  };
-  if (line.includes("会心")) { pulse(flash, "go-crit"); return; }
-  if (line.startsWith(`${ctx.attName}の攻撃`) || line.startsWith(`${ctx.attName}の魔法攻撃`)) { pulse(att, "bc-lunge-r"); pulse(def, "bc-hurt"); pulse(flash, "go"); return; }
-  if (line.startsWith(`${ctx.defName}の攻撃`) || line.startsWith(`${ctx.defName}の魔法攻撃`)) { pulse(def, "bc-lunge-l"); pulse(att, "bc-hurt"); pulse(flash, "go"); return; }
-  if (line.includes("物理無効！") || line.includes("物理反射！")) { pulse(flash, "go"); return; }
-  if (line.includes("跳ね返った")) { // 物理反射のダメージが攻撃側に返った行（行頭は被弾した側の名前）
-    if (line.startsWith(ctx.attName)) pulse(att, "bc-hurt");
-    else if (line.startsWith(ctx.defName)) pulse(def, "bc-hurt");
-    pulse(flash, "go"); return;
-  }
+  if (line.includes("会心")) { _battlePulse(flash, "go-crit"); return; }
+  if (line.startsWith(`${ctx.attName}の攻撃`) || line.startsWith(`${ctx.attName}の魔法攻撃`)) { _battlePulse(att, "bc-lunge-r"); _battlePulse(def, "bc-hurt"); _battlePulse(flash, "go"); return; }
+  if (line.startsWith(`${ctx.defName}の攻撃`) || line.startsWith(`${ctx.defName}の魔法攻撃`)) { _battlePulse(def, "bc-lunge-l"); _battlePulse(att, "bc-hurt"); _battlePulse(flash, "go"); return; }
   if (line.includes("倒された")) {
-    if (line.startsWith(ctx.defName)) pulse(def, "bc-dead");
-    else if (line.startsWith(ctx.attName)) pulse(att, "bc-dead");
+    if (line.startsWith(ctx.defName)) _battlePulse(def, "bc-dead");
+    else if (line.startsWith(ctx.attName)) _battlePulse(att, "bc-dead");
   }
 }
 
-async function playBattleLines(lines, interval = 700) {
+// ログを1行ずつ流しながら演出する。行の種類で間合いを変える
+// （強化の行は短く・計算式は一瞬・攻撃は長め・決着はたっぷり）
+async function playBattleLines(lines, interval = 700, ev = null) {
   const el = document.getElementById("battle-log");
-  for (const line of lines) {
+  const byLine = new Map();
+  (ev || []).forEach(e => { if (!byLine.has(e.at)) byLine.set(e.at, []); byLine.get(e.at).push(e); });
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const instant = UI.battleSkip; // スキップ後は残りを一括表示
     if (el) {
       const div = document.createElement("div");
       div.textContent = line;
       if (line.includes("会心")) div.className = "crit";
       else if (line.startsWith("📊")) div.className = "formula";
+      else if (line.startsWith("💥") || line.startsWith("⚖ 両者")) div.className = "result";
       el.appendChild(div);
       el.scrollTop = el.scrollHeight;
     }
     log(line, "battle");
-    if (instant) continue;
-    if (line.includes("倒された")) SFX.destroy();
-    else if (line.includes("会心")) SFX.destroy();
-    else if (line.includes("攻撃！")) SFX.hit();
-    _battleLineFx(line);
-    await sleep(interval);
+    const evs = byLine.get(i) || [];
+    if (instant) {
+      // スキップ中も数値だけは最後の状態へ合わせる（HPバーが途中で止まらないように）
+      evs.forEach(e => { if (e.t === "init" || e.t === "hit" || e.t === "heal" || e.t === "endure" || e.t === "stup" || e.t === "end") _battleEvent(e); });
+      continue;
+    }
+    let wait = interval;
+    if (ev) {
+      if (evs.length) evs.forEach(_battleEvent);
+      else _battleBuffLine(line);
+      const kinds = evs.map(e => e.t);
+      if (kinds.includes("end")) wait = 1000;
+      else if (kinds.includes("hit") || kinds.includes("block")) wait = 820;
+      else if (kinds.includes("crit")) wait = 420;
+      else if (kinds.includes("init")) wait = 620;
+      else if (line.startsWith("📊")) wait = 160;
+      else wait = 420;
+    } else {
+      if (line.includes("倒された")) SFX.destroy();
+      else if (line.includes("会心")) SFX.destroy();
+      else if (line.includes("攻撃！")) SFX.hit();
+      _battleLineFx(line);
+    }
+    await sleep(wait);
   }
 }
 
@@ -1702,7 +2309,8 @@ function humanChooseDirection(p, tile, stepsLeft, prevId = null) {
     const msgEl = document.getElementById("message");
     const prevMsg = msgEl ? msgEl.innerHTML : "";
     UI.dirChoice = { fromId: tile.id, ids: new Set(opts.map(t => t.id)) };
-    setMessage(`🧭 <b>進む方向を選んでください</b>（残り ${stepsLeft} マス）— 光っているマスをタップ`);
+    // v35: setMessage は文字をそのまま出す（タグが「<b>」のまま見えていた）ので、ここだけ HTML で書く
+    if (msgEl) msgEl.innerHTML = `🧭 <b>進む方向を選んでください</b>（残り ${stepsLeft} マス）— 光っているマスをタップ`;
     scrollBoardTo(tile);
     renderBoard(G);
     const finish = id => {
@@ -1789,15 +2397,72 @@ function waitButton(label) {
 }
 
 // ダイス演出
+// v35: 出目は「目のあるサイコロの面」で見せる（7以上＝ブースト時は数字）。
+// 転がる途中の面は出目から決める＝乱数を使わない（乱数スタブを使うテストの消費数を変えない）
+const DIE_PIPS = { 1: [5], 2: [3, 7], 3: [3, 5, 7], 4: [1, 3, 7, 9], 5: [1, 3, 5, 7, 9], 6: [1, 3, 4, 6, 7, 9] };
+function diceFaceHTML(n) {
+  if (!DIE_PIPS[n]) return `<span class="die die-num">${n}</span>`;
+  let s = "";
+  for (let i = 1; i <= 9; i++) s += `<i${DIE_PIPS[n].includes(i) ? ` class="on${n === 1 ? " red" : ""}"` : ""}></i>`;
+  return `<span class="die">${s}</span>`;
+}
 async function animateDice(finalValue) {
   const el = document.getElementById("dice");
   el.classList.add("rolling");
   for (let i = 0; i < 8; i++) {
-    el.textContent = 1 + Math.floor(Math.random() * 6);
+    el.innerHTML = diceFaceHTML(((finalValue + i * 5) % 6) + 1);
     SFX.dice();
     await sleep(60);
   }
-  el.textContent = finalValue;
+  el.innerHTML = diceFaceHTML(finalValue);
   el.classList.remove("rolling");
-  await sleep(350);
+  diceCallout(finalValue);
+  await sleep(420);
+}
+// 出目を盤面の中央に大きく出す（どこを見ていても何マス進むか分かる）
+function diceCallout(n) {
+  const wrap = document.getElementById("board-wrap");
+  if (!wrap || GAME_SPEED < 0.1) return;
+  const r = wrap.getBoundingClientRect();
+  const el = document.createElement("div");
+  el.className = "dice-callout";
+  el.style.left = `${r.left + r.width / 2}px`;
+  el.style.top = `${r.top + r.height / 2}px`;
+  el.innerHTML = `<b>${n}</b><small>マス進む</small>`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1100);
+}
+
+// ---------- 手番の帯（v35） ----------
+// 手番が替わるたびに「ROUND 3 — 剣闘士ガイアスのターン」の帯が画面を横切る。
+// どちらの番か・何ラウンド目かを、上部の小さな文字を読まずに分かるようにする。操作は奪わない（pointer-events:none）
+async function turnBanner(g, p) {
+  if (!g || !p || GAME_SPEED < 0.1) return;
+  const old = document.getElementById("turn-banner");
+  if (old) old.remove();
+  const ch = (typeof charOf === "function") ? charOf(p) : null;
+  const face = ch ? charPortraitSVG(ch, 46) : `<span class="tb-emoji">${P_ICONS[p.id]}</span>`;
+  const mine = !p.isCPU && !g.hotseat;
+  const el = document.createElement("div");
+  el.id = "turn-banner";
+  el.style.setProperty("--pc", PLAYER_COLORS[p.id]);
+  el.innerHTML = `<div class="tb-band${g.climax ? " climax" : ""}">` +
+    `<span class="tb-face">${face}</span>` +
+    `<span class="tb-text"><small>ROUND ${Math.min(g.round, RULES.maxRounds)}${g.climax ? "　⚔ 決戦の刻" : ""}</small>` +
+    `<b>${mine ? "あなたのターン" : `${esc(p.name)}のターン`}</b></span></div>`;
+  document.body.appendChild(el);
+  if (typeof SFX !== "undefined" && SFX.turn) SFX.turn();
+  await sleep(mine ? 820 : 640);
+  el.classList.add("out");
+  setTimeout(() => el.remove(), 320);
+}
+
+// 画面中央に大見出しを出す（盤面イベント・決戦の刻など、全員に関わる出来事）
+function bigAnnounce(title, sub = "", cls = "") {
+  if (GAME_SPEED < 0.1) return;
+  const el = document.createElement("div");
+  el.className = `big-announce ${cls}`;
+  el.innerHTML = `<b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2300);
 }

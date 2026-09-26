@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>マナサーキット — 盤面プレビュー（v31）</title>
+<title>マナサーキット — 盤面プレビュー（v35）</title>
 <!--
   盤面とマス目の見た目だけを並べて確認するためのページ（対戦はしない）。
   ゲーム本体と同じ js を読み込み、renderBoard をそのまま呼んで描いているので、
@@ -25,14 +25,36 @@
   .b h2 { font-size: 15px; margin: 0 0 2px; }
   .b p { font-size: 12px; color: #a49ac9; margin: 0 0 8px; }
   .b svg { width: 100%; height: auto; display: block; }
+  /* v35: マス目の表示密度（詳細表示のみ）と地形の動き（本体の style.css と同じ規則の抜粋） */
+  .t-lo { display: none; }
+  .amb { transform-box: fill-box; }
+  .amb-rise { animation: amb-rise linear infinite; }
+  @keyframes amb-rise { 0% { transform: translate(0, 12px); opacity: 0; } 15% { opacity: 0.9; } 85% { opacity: 0.6; } 100% { transform: translate(8px, -95px); opacity: 0; } }
+  .amb-drift { animation: amb-drift ease-in-out infinite alternate; }
+  @keyframes amb-drift { 0% { transform: translate(-14px, 8px); opacity: 0.15; } 50% { opacity: 0.95; } 100% { transform: translate(16px, -10px); opacity: 0.2; } }
+  .amb-twinkle { animation: amb-twinkle ease-in-out infinite; }
+  @keyframes amb-twinkle { 0%, 100% { opacity: 0.08; } 50% { opacity: 0.95; } }
+  .amb-flash { animation: amb-flash linear infinite; opacity: 0; }
+  @keyframes amb-flash { 0%, 88%, 100% { opacity: 0; } 89% { opacity: 0.95; } 90.5% { opacity: 0.15; } 92% { opacity: 0.85; } 95% { opacity: 0; } }
+  .amb-flicker { transform-origin: center bottom; animation: amb-flicker ease-in-out infinite alternate; }
+  @keyframes amb-flicker { 0% { opacity: 0.55; transform: scaleY(0.88); } 100% { opacity: 1; transform: scaleY(1.12); } }
+  .amb-spin { transform-box: fill-box; transform-origin: center; animation: amb-spin linear infinite; }
+  .amb-spin.rev { animation-direction: reverse; }
+  @keyframes amb-spin { to { transform: rotate(360deg); } }
+  .wind { animation: wind-flow 4.5s linear infinite; }
+  @keyframes wind-flow { to { stroke-dashoffset: -156; } }
+  .lk-flow { stroke-opacity: 0.9; animation: lk-flow 1.1s linear infinite; }
+  @keyframes lk-flow { to { stroke-dashoffset: -28; } }
 </style>
 </head>
 <body>
-<h1>✦ マナサーキット — 盤面とマス目のプレビュー（v31）</h1>
+<h1>✦ マナサーキット — 盤面とマス目のプレビュー（v35）</h1>
 <p class="note">
   マス目の<b>形</b>・マス間の<b>余白</b>・道の<b>太さ</b>をステージごとに変えられるようにしました。
   特別マス（🏰城・⛩️関門・💎魔力・🎰運命・🌋マグマ・💨疾風）の形は<b>全ステージ共通</b>なので、
   形を見ればマスの種類が分かります。<br>
+  <b>v35</b>: 盤面にステージごとの<b>地形</b>（草むら・溶岩の亀裂・波紋・歯車…）を敷き、領地には<b>駐留クリーチャーの姿</b>が立つようになりました。
+  隣り合う自分の土地どうしの道は<b>所有者の色に灯ります</b>（🏰援護の目印）。<br>
   駒は「マントを羽織った術者の立像」に描き直しました。ここでは<b>3人ぶんを同じマスに重ねて</b>置いてあります
   （重なっても全員見えること・盤面の端でも切れないことの確認用）。手番の駒は足元の魔法陣が回り、頭上に▼が出ます。<br>
   <a class="back" href="index.html">← ゲームへ戻る</a>
@@ -40,17 +62,18 @@
 <div class="grid" id="grid"></div>
 
 <!-- 本体と同じスクリプト（描画に必要なものだけ） -->
-<script src="js/sfx.js?v=31"></script>
-<script src="js/profile.js?v=31"></script>
-<script src="js/cards.js?v=31"></script>
-<script src="js/art.js?v=31"></script>
-<script src="js/stages.js?v=31"></script>
-<script src="js/chars.js?v=31"></script>
-<script src="js/weekly.js?v=31"></script>
-<script src="js/state.js?v=31"></script>
-<script src="js/battle.js?v=31"></script>
-<script src="js/ai.js?v=31"></script>
-<script src="js/ui.js?v=31"></script>
+<script src="js/sfx.js?v=35"></script>
+<script src="js/profile.js?v=35"></script>
+<script src="js/cards.js?v=35"></script>
+<script src="js/art.js?v=35"></script>
+<script src="js/scenery.js?v=35"></script>
+<script src="js/stages.js?v=35"></script>
+<script src="js/chars.js?v=35"></script>
+<script src="js/weekly.js?v=35"></script>
+<script src="js/state.js?v=35"></script>
+<script src="js/battle.js?v=35"></script>
+<script src="js/ai.js?v=35"></script>
+<script src="js/ui.js?v=35"></script>
 <script>
 // 全16ステージを、実際の renderBoard で1枚ずつ描き出す。
 // renderBoard は #board へ書き込むので、作業用の svg を都度 #board に成り代わらせてから描き、

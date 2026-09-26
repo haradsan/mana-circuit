@@ -6,7 +6,7 @@
 <title>マナサーキット — カード×ボード対戦</title>
 <!-- ?v= はキャッシュ避け。スマホのブラウザは css/js を強く握り続けるため、
      更新したら必ずこの番号を上げること（上げないと端末に古い版が残り続ける） -->
-<link rel="stylesheet" href="css/style.css?v=34">
+<link rel="stylesheet" href="css/style.css?v=35">
 </head>
 <body>
 <header>
@@ -54,6 +54,9 @@
 <main>
   <div id="board-wrap">
     <div id="board-inner">
+      <!-- v35: 地形・道・領地の回路は真下に重ねた別のSVG（#board-bg）に描く。
+           地形の粒や回路の流れが動いても、マス目側（#board）を描き直さずに済む＝スマホの描画負荷対策 -->
+      <svg id="board-bg" viewBox="0 0 700 700" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
       <svg id="board" viewBox="0 0 700 700" xmlns="http://www.w3.org/2000/svg"></svg>
     </div>
   </div>
@@ -103,20 +106,22 @@
 <!-- ダイアログを一旦閉じて盤面/手札を確認しているときに表示する「選択に戻る」ボタン -->
 <button id="peek-restore" class="hidden">▲ 選択ウインドウに戻る</button>
 
-<script src="js/sfx.js?v=34"></script>
-<script src="js/bgm.js?v=34"></script>
-<script src="js/profile.js?v=34"></script>
-<script src="js/cards.js?v=34"></script>
-<script src="js/styles.js?v=34"></script>
-<script src="js/art.js?v=34"></script>
-<script src="js/stages.js?v=34"></script>
-<script src="js/chars.js?v=34"></script>
-<script src="js/weekly.js?v=34"></script>
-<script src="js/state.js?v=34"></script>
-<script src="js/battle.js?v=34"></script>
-<script src="js/ai.js?v=34"></script>
-<script src="js/ui.js?v=34"></script>
-<script src="js/collection.js?v=34"></script>
-<script src="js/main.js?v=34"></script>
+<script src="js/sfx.js?v=35"></script>
+<script src="js/bgm.js?v=35"></script>
+<script src="js/profile.js?v=35"></script>
+<script src="js/cards.js?v=35"></script>
+<script src="js/styles.js?v=35"></script>
+<script src="js/art.js?v=35"></script>
+<script src="js/scenery.js?v=35"></script>
+<script src="js/stages.js?v=35"></script>
+<script src="js/chars.js?v=35"></script>
+<script src="js/weekly.js?v=35"></script>
+<script src="js/state.js?v=35"></script>
+<script src="js/battle.js?v=35"></script>
+<script src="js/ai.js?v=35"></script>
+<script src="js/ui.js?v=35"></script>
+<script src="js/collection.js?v=35"></script>
+<script src="js/missions.js?v=35"></script>
+<script src="js/main.js?v=35"></script>
 </body>
 </html>
